@@ -271,7 +271,7 @@ func (cn *conn) startup(o Values) {
 		switch t {
 		case 'K', 'S':
 		case 'R':
-			cn.auth(r, o.Get("password", o.Get("user"))
+			cn.auth(r, o)
 		case 'Z':
 			return
 		default:
@@ -280,14 +280,14 @@ func (cn *conn) startup(o Values) {
 	}
 }
 
-func (cn *conn) auth(r *readBuf, p string, u string) {
+func (cn *conn) auth(r *readBuf, o Values) {
 	switch code := r.int32(); code {
 	case 0:
 		// OK
 	case 5:
 		s := string(r.next(4))
 		w := newWriteBuf('p')
-		w.string("md5" + md5s(md5s(p+u)+s))
+		w.string("md5" + md5s(md5s(o.Get("password")+o.Get("user"))+s))
 		cn.send(w)
 
 		t, r := cn.recv()
