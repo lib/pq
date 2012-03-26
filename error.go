@@ -62,14 +62,14 @@ func errRecover(err *error) {
 	case *PGError:
 		if v.Fatal() {
 			*err = driver.ErrBadConn
-			println("pgerror: bad conn")
+			println("pgerror: bad conn", v.Error())
 		} else {
 			*err = v
 		}
 	case error:
 		if v == io.EOF {
 			*err = driver.ErrBadConn
-			println("reg error: bad conn")
+			println("reg error: EOF")
 		} else {
 			*err = v
 		}
