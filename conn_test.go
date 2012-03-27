@@ -245,3 +245,23 @@ func TestBadConn(t *testing.T) {
 		t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
 	}
 }
+
+func TestErrorOnExec(t *testing.T) {
+	db, err := sql.Open("postgres", cs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	
+	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
+	_, err = db.Exec(sql)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	_, err = db.Exec("SELECT 1 WHERE true = false") // returns no rows
+	if err != nil {
+		t.Fatalf("got err: %v", err)
+	}
+}
