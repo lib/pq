@@ -342,9 +342,7 @@ func (st *stmt) Close() (err error) {
 
 func (st *stmt) Query(v []driver.Value) (_ driver.Rows, err error) {
 	defer errRecover(&err)
-
 	st.exec(v)
-
 	return &rows{st: st}, nil
 }
 
