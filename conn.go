@@ -353,8 +353,10 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 	st.exec(v)
 
 	for {
-		t, r := st.cn.recv()
+		t, r := st.cn.recv1()
 		switch t {
+		case 'E':
+			err = parseError(r)
 		case 'C':
 			res = parseComplete(r.string())
 		case 'Z':
