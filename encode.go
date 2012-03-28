@@ -70,24 +70,11 @@ type NullTime struct {
 
 // Scan implements the Scanner interface.
 func (nt *NullTime) Scan(value interface{}) error {
-	if value == nil {
-		nt.Time, nt.Valid = time.Time{}, false
-		return nil
-	}
-	nt.Valid = true
-	switch s := value.(type) {
-	case time.Time:
-		nt.Time = s
-	default:
-		errorf("invalid time")
-	}
+	nt.Time, nt.Valid = value.(time.Time)
 	return nil
 }
 
 // Value implements the driver Valuer interface.
 func (nt NullTime) Value() (driver.Value, error) {
-	if !nt.Valid {
-		return nil, nil
-	}
 	return nt.Time, nil
 }
