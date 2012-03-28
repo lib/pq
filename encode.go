@@ -1,6 +1,7 @@
 package pq
 
 import (
+	"database/sql/driver"
 	"encoding/hex"
 	"fmt"
 	"time"
@@ -60,4 +61,33 @@ func mustParse(f string, s []byte) time.Time {
 		errorf("decode: %s", err)
 	}
 	return t
+}
+
+type NullTime struct {
+	Time  time.Time
+	Valid bool // Valid is true if Time is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (nt *NullTime) Scan(value interface{}) error {
+	if value == nil {
+		nt.Time, nt.Valid = time.Time{}, false
+		return nil
+	}
+	nt.Valid = true
+	switch s := value.(type) {
+	case time.Time:
+		nt.Time = s
+	default:
+		errorf("invalid time")
+	}
+	return nil
+}
+
+// Value implements the driver Valuer interface.
+func (nt NullTime) Value() (driver.Value, error) {
+	if !nt.Valid {
+		return nil, nil
+	}
+	return nt.Time, nil
 }
