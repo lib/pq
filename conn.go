@@ -187,7 +187,6 @@ func (cn *conn) send(m *writeBuf) {
 		*m = b
 	}
 
-	fmt.Printf(">>: %q\n", (*m)[0])
 	_, err := cn.c.Write(*m)
 	if err != nil {
 		panic(err)
@@ -197,7 +196,6 @@ func (cn *conn) send(m *writeBuf) {
 func (cn *conn) recv() (t byte, r *readBuf) {
 	for {
 		t, r = cn.recv1()
-		fmt.Printf("<<: %q\n", t)
 		switch t {
 		case 'E':
 			panic(parseError(r))
