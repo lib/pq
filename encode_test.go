@@ -24,4 +24,3 @@ func TestScanNilTimestamp(t *testing.T) {
 		t.Errorf("Expected Valid=false")
 	}
 }
-

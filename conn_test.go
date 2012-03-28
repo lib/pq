@@ -253,7 +253,6 @@ func TestErrorOnExec(t *testing.T) {
 	}
 	defer db.Close()
 
-	
 	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
 	_, err = db.Exec(sql)
 	if err == nil {
