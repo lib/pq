@@ -265,3 +265,35 @@ func TestErrorOnExec(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestErrorOnQuery(t *testing.T) {
+	db, err := sql.Open("postgres", cs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
+	r, err := db.Query(sql)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if r.Next() {
+		t.Fatal("unexpected row, want error")
+	}
+
+	_, ok := r.Err().(*PGError)
+	if !ok {
+		t.Fatalf("expected PGError, was: %#v", r.Err())
+	}
+
+	r, err = db.Query("SELECT 1 WHERE true = false") // returns no rows
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if r.Next() {
+		t.Fatal("unexpected row")
+	}
+}
