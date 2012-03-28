@@ -255,12 +255,13 @@ func TestErrorOnExec(t *testing.T) {
 
 	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
 	_, err = db.Exec(sql)
-	if err == nil {
-		t.Fatal("expected error")
+	_, ok := err.(*PGError)
+	if !ok {
+		t.Fatalf("expected PGError, was: %#v", err)
 	}
 
 	_, err = db.Exec("SELECT 1 WHERE true = false") // returns no rows
 	if err != nil {
-		t.Fatalf("got err: %v", err)
+		t.Fatal(err)
 	}
 }
