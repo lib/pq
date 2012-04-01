@@ -2,44 +2,68 @@ package pq
 
 import (
 	"fmt"
-	"net/url"
+	nurl "net/url"
 	"strings"
+	"sort"
 )
 
-func ParseURL(us string) (string, error) {
-	u, err := url.Parse(us)
+// ParseURL converts url to a connection string for driver.Open.
+// Example:
+//
+//	"postgres://bob:secret@1.2.3.4:5432/mydb?sslmode=verify-full"
+//
+// converts to:
+//
+//	"user=bob password=secret host=1.2.3.4 port=5432 dbname=mydb sslmode=verify-full"
+//
+// A minimal example:
+//
+//	"postgres://"
+//
+// This will be blank, causing driver.Open to use all of the defaults
+func ParseURL(url string) (string, error) {
+	u, err := nurl.Parse(url)
 	if err != nil {
 		return "", err
 	}
+
 	if u.Scheme != "postgres" {
 		return "", fmt.Errorf("invalid connection protocol: %s", u.Scheme)
 	}
 
-	result := make([]string, 0, 5)
-	host := ""
-	switch i := strings.Index(u.Host, ":"); i {
-	case -1:
-		host = u.Host
-	case 0:
-		return "", fmt.Errorf("missing host")
-	default:
-		host = u.Host[:i]
-		result = append(result, fmt.Sprintf("port=%s", u.Host[i+1:]))
-	}
-	result = append(result, fmt.Sprintf("host=%s", host))
-
+	var kvs []string
 	if u.User != nil {
-		if un := u.User.Username(); un != "" {
-			result = append(result, fmt.Sprintf("user=%s", un))
-		}
-		if p, set := u.User.Password(); set && p != "" {
-			result = append(result, fmt.Sprintf("password=%s", p))
-		}
+		v := u.User.Username()
+		kvs = appendkv(kvs, "user", v)
+
+		v, _ =  u.User.Password()
+		kvs = appendkv(kvs, "password", v)
 	}
 
-	if u.Path != "" && u.Path != "/" {
-		result = append(result, fmt.Sprintf("dbname=%s", u.Path[1:]))
+	i := strings.Index(u.Host, ":")
+	if i < 0 {
+		kvs = appendkv(kvs, "host", u.Host)
+	} else {
+		kvs = appendkv(kvs, "host", u.Host[:i])
+		kvs = appendkv(kvs, "port", u.Host[i+1:])
 	}
 
-	return strings.Join(result, " "), nil
+	if u.Path != "" {
+		kvs = appendkv(kvs, "dbname", u.Path[1:])
+	}
+
+	q := u.Query()
+	for k, _ := range q {
+		kvs = appendkv(kvs, k, q.Get(k))
+	}
+	
+	sort.Strings(kvs)
+	return strings.Join(kvs, " "), nil
+}
+
+func appendkv(kvs []string, k, v string) []string {
+	if v != "" {
+		return append(kvs, k+"="+v)
+	}
+	return kvs
 }
