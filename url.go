@@ -57,7 +57,7 @@ func ParseURL(url string) (string, error) {
 		kvs = appendkv(kvs, k, q.Get(k))
 	}
 	
-	sort.Strings(kvs)
+	sort.Strings(kvs) // Makes testing easier (not a performance concern)
 	return strings.Join(kvs, " "), nil
 }
 
