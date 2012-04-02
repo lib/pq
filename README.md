@@ -42,6 +42,7 @@ See http://tip.golang.org/pkg/database/sql to learn how to use with `pq` through
 * Handles bad connections for `database/sql`
 * Scan `time.Time` correctly (i.e. `timestamp[tz]`, `time[tz]`, `date`)
 * Scan binary blobs correctly (i.e. `bytea`)
+* pq.ParseURL for converting urls to connection strings for sql.Open.
 
 ## Future / Things you can help with
 
