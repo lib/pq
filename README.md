@@ -34,7 +34,7 @@ See http://www.postgresql.org/docs/9.0/static/libpq-connect.html
 	* `require` - Always SSL (skip verification)
 	* `verify-full` - Always SSL (require verification)
 
-See http://tip.golang.org/pkg/database/sql to learn how to use with `pq` through the `database/sql` package.
+See http://golang.org/pkg/database/sql to learn how to use with `pq` through the `database/sql` package.
 
 ## Features
 
