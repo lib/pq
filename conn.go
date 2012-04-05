@@ -211,7 +211,7 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 
 func (cn *conn) recv1() (byte, *readBuf) {
 	x := make([]byte, 5)
-	_, err := cn.c.Read(x)
+	_, err := io.ReadFull(cn.c, x)
 	if err != nil {
 		panic(err)
 	}
