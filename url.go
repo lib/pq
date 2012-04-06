@@ -3,8 +3,8 @@ package pq
 import (
 	"fmt"
 	nurl "net/url"
-	"strings"
 	"sort"
+	"strings"
 )
 
 // ParseURL converts url to a connection string for driver.Open.
@@ -36,7 +36,7 @@ func ParseURL(url string) (string, error) {
 		v := u.User.Username()
 		kvs = appendkv(kvs, "user", v)
 
-		v, _ =  u.User.Password()
+		v, _ = u.User.Password()
 		kvs = appendkv(kvs, "password", v)
 	}
 
@@ -56,7 +56,7 @@ func ParseURL(url string) (string, error) {
 	for k, _ := range q {
 		kvs = appendkv(kvs, k, q.Get(k))
 	}
-	
+
 	sort.Strings(kvs) // Makes testing easier (not a performance concern)
 	return strings.Join(kvs, " "), nil
 }
