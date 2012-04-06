@@ -18,7 +18,10 @@ func TestExec(t *testing.T) {
 	}
 	defer db.Close()
 
-	db.Exec("DELETE FROM temp")
+	_, err = db.Exec("CREATE TEMP TABLE temp (a int)")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	r, err := db.Exec("INSERT INTO temp VALUES (1)")
 	if err != nil {
