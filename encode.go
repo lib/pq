@@ -56,7 +56,13 @@ func decode(s []byte, typ int) interface{} {
 }
 
 func mustParse(f string, s []byte) time.Time {
-	t, err := time.Parse(f, string(s))
+	str := string(s)
+	// Special case until time.Parse bug is fixed:
+	// http://code.google.com/p/go/issues/detail?id=3487
+	if str[len(str)-2] == '.' {
+		str += "0"
+	}
+	t, err := time.Parse(f, str)
 	if err != nil {
 		errorf("decode: %s", err)
 	}
