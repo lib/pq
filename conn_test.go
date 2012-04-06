@@ -300,3 +300,26 @@ func TestErrorOnQuery(t *testing.T) {
 		t.Fatal("unexpected row")
 	}
 }
+
+func TestBindError(t *testing.T) {
+	db, err := sql.Open("postgres", cs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec("create temp table test (i integer)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Query("select * from test where i=$1", "hhh")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+
+	// Should not get error here
+	_, err = db.Query("select * from test where i=$1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+}

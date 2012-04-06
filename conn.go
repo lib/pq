@@ -397,9 +397,25 @@ func (st *stmt) exec(v []driver.Value) {
 
 	st.cn.send(newWriteBuf('S'))
 
-	t, _ := st.cn.recv()
-	if t != '2' {
-		errorf("unexpected bind response: %q", t)
+	var err error
+	for {
+		t, r := st.cn.recv1()
+		switch t {
+		case 'E':
+			err = parseError(r)
+		case '2':
+			if err != nil {
+				panic(err)
+			}
+			return
+		case 'Z':
+			if err != nil {
+				panic(err)
+			}
+			return
+		default:
+			errorf("unexpected bind response: %q", t)
+		}
 	}
 }
 
@@ -454,12 +470,17 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 	defer errRecover(&err)
 
 	for {
-		t, r := rs.st.cn.recv()
+		t, r := rs.st.cn.recv1()
 		switch t {
+		case 'E':
+			err = parseError(r)
 		case 'C', 'S':
 			continue
 		case 'Z':
 			rs.done = true
+			if err != nil {
+				return err
+			}
 			return io.EOF
 		case 'D':
 			n := r.int16()
