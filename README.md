@@ -20,8 +20,13 @@
 
 **Connection String Parameters**
 
-These are a subset of the libpq connection parameters.
-See http://www.postgresql.org/docs/9.0/static/libpq-connect.html
+These are a subset of the libpq connection parameters.  In addition, a
+number of the [environment
+variables](http://www.postgresql.org/docs/9.1/static/libpq-envars.html)
+supported by libpq are also supported.  Just like libpq, these have
+lower precedence than explicitly provided connection parameters.
+
+See http://www.postgresql.org/docs/9.1/static/libpq-connect.html.
 
 * `dbname` - The name of the database to connect to
 * `user` - The user to sign in as
@@ -36,6 +41,17 @@ See http://www.postgresql.org/docs/9.0/static/libpq-connect.html
 
 See http://golang.org/pkg/database/sql to learn how to use with `pq` through the `database/sql` package.
 
+## Tests
+
+`go test` is used for testing.  A running PostgreSQL server is
+required, with the ability to log in.  The default database to connect
+to test with is "pqgotest," but it can be overridden using environment
+variables.
+
+Example:
+
+	PGHOST=/var/run/postgresql go test pq
+
 ## Features
 
 * SSL
@@ -43,6 +59,8 @@ See http://golang.org/pkg/database/sql to learn how to use with `pq` through the
 * Scan `time.Time` correctly (i.e. `timestamp[tz]`, `time[tz]`, `date`)
 * Scan binary blobs correctly (i.e. `bytea`)
 * pq.ParseURL for converting urls to connection strings for sql.Open.
+* Many libpq compatible environment variables
+* Unix socket support
 
 ## Future / Things you can help with
 
