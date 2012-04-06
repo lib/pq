@@ -10,6 +10,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"os/user"
+	"path"
 	"strconv"
 	"strings"
 )
@@ -38,8 +41,29 @@ func Open(name string) (_ driver.Conn, err error) {
 	defer errRecover(&err)
 
 	o := make(Values)
+
+	// A number of defaults are applied here, in this order:
+	//
+	// * Very low precedence defaults applied in every situation
+	// * Environment variables
+	// * Explicitly passed connection information
 	o.Set("host", "localhost")
 	o.Set("port", "5432")
+
+	// Default the username, but ignore errors, because a user
+	// passed in via environment variable or connection string
+	// would be okay.  This can result in connections failing
+	// *sometimes* if the client relies on being able to determine
+	// the current username and there are intermittent problems.
+	u, err := user.Current()
+	if err == nil {
+		o.Set("user", u.Username)
+	}
+
+	for k, v := range parseEnviron(os.Environ()) {
+		o.Set(k, v)
+	}
+
 	parseOpts(name, o)
 
 	c, err := net.Dial(network(o))
@@ -57,7 +81,8 @@ func network(o Values) (string, string) {
 	host := o.Get("host")
 
 	if strings.HasPrefix(host, "/") {
-		return "unix", host
+		sockPath := path.Join(host, ".s.PGSQL."+o.Get("port"))
+		return "unix", sockPath
 	}
 
 	return "tcp", host + ":" + o.Get("port")
@@ -504,4 +529,74 @@ func md5s(s string) string {
 	h := md5.New()
 	h.Write([]byte(s))
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// parseEnviron tries to mimic some of libpq's environment handling
+//
+// To ease testing, it does not directly reference os.Environ, but is
+// designed to accept its output.
+//
+// Environment-set connection information is intended to have a higher
+// precedence than a library default but lower than any explicitly
+// passed information (such as in the URL or connection string).
+func parseEnviron(env []string) (out map[string]string) {
+	out = make(map[string]string)
+
+	for _, v := range env {
+		parts := strings.SplitN(v, "=", 2)
+
+		accrue := func(keyname string) {
+			out[keyname] = parts[1]
+		}
+
+		// The order of these is the same as is seen in the
+		// PostgreSQL 9.1 manual, with omissions briefly
+		// noted.
+		switch parts[0] {
+		case "PGHOST":
+			accrue("host")
+		case "PGHOSTADDR":
+			accrue("hostaddr")
+		case "PGPORT":
+			accrue("port")
+		case "PGDATABASE":
+			accrue("dbname")
+		case "PGUSER":
+			accrue("user")
+		case "PGPASSWORD":
+			accrue("password")
+		// skip PGPASSFILE, PGSERVICE, PGSERVICEFILE,
+		// PGREALM
+		case "PGOPTIONS":
+			accrue("options")
+		case "PGAPPNAME":
+			accrue("application_name")
+		case "PGSSLMODE":
+			accrue("sslmode")
+		case "PGREQUIRESSL":
+			accrue("requiressl")
+		case "PGSSLCERT":
+			accrue("sslcert")
+		case "PGSSLKEY":
+			accrue("sslkey")
+		case "PGSSLROOTCERT":
+			accrue("sslrootcert")
+		case "PGSSLCRL":
+			accrue("sslcrl")
+		case "PGREQUIREPEER":
+			accrue("requirepeer")
+		case "PGKRBSRVNAME":
+			accrue("krbsrvname")
+		case "PGGSSLIB":
+			accrue("gsslib")
+		case "PGCONNECT_TIMEOUT":
+			accrue("connect_timeout")
+		case "PGCLIENTENCODING":
+			accrue("client_encoding")
+			// skip PGDATESTYLE, PGTZ, PGGEQO, PGSYSCONFDIR,
+			// PGLOCALEDIR
+		}
+	}
+
+	return out
 }

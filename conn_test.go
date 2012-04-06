@@ -4,21 +4,37 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"io"
+	"os"
 	"reflect"
 	"testing"
 	"time"
 )
 
-var cs = "user=pqgotest sslmode=disable"
+func openTestConn(t *testing.T) *sql.DB {
+	datname := os.Getenv("PGDATABASE")
+	sslmode := os.Getenv("PGSSLMODE")
 
-func TestExec(t *testing.T) {
-	db, err := sql.Open("postgres", cs)
+	if datname == "" {
+		os.Setenv("PGDATABASE", "pqgotest")
+	}
+
+	if sslmode == "" {
+		os.Setenv("PGSSLMODE", "disable")
+	}
+
+	conn, err := sql.Open("postgres", "")
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	return conn
+}
+
+func TestExec(t *testing.T) {
+	db := openTestConn(t)
 	defer db.Close()
 
-	_, err = db.Exec("CREATE TEMP TABLE temp (a int)")
+	_, err := db.Exec("CREATE TEMP TABLE temp (a int)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,10 +50,7 @@ func TestExec(t *testing.T) {
 }
 
 func TestStatment(t *testing.T) {
-	db, err := sql.Open("postgres", cs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openTestConn(t)
 	defer db.Close()
 
 	st, err := db.Prepare("SELECT 1")
@@ -94,10 +107,8 @@ func TestStatment(t *testing.T) {
 }
 
 func TestRowsCloseBeforeDone(t *testing.T) {
-	db, err := sql.Open("postgres", cs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openTestConn(t)
+	defer db.Close()
 
 	r, err := db.Query("SELECT 1")
 	if err != nil {
@@ -119,10 +130,7 @@ func TestRowsCloseBeforeDone(t *testing.T) {
 }
 
 func TestEncodeDecode(t *testing.T) {
-	db, err := sql.Open("postgres", cs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openTestConn(t)
 	defer db.Close()
 
 	q := `
@@ -182,10 +190,7 @@ func TestEncodeDecode(t *testing.T) {
 }
 
 func TestNoData(t *testing.T) {
-	db, err := sql.Open("postgres", cs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openTestConn(t)
 	defer db.Close()
 
 	st, err := db.Prepare("SELECT 1 WHERE true = false")
@@ -209,7 +214,9 @@ func TestNoData(t *testing.T) {
 }
 
 func TestPGError(t *testing.T) {
-	db, err := sql.Open("postgres", "user=asdf")
+	// Don't use the normal connection setup, this is intended to
+	// blow up in the startup packet from a non-existent user.
+	db, err := sql.Open("postgres", "user=thisuserreallydoesntexist")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,14 +257,11 @@ func TestBadConn(t *testing.T) {
 }
 
 func TestErrorOnExec(t *testing.T) {
-	db, err := sql.Open("postgres", cs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openTestConn(t)
 	defer db.Close()
 
 	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
-	_, err = db.Exec(sql)
+	_, err := db.Exec(sql)
 	_, ok := err.(*PGError)
 	if !ok {
 		t.Fatalf("expected PGError, was: %#v", err)
@@ -270,10 +274,7 @@ func TestErrorOnExec(t *testing.T) {
 }
 
 func TestErrorOnQuery(t *testing.T) {
-	db, err := sql.Open("postgres", cs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openTestConn(t)
 	defer db.Close()
 
 	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
@@ -302,12 +303,10 @@ func TestErrorOnQuery(t *testing.T) {
 }
 
 func TestBindError(t *testing.T) {
-	db, err := sql.Open("postgres", cs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openTestConn(t)
+	defer db.Close()
 
-	_, err = db.Exec("create temp table test (i integer)")
+	_, err := db.Exec("create temp table test (i integer)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,5 +320,13 @@ func TestBindError(t *testing.T) {
 	_, err = db.Query("select * from test where i=$1", 1)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestParseEnviron(t *testing.T) {
+	expected := map[string]string{"dbname": "hello", "user": "goodbye"}
+	results := parseEnviron([]string{"PGDATABASE=hello", "PGUSER=goodbye"})
+	if !reflect.DeepEqual(expected, results) {
+		t.Fatalf("Expected: %#v Got: %#v", expected, results)
 	}
 }
