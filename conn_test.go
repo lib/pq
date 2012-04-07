@@ -47,6 +47,15 @@ func TestExec(t *testing.T) {
 	if n, _ := r.RowsAffected(); n != 1 {
 		t.Fatalf("expected 1 row affected, not %d", n)
 	}
+
+	r, err = db.Exec("INSERT INTO temp VALUES ($1), ($2), ($3)", 1, 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if n, _ := r.RowsAffected(); n != 3 {
+		t.Fatalf("expected 3 row affected, not %d", n)
+	}
 }
 
 func TestStatment(t *testing.T) {
@@ -328,5 +337,16 @@ func TestParseEnviron(t *testing.T) {
 	results := parseEnviron([]string{"PGDATABASE=hello", "PGUSER=goodbye"})
 	if !reflect.DeepEqual(expected, results) {
 		t.Fatalf("Expected: %#v Got: %#v", expected, results)
+	}
+}
+
+func TestExecerInterface(t *testing.T) {
+	// Gin up a straw man private struct just for the type check
+	cn := &conn{c: nil}
+	var cni interface{} = cn
+
+	_, ok := cni.(driver.Execer)
+	if !ok {
+		t.Fatal("Driver doesn't implement Execer")
 	}
 }
