@@ -149,10 +149,10 @@ func (cn *conn) gname() string {
 	return strconv.FormatInt(int64(cn.namei), 10)
 }
 
-func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
+func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 	defer errRecover(&err)
 
-	st := &stmt{cn: cn, name: cn.gname()}
+	st := &stmt{cn: cn, name: stmtName}
 
 	b := newWriteBuf('P')
 	b.string(st.name)
@@ -199,8 +199,34 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 	return st, nil
 }
 
+func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
+	st, err := cn.prepareTo(q, cn.gname())
+	return st, err
+}
+
 func (cn *conn) Close() error {
 	return cn.c.Close()
+}
+
+// Implement the optional "Execer" interface for one-shot queries
+func (cn *conn) Exec(
+	query string, args []driver.Value) (_ driver.Result, err error) {
+	defer errRecover(&err)
+
+	// Use the unnamed statement to defer planning until bind
+	// time, or else value-based selectivity estimates cannot be
+	// used.
+	st, err := cn.prepareTo(query, "")
+	if err != nil {
+		panic(err)
+	}
+
+	r, err := st.Exec(args)
+	if err != nil {
+		panic(err)
+	}
+
+	return r, err
 }
 
 // Assumes len(*m) is > 5
