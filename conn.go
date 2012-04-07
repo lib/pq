@@ -200,6 +200,8 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 }
 
 func (cn *conn) Close() error {
+	cn.send(newWriteBuf('X'))
+
 	return cn.c.Close()
 }
 
