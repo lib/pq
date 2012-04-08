@@ -67,6 +67,7 @@ func TestStatment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer r.Close()
 
 	if !r.Next() {
 		t.Fatal("expected row")
@@ -84,19 +85,20 @@ func TestStatment(t *testing.T) {
 
 	// st1
 
-	r, err = st1.Query()
+	r1, err := st1.Query()
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer r1.Close()
 
-	if !r.Next() {
+	if !r1.Next() {
 		if r.Err() != nil {
-			t.Fatal(r.Err())
+			t.Fatal(r1.Err())
 		}
 		t.Fatal("expected row")
 	}
 
-	err = r.Scan(&i)
+	err = r1.Scan(&i)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,6 +284,7 @@ func TestErrorOnQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer r.Close()
 
 	if r.Next() {
 		t.Fatal("unexpected row, want error")
@@ -317,10 +320,11 @@ func TestBindError(t *testing.T) {
 	}
 
 	// Should not get error here
-	_, err = db.Query("select * from test where i=$1", 1)
+	r, err := db.Query("select * from test where i=$1", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer r.Close()
 }
 
 func TestParseEnviron(t *testing.T) {
