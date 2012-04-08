@@ -199,7 +199,8 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 	return st, nil
 }
 
-func (cn *conn) Close() error {
+func (cn *conn) Close() (err error) {
+	errRecover(&err)
 	cn.send(newWriteBuf('X'))
 
 	return cn.c.Close()
