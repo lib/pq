@@ -154,33 +154,33 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 
 	st := &stmt{cn: cn, name: stmtName}
 
-	b := newWriteBuf('P')
+	b := newWriteBuf(msgParseP)
 	b.string(st.name)
 	b.string(q)
 	b.int16(0)
 	cn.send(b)
 
-	b = newWriteBuf('D')
-	b.byte('S')
+	b = newWriteBuf(msgDescribeD)
+	b.byte(msgIsStatementS)
 	b.string(st.name)
 	cn.send(b)
 
-	cn.send(newWriteBuf('H'))
+	cn.send(newWriteBuf(msgFlushH))
 
 	t, r := cn.recv()
-	if t != '1' {
+	if t != msgParseComplete1 {
 		errorf("unexpected parse response: %q", t)
 	}
 
 	t, r = cn.recv()
-	if t != 't' {
+	if t != msgParameterDescriptiont {
 		errorf("unexpected describe params response: %q", t)
 	}
 	st.nparams = int(r.int16())
 
 	t, r = cn.recv()
 	switch t {
-	case 'T':
+	case msgRowDescriptionT:
 		n := r.int16()
 		st.cols = make([]string, n)
 		st.ooid = make([]int, n)
@@ -190,7 +190,7 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 			st.ooid[i] = r.int32()
 			r.next(8)
 		}
-	case 'n':
+	case msgNoDatan:
 		// no data
 	default:
 		errorf("unexpected describe rows response: %q", t)
@@ -206,7 +206,7 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 
 func (cn *conn) Close() (err error) {
 	defer errRecover(&err)
-	cn.send(newWriteBuf('X'))
+	cn.send(newWriteBuf(msgTerminateX))
 
 	return cn.c.Close()
 }
@@ -247,13 +247,13 @@ func (cn *conn) send(m *writeBuf) {
 	}
 }
 
-func (cn *conn) recv() (t byte, r *readBuf) {
+func (cn *conn) recv() (t pqMsgType, r *readBuf) {
 	for {
 		t, r = cn.recv1()
 		switch t {
-		case 'E':
+		case msgErrorResponseE:
 			panic(parseError(r))
-		case 'N':
+		case msgNoticeResponseN:
 			// TODO(bmizerany): log notices?
 		default:
 			return
@@ -263,7 +263,7 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 	panic("not reached")
 }
 
-func (cn *conn) recv1() (byte, *readBuf) {
+func (cn *conn) recv1() (pqMsgType, *readBuf) {
 	x := make([]byte, 5)
 	_, err := io.ReadFull(cn.c, x)
 	if err != nil {
@@ -277,7 +277,7 @@ func (cn *conn) recv1() (byte, *readBuf) {
 		panic(err)
 	}
 
-	return x[0], (*readBuf)(&y)
+	return pqMsgType(x[0]), (*readBuf)(&y)
 }
 
 func (cn *conn) ssl(o Values) {
@@ -323,10 +323,10 @@ func (cn *conn) startup(o Values) {
 	for {
 		t, r := cn.recv()
 		switch t {
-		case 'K', 'S':
-		case 'R':
+		case msgBackendKeyDataK, msgParameterStatusS:
+		case msgAuthenticationOkR:
 			cn.auth(r, o)
-		case 'Z':
+		case msgReadyForQueryZ:
 			return
 		default:
 			errorf("unknown response for startup: %q", t)
@@ -340,12 +340,12 @@ func (cn *conn) auth(r *readBuf, o Values) {
 		// OK
 	case 5:
 		s := string(r.next(4))
-		w := newWriteBuf('p')
+		w := newWriteBuf(msgPasswordMessagep)
 		w.string("md5" + md5s(md5s(o.Get("password")+o.Get("user"))+s))
 		cn.send(w)
 
 		t, r := cn.recv()
-		if t != 'R' {
+		if t != msgAuthenticationOkR {
 			errorf("unexpected password response: %q", t)
 		}
 
@@ -373,21 +373,21 @@ func (st *stmt) Close() (err error) {
 
 	defer errRecover(&err)
 
-	w := newWriteBuf('C')
-	w.byte('S')
+	w := newWriteBuf(msgCloseC)
+	w.byte(msgIsStatementS)
 	w.string(st.name)
 	st.cn.send(w)
 
-	st.cn.send(newWriteBuf('S'))
+	st.cn.send(newWriteBuf(msgSyncS))
 
 	t, _ := st.cn.recv()
-	if t != '3' {
+	if t != msgCloseComplete3 {
 		errorf("unexpected close response: %q", t)
 	}
 	st.closed = true
 
 	t, _ = st.cn.recv()
-	if t != 'Z' {
+	if t != msgReadyForQueryZ {
 		errorf("expected ready for query, but got: %q", t)
 	}
 
@@ -407,16 +407,16 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 	for {
 		t, r := st.cn.recv1()
 		switch t {
-		case 'E':
+		case msgErrorResponseE:
 			err = parseError(r)
-		case 'C':
+		case msgCommandCompleteC:
 			res = parseComplete(r.string())
-		case 'Z':
+		case msgReadyForQueryZ:
 			// done
 			return
-		case 'D':
+		case msgDataRowD:
 			errorf("unexpected data row returned in Exec; check your query")
-		case 'S', 'N':
+		case msgParameterStatusS, msgNoticeResponseN:
 			// Ignore
 		default:
 			errorf("unknown exec response: %q", t)
@@ -427,7 +427,7 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 }
 
 func (st *stmt) exec(v []driver.Value) {
-	w := newWriteBuf('B')
+	w := newWriteBuf(msgBindB)
 	w.string("")
 	w.string(st.name)
 	w.int16(0)
@@ -444,25 +444,25 @@ func (st *stmt) exec(v []driver.Value) {
 	w.int16(0)
 	st.cn.send(w)
 
-	w = newWriteBuf('E')
+	w = newWriteBuf(msgExecuteE)
 	w.string("")
 	w.int32(0)
 	st.cn.send(w)
 
-	st.cn.send(newWriteBuf('S'))
+	st.cn.send(newWriteBuf(msgSyncS))
 
 	var err error
 	for {
 		t, r := st.cn.recv1()
 		switch t {
-		case 'E':
+		case msgErrorResponseE:
 			err = parseError(r)
-		case '2':
+		case msgBindComplete2:
 			if err != nil {
 				panic(err)
 			}
 			return
-		case 'Z':
+		case msgReadyForQueryZ:
 			if err != nil {
 				panic(err)
 			}
@@ -526,17 +526,17 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 	for {
 		t, r := rs.st.cn.recv1()
 		switch t {
-		case 'E':
+		case msgErrorResponseE:
 			err = parseError(r)
-		case 'C', 'S':
+		case msgCommandCompleteC, msgParameterStatusS:
 			continue
-		case 'Z':
+		case msgReadyForQueryZ:
 			rs.done = true
 			if err != nil {
 				return err
 			}
 			return io.EOF
-		case 'D':
+		case msgDataRowD:
 			n := r.int16()
 			for i := 0; i < len(dest) && i < n; i++ {
 				l := r.int32()
