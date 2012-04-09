@@ -32,38 +32,37 @@ func ParseURL(url string) (string, error) {
 	}
 
 	var kvs []string
+	accrue := func(k, v string) {
+		if v != "" {
+			kvs = append(kvs, k+"="+v)
+		}
+	}
+
 	if u.User != nil {
 		v := u.User.Username()
-		kvs = appendkv(kvs, "user", v)
+		accrue("user", v)
 
 		v, _ = u.User.Password()
-		kvs = appendkv(kvs, "password", v)
+		accrue("password", v)
 	}
 
 	i := strings.Index(u.Host, ":")
 	if i < 0 {
-		kvs = appendkv(kvs, "host", u.Host)
+		accrue("host", u.Host)
 	} else {
-		kvs = appendkv(kvs, "host", u.Host[:i])
-		kvs = appendkv(kvs, "port", u.Host[i+1:])
+		accrue("host", u.Host[:i])
+		accrue("port", u.Host[i+1:])
 	}
 
 	if u.Path != "" {
-		kvs = appendkv(kvs, "dbname", u.Path[1:])
+		accrue("dbname", u.Path[1:])
 	}
 
 	q := u.Query()
 	for k, _ := range q {
-		kvs = appendkv(kvs, k, q.Get(k))
+		accrue(k, q.Get(k))
 	}
 
 	sort.Strings(kvs) // Makes testing easier (not a performance concern)
 	return strings.Join(kvs, " "), nil
-}
-
-func appendkv(kvs []string, k, v string) []string {
-	if v != "" {
-		return append(kvs, k+"="+v)
-	}
-	return kvs
 }
