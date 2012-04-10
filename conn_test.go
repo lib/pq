@@ -354,3 +354,49 @@ func TestExecerInterface(t *testing.T) {
 		t.Fatal("Driver doesn't implement Execer")
 	}
 }
+
+func TestNullAfterNonNull(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	r, err := db.Query("SELECT 9::integer UNION SELECT NULL::integer")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var n sql.NullInt64
+
+	if !r.Next() {
+		if r.Err() != nil {
+			t.Fatal(err)
+		}
+		t.Fatal("expected row")
+	}
+
+	if err := r.Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+
+	if n.Int64 != 9 {
+		t.Fatalf("expected 2, not %d", n.Int64)
+	}
+
+	if !r.Next() {
+		if r.Err() != nil {
+			t.Fatal(err)
+		}
+		t.Fatal("expected row")
+	}
+
+	if err := r.Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+
+	if n.Valid {
+		t.Fatal("expected n to be invalid")
+	}
+
+	if n.Int64 != 0 {
+		t.Fatalf("expected n to 2, not %d", n.Int64)
+	}
+}
