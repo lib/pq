@@ -541,6 +541,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 			for i := 0; i < len(dest) && i < n; i++ {
 				l := r.int32()
 				if l == -1 {
+					dest[i] = nil
 					continue
 				}
 				dest[i] = decode(r.next(l), rs.st.ooid[i])
