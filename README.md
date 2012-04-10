@@ -72,6 +72,7 @@ Example:
 Some of these contributors are from the original library `bmizerany/pq.go` whose
 code still exists in here.
 
+* Ben Berkert (benburkert)
 * Blake Gentry (bgentry)
 * Brad Fitzpatrick (bradfitz)
 * Daniel Farina (fdr)
