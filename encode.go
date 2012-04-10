@@ -50,6 +50,8 @@ func decode(s []byte, typ int) interface{} {
 		return mustParse("15:04:05-07", s)
 	case t_date:
 		return mustParse("2006-01-02", s)
+	case t_bool:
+		return s[0] == 't';
 	}
 
 	return s
