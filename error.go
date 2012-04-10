@@ -66,7 +66,7 @@ func errRecover(err *error) {
 			*err = v
 		}
 	case error:
-		if v == io.EOF {
+		if v == io.EOF || (*err).Error() == "remote error: handshake failure" {
 			*err = driver.ErrBadConn
 		} else {
 			*err = v
