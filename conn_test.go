@@ -149,7 +149,8 @@ func TestEncodeDecode(t *testing.T) {
 			'\x000102'::bytea,
 			'foobar'::text,
 			NULL::integer,
-			'2000-1-1 01:02:03.04-7'::timestamptz
+			'2000-1-1 01:02:03.04-7'::timestamptz,
+			0::boolean
 		WHERE 
 			    '\x000102'::bytea = $1
 			AND 'foobar'::text = $2
@@ -177,8 +178,9 @@ func TestEncodeDecode(t *testing.T) {
 	var got2 string
 	var got3 = sql.NullInt64{Valid: true}
 	var got4 time.Time
+	var got5 interface{}
 
-	err = r.Scan(&got1, &got2, &got3, &got4)
+	err = r.Scan(&got1, &got2, &got3, &got4, &got5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,6 +199,10 @@ func TestEncodeDecode(t *testing.T) {
 
 	if got4.Year() != 2000 {
 		t.Fatal("wrong year")
+	}
+
+	if got5 != false {
+		t.Fatalf("expected false, got %q", got5)
 	}
 }
 
