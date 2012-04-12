@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"io"
+	"net"
 	"runtime"
 )
 
@@ -65,8 +66,10 @@ func errRecover(err *error) {
 		} else {
 			*err = v
 		}
+	case *net.OpError:
+		*err = driver.ErrBadConn
 	case error:
-		if v == io.EOF || (*err).Error() == "remote error: handshake failure" {
+		if v == io.EOF || v.(error).Error() == "remote error: handshake failure" {
 			*err = driver.ErrBadConn
 		} else {
 			*err = v
