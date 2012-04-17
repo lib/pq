@@ -150,7 +150,9 @@ func TestEncodeDecode(t *testing.T) {
 			'foobar'::text,
 			NULL::integer,
 			'2000-1-1 01:02:03.04-7'::timestamptz,
-			0::boolean
+			0::boolean,
+			123,
+			3.14::float8
 		WHERE 
 			    '\x000102'::bytea = $1
 			AND 'foobar'::text = $2
@@ -178,9 +180,9 @@ func TestEncodeDecode(t *testing.T) {
 	var got2 string
 	var got3 = sql.NullInt64{Valid: true}
 	var got4 time.Time
-	var got5 interface{}
+	var got5, got6, got7 interface{}
 
-	err = r.Scan(&got1, &got2, &got3, &got4, &got5)
+	err = r.Scan(&got1, &got2, &got3, &got4, &got5, &got6, &got7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,6 +205,14 @@ func TestEncodeDecode(t *testing.T) {
 
 	if got5 != false {
 		t.Fatalf("expected false, got %q", got5)
+	}
+
+	if got6 != int64(123) {
+		t.Fatalf("expected 123, got %d", got6)
+	}
+
+	if got7 != float64(3.14) {
+		t.Fatalf("expected 3.14, got %f", got7)
 	}
 }
 
