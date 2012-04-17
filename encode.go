@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -52,6 +53,22 @@ func decode(s []byte, typ int) interface{} {
 		return mustParse("2006-01-02", s)
 	case t_bool:
 		return s[0] == 't'
+	case t_int8, t_int2, t_int4:
+		i, err := strconv.ParseInt(string(s), 10, 64)
+		if err != nil {
+			errorf("%s", err)
+		}
+		return i
+	case t_float4, t_float8:
+		bits := 64
+		if typ == t_float4 {
+			bits = 32
+		}
+		f, err := strconv.ParseFloat(string(s), bits)
+		if err != nil {
+			errorf("%s", err)
+		}
+		return f
 	}
 
 	return s
