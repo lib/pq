@@ -148,9 +148,8 @@ func nullString(v interface{}) sql.NullString {
 	return sql.NullString{String: v.(string), Valid: true}
 }
 
-
 var fullTests = []matchTest{
-	{in: "NULL", out:[]string{}},
+	{in: "NULL", out: []string{}},
 	{in: "\"a\" => \"b\"",
 		out:    []string{"\"a\" => \"b\""},
 		hstore: Hstore{"a": nullString("b")}},
@@ -174,7 +173,6 @@ var fullTests = []matchTest{
 		},
 	},
 }
-
 
 func TestParseHstore(t *testing.T) {
 	for _, mt := range fullTests {
@@ -207,12 +205,10 @@ func TestDBRoundTrip(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-
 	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS hstore")
 	fatal(t, err)
 	_, err = db.Exec("CREATE TEMP TABLE temp (id serial, data hstore)")
 	fatal(t, err)
-
 
 	for _, mt := range fullTests {
 		v, err := mt.hstore.Value()
@@ -222,9 +218,9 @@ func TestDBRoundTrip(t *testing.T) {
 
 		if n, _ := r.RowsAffected(); n != 1 {
 			t.Fatalf("expected 1 row affected, not %d", n)
-		}		
+		}
 	}
-	
+
 	rows, err := db.Query("SELECT data FROM temp ORDER BY id ASC")
 	check(t, err)
 
