@@ -61,19 +61,19 @@ func nullStringValue(ns sql.NullString) string {
 
 var (
 	// <hstoreChar>   := [^"\] | '\"' | '\\' 
-	hstoreChar = "[^\"\\\\]|\\\\\"|\\\\\\\\"
+	hstoreChar = `[^"\\]|\\"|\\\\`
 
 	// <hstoreString> := <hstoreChar>*
 	hstoreString = fmt.Sprintf("(%s)*", hstoreChar)
 
 	// <hstoreKey> := '"' <hstoreString> '"'
-	hstoreKey = fmt.Sprintf("\"(?P<key>%s)\"", hstoreString)
+	hstoreKey = fmt.Sprintf(`"(?P<key>%s)"`, hstoreString)
 
 	// <hstoreValue> := ('"' <hstoreString> '"') | 'NULL'
-	hstoreValue = fmt.Sprintf("(?P<value>\"(?P<string>%s)\"|NULL)", hstoreString)
+	hstoreValue = fmt.Sprintf(`(?P<value>"(?P<string>%s)"|NULL)`, hstoreString)
 
 	// <pair>       := <hstoreKey> <ws> '=>' <ws> <hstoreValue>
-	pairExp = regexp.MustCompile(fmt.Sprintf("%s\\s*=>\\s*%s", hstoreKey, hstoreValue))
+	pairExp = regexp.MustCompile(fmt.Sprintf(`%s\s*=>\s*%s`, hstoreKey, hstoreValue))
 
 	subexps = make(map[string]int)
 )
