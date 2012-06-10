@@ -15,7 +15,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
-    "time"
+	"time"
 )
 
 var (
@@ -37,14 +37,14 @@ const WAIT_NOTIFICATION_CMD = "ACCEPT"
 const MAX_NOTIFICATIONS = 10
 
 type notification struct {
-    channel string
-    payload string
+	channel string
+	payload string
 }
 
 type conn struct {
-	c     net.Conn
-	namei int
-    notifications chan *notification
+	c             net.Conn
+	namei         int
+	notifications chan *notification
 }
 
 func Open(name string) (_ driver.Conn, err error) {
@@ -81,7 +81,7 @@ func Open(name string) (_ driver.Conn, err error) {
 		return nil, err
 	}
 
-    cn := &conn{c: c, notifications: make(chan *notification, MAX_NOTIFICATIONS)}
+	cn := &conn{c: c, notifications: make(chan *notification, MAX_NOTIFICATIONS)}
 	cn.ssl(o)
 	cn.startup(o)
 	return cn, nil
@@ -162,22 +162,22 @@ func (cn *conn) gname() string {
 func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 	defer errRecover(&err)
 
-    // If notification wait command, creates fake statement
-    cmd_fields := strings.Fields(q)
-    if len(cmd_fields) == 2 && (strings.ToUpper(cmd_fields[0]) == WAIT_NOTIFICATION_CMD) {
-        timeout, err := strconv.ParseInt(cmd_fields[1], 10, 32)
-        if err != nil {
-            return nil, errors.New("Invalid wait notification command timeout")
-        }
-        st := &stmt{cn: cn, name: stmtName, notwait: true, nottimeout:int(timeout)}
+	// If notification wait command, creates fake statement
+	cmd_fields := strings.Fields(q)
+	if len(cmd_fields) == 2 && (strings.ToUpper(cmd_fields[0]) == WAIT_NOTIFICATION_CMD) {
+		timeout, err := strconv.ParseInt(cmd_fields[1], 10, 32)
+		if err != nil {
+			return nil, errors.New("Invalid wait notification command timeout")
+		}
+		st := &stmt{cn: cn, name: stmtName, notwait: true, nottimeout: int(timeout)}
 		st.cols = make([]string, 2)
 		st.ooid = make([]int, 2)
-        st.cols[0] = "channel"
-        st.cols[1] = "payload"
-        st.ooid[0] = t_text
-        st.ooid[1] = t_text
-        return st, nil
-    }
+		st.cols[0] = "channel"
+		st.cols[1] = "payload"
+		st.ooid[0] = t_text
+		st.ooid[1] = t_text
+		return st, nil
+	}
 
 	st := &stmt{cn: cn, name: stmtName}
 
@@ -385,15 +385,15 @@ func (cn *conn) auth(r *readBuf, o Values) {
 }
 
 type stmt struct {
-	cn          *conn
-	name        string
-	cols        []string
-	nparams     int
-	ooid        []int
-	closed      bool
-    notwait     bool
-    nottimeout  int
-    notcount    int
+	cn         *conn
+	name       string
+	cols       []string
+	nparams    int
+	ooid       []int
+	closed     bool
+	notwait    bool
+	nottimeout int
+	notcount   int
 }
 
 func (st *stmt) Close() (err error) {
@@ -401,11 +401,11 @@ func (st *stmt) Close() (err error) {
 		return nil
 	}
 
-    // Fake notification wait statement
-    if st.notwait {
-	    st.closed = true
-        return nil
-    }
+	// Fake notification wait statement
+	if st.notwait {
+		st.closed = true
+		return nil
+	}
 
 	defer errRecover(&err)
 
@@ -454,8 +454,8 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 			errorf("unexpected data row returned in Exec; check your query")
 		case 'S', 'N':
 			// Ignore
-        case 'A':
-            parseNotificationResponse(st.cn, r)
+		case 'A':
+			parseNotificationResponse(st.cn, r)
 		default:
 			errorf("unknown exec response: %q", t)
 		}
@@ -465,10 +465,10 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 }
 
 func (st *stmt) exec(v []driver.Value) {
-    // Fake notification wait statement
-    if st.notwait {
-        return
-    }
+	// Fake notification wait statement
+	if st.notwait {
+		return
+	}
 
 	w := newWriteBuf('B')
 	w.string("")
@@ -564,33 +564,33 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 		return io.EOF
 	}
 
-    // Process fake notification wait statement
-    if rs.st.notwait {
-        // Return next received notification
-        not := pollNotificationResponse(rs.st.cn)
-        if not != nil {
-            dest[0] = not.channel
-            dest[1] = not.payload
-            rs.st.notcount++
-            return nil
-        }
-        // If at least one notification was received don't wait for timeout
-        if rs.st.notcount > 0 {
-            rs.done = true
+	// Process fake notification wait statement
+	if rs.st.notwait {
+		// Return next received notification
+		not := pollNotificationResponse(rs.st.cn)
+		if not != nil {
+			dest[0] = not.channel
+			dest[1] = not.payload
+			rs.st.notcount++
+			return nil
+		}
+		// If at least one notification was received don't wait for timeout
+		if rs.st.notcount > 0 {
+			rs.done = true
 			return io.EOF
-        }
-        // Blocks waiting for new notification or timeout
-        not = readNotificationResponse(rs.st.cn, time.Duration(rs.st.nottimeout) * time.Millisecond)
-        if not == nil {
-            rs.done = true
+		}
+		// Blocks waiting for new notification or timeout
+		not = readNotificationResponse(rs.st.cn, time.Duration(rs.st.nottimeout)*time.Millisecond)
+		if not == nil {
+			rs.done = true
 			return io.EOF
-        }
-        dest[0] = not.channel
-        dest[1] = not.payload
-        rs.st.notcount++
-        rs.done = true
-        return nil
-    }
+		}
+		dest[0] = not.channel
+		dest[1] = not.payload
+		rs.st.notcount++
+		rs.done = true
+		return nil
+	}
 
 	defer errRecover(&err)
 
@@ -704,47 +704,47 @@ func parseEnviron(env []string) (out map[string]string) {
 
 // Parse received NotificationResponse and inserts into channel
 func parseNotificationResponse(cn *conn, r *readBuf) {
-    // Builds notification response structure
-    nr := new(notification)
-    r.next(4)   // skip pid
-    nr.channel = r.string()
-    nr.payload = r.string()
-    // Insert notification response in channel without blocking
-    select {
-    case cn.notifications <- nr:
-        return
-    default:
-        // Notification channel is full
-        return
-    }
+	// Builds notification response structure
+	nr := new(notification)
+	r.next(4) // skip pid
+	nr.channel = r.string()
+	nr.payload = r.string()
+	// Insert notification response in channel without blocking
+	select {
+	case cn.notifications <- nr:
+		return
+	default:
+		// Notification channel is full
+		return
+	}
 }
 
 // Get next notification response from channel or return nil (does not block)
 func pollNotificationResponse(cn *conn) (not *notification) {
-    select {
-    case not := <-cn.notifications:
-        return not
-    default:
-        return nil
-    }
-    panic("not reached")
+	select {
+	case not := <-cn.notifications:
+		return not
+	default:
+		return nil
+	}
+	panic("not reached")
 }
 
 // Return next notification in channel or waits notification till specified timeout
 func readNotificationResponse(cn *conn, timeout time.Duration) (not *notification) {
-    not = pollNotificationResponse(cn)
-    if not != nil {
-        return not
-    }
-    cn.c.SetReadDeadline(time.Now().Add(timeout))
-    defer timeoutRecover(not)
-    t, r := cn.recv1()
-    cn.c.SetReadDeadline(time.Time{})
-    if t != 'A' {
-        return nil
-    }
-    parseNotificationResponse(cn, r)
-    return pollNotificationResponse(cn)
+	not = pollNotificationResponse(cn)
+	if not != nil {
+		return not
+	}
+	cn.c.SetReadDeadline(time.Now().Add(timeout))
+	defer timeoutRecover(not)
+	t, r := cn.recv1()
+	cn.c.SetReadDeadline(time.Time{})
+	if t != 'A' {
+		return nil
+	}
+	parseNotificationResponse(cn, r)
+	return pollNotificationResponse(cn)
 }
 
 // Recover from socket read timeout error or panic for other errors
@@ -754,13 +754,12 @@ func timeoutRecover(not *notification) {
 	case nil:
 		// Do nothing
 	case *net.OpError:
-        if v.Timeout() {
-            not = nil
-            return
-        }
-        panic(e)
+		if v.Timeout() {
+			not = nil
+			return
+		}
+		panic(e)
 	default:
-        panic(e)
+		panic(e)
 	}
 }
-
