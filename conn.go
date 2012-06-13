@@ -212,8 +212,7 @@ func (cn *conn) Close() (err error) {
 }
 
 // Implement the optional "Execer" interface for one-shot queries
-func (cn *conn) Exec(
-	query string, args []driver.Value) (_ driver.Result, err error) {
+func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err error) {
 	defer errRecover(&err)
 
 	// Use the unnamed statement to defer planning until bind
