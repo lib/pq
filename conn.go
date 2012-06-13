@@ -115,32 +115,20 @@ func parseOpts(name string, o Values) {
 }
 
 func (cn *conn) Begin() (driver.Tx, error) {
-	st, err := cn.Prepare("BEGIN")
+	_, err := cn.Exec("BEGIN", nil)
 	if err != nil {
 		return nil, err
 	}
-
-	_, err = st.Exec(nil)
 	return cn, err
 }
 
 func (cn *conn) Commit() error {
-	st, err := cn.Prepare("COMMIT")
-	if err != nil {
-		return err
-	}
-
-	_, err = st.Exec(nil)
+	_, err := cn.Exec("COMMIT", nil)
 	return err
 }
 
 func (cn *conn) Rollback() error {
-	st, err := cn.Prepare("ROLLBACK")
-	if err != nil {
-		return err
-	}
-
-	_, err = st.Exec(nil)
+	_, err := cn.Exec("ROLLBACK", nil)
 	return err
 }
 
