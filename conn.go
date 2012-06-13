@@ -200,8 +200,7 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 }
 
 func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
-	st, err := cn.prepareTo(q, cn.gname())
-	return st, err
+	return cn.prepareTo(q, cn.gname())
 }
 
 func (cn *conn) Close() (err error) {
