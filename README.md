@@ -4,6 +4,10 @@
 
 	go get github.com/bmizerany/pq
 
+## Docs
+
+<http://go.pkgdoc.org/github.com/bmizerany/pq>
+
 ## Use
 
 	package main
