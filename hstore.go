@@ -32,9 +32,9 @@ func (hs *Hstore) Scan(value interface{}) error {
 }
 
 // Value implements the Valuer interface
-func (hs *Hstore) Value() (driver.Value, error) {
-	pairs := make([]string, 0, len(*hs))
-	for k, v := range *hs {
+func (hs Hstore) Value() (driver.Value, error) {
+	pairs := make([]string, 0, len(hs))
+	for k, v := range hs {
 		pairs = append(pairs, fmt.Sprintf(`"%s"=>%s`, k, nullStringValue(v)))
 	}
 	return strings.Join(pairs, ","), nil
