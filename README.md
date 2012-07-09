@@ -2,7 +2,7 @@
 
 ## Install
 
-	go get github.com/bmizerany/pq
+	go get github.com/elpix/pq
 
 ## Docs
 
@@ -13,14 +13,30 @@
 	package main
 
 	import (
-		_ "github.com/bmizerany/pq"
+		_ "github.com/elpix/pq"
 		"database/sql"
 	)
 
 	func main() {
 		db, err := sql.Open("postgres", "user=pqgotest dbname=pqgotest sslmode=verify-full")
 		// ...
-	}
+
+        // Listen for notifications
+        _, err := db.Exec("LISTEN channel_name")
+
+        // Sends notification
+        _, err = db.Exec("NOTIFY channel_name, 'payload_data'")
+
+        // To read/wait notifications use 'fake' SQL command: 'ACCEPT <timeout_ms>'
+        rows, err := db.Query("ACCEPT 1000")
+        for rows.Next() {
+            var channel string
+            var payload string
+            err = rows.Scan(&channel, &payload)
+            // ...
+        }
+        rows.Close()
+    }
 
 **Connection String Parameters**
 
@@ -68,7 +84,6 @@ Example:
 
 ## Future / Things you can help with
 
-* Notifications: `LISTEN`/`NOTIFY`
 * `hstore` sugar (i.e. handling hstore in `rows.Scan`)
 
 ## Thank you (alphabetical)
@@ -81,6 +96,7 @@ code still exists in here.
 * Blake Gentry (bgentry)
 * Brad Fitzpatrick (bradfitz)
 * Daniel Farina (fdr)
+* Elemer (elpix1)
 * Everyone at The Go Team
 * Federico Romero (federomero)
 * Heroku (heroku)
