@@ -153,41 +153,39 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 	b.string(st.name)
 	cn.send(b)
 
-	cn.send(newWriteBuf('H'))
+	cn.send(newWriteBuf('S'))
 
-	t, r := cn.recv()
-	if t != '1' {
-		errorf("unexpected parse response: %q", t)
-	}
-
-	t, r = cn.recv()
-	if t != 't' {
-		errorf("unexpected describe params response: %q", t)
-	}
-	st.nparams = int(r.int16())
-
-	t, r = cn.recv()
-	switch t {
-	case 'T':
-		n := r.int16()
-		st.cols = make([]string, n)
-		st.ooid = make([]int, n)
-		for i := range st.cols {
-			st.cols[i] = r.string()
-			r.next(6)
-			st.ooid[i] = r.int32()
-			r.next(8)
+	for {
+		t, r := cn.recv1()
+		switch t {
+		case '1', '2':
+		case 't':
+			st.nparams = int(r.int16())
+		case 'T':
+			n := r.int16()
+			st.cols = make([]string, n)
+			st.ooid = make([]int, n)
+			for i := range st.cols {
+				st.cols[i] = r.string()
+				r.next(6)
+				st.ooid[i] = r.int32()
+				r.next(8)
+			}
+		case 'n':
+			// no data
+		case 'Z':
+			return st, nil
+		case 'E':
+			err = parseError(r)
+		default:
+			errorf("unexpected describe rows response: %q", t)
 		}
-	case 'n':
-		// no data
-	default:
-		errorf("unexpected describe rows response: %q", t)
 	}
 
-	return st, nil
+	panic("not reached")
 }
 
-func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
+func (cn *conn) Prepare(q string) (driver.Stmt, error) {
 	return cn.prepareTo(q, cn.gname())
 }
 
