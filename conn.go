@@ -381,7 +381,26 @@ func (st *stmt) Close() (err error) {
 func (st *stmt) Query(v []driver.Value) (_ driver.Rows, err error) {
 	defer errRecover(&err)
 	st.exec(v)
-	return &rows{st: st}, nil
+
+	// See if the very next response we get from the server is 'C'; if it
+	// is, check to see if this was a LISTEN. If it's not, we need to save
+	// it in the rows struct (so the first call to Next() can handle it).
+	t, r := st.cn.recv1()
+	if t == 'C' && r.string() == "LISTEN" {
+		// we need to flush the rest of the responses until we get to an
+		// error ('E') or the end ('Z')
+		for {
+			t, r := st.cn.recv1()
+			switch t {
+			case 'E':
+				panic(parseError(r))
+			case 'Z':
+				return &listenrows{st: st}, nil
+			}
+		}
+	}
+
+	return &rows{st: st, readT: t, readR: r}, nil
 }
 
 func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
@@ -478,8 +497,10 @@ func parseComplete(s string) driver.Result {
 }
 
 type rows struct {
-	st   *stmt
-	done bool
+	st    *stmt
+	readT byte
+	readR *readBuf
+	done  bool
 }
 
 func (rs *rows) Close() error {
@@ -508,7 +529,14 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 	defer errRecover(&err)
 
 	for {
-		t, r := rs.st.cn.recv1()
+		var t byte
+		var r *readBuf
+		if rs.readR != nil {
+			t, r = rs.readT, rs.readR
+			rs.readR = nil
+		} else {
+			t, r = rs.st.cn.recv1()
+		}
 		switch t {
 		case 'E':
 			err = parseError(r)
