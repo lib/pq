@@ -139,6 +139,32 @@ func (cn *conn) gname() string {
 	return strconv.FormatInt(int64(cn.namei), 10)
 }
 
+func (cn *conn) simpleQuery(q string) (res driver.Result, err error) {
+	defer errRecover(&err)
+
+	b := newWriteBuf('Q')
+	b.string(q)
+	cn.send(b)
+
+	for {
+		t, r := cn.recv1()
+		switch t {
+		case 'C':
+			res = parseComplete(r.string())
+		case 'Z':
+			// done
+			return
+		case 'E':
+			err = parseError(r)
+		case 'T':
+			// ignore
+		default:
+			errorf("unknown response for simple query: %q", t)
+		}
+	}
+	panic("not reached")
+}
+
 func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 	defer errRecover(&err)
 
@@ -201,6 +227,12 @@ func (cn *conn) Close() (err error) {
 // Implement the optional "Execer" interface for one-shot queries
 func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err error) {
 	defer errRecover(&err)
+
+	// Check to see if we can use the "simpleQuery" interface, which is
+	// *much* faster than going through prepare/exec
+	if len(args) == 0 {
+		return cn.simpleQuery(query)
+	}
 
 	// Use the unnamed statement to defer planning until bind
 	// time, or else value-based selectivity estimates cannot be
