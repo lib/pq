@@ -1,6 +1,7 @@
 package pq
 
 import (
+	"bufio"
 	"crypto/md5"
 	"crypto/tls"
 	"database/sql"
@@ -34,6 +35,7 @@ func init() {
 
 type conn struct {
 	c     net.Conn
+	buf   *bufio.Reader
 	namei int
 }
 
@@ -71,7 +73,7 @@ func Open(name string) (_ driver.Conn, err error) {
 		return nil, err
 	}
 
-	cn := &conn{c: c}
+	cn := &conn{c: c, buf: bufio.NewReader(c)}
 	cn.ssl(o)
 	cn.startup(o)
 	return cn, nil
@@ -137,10 +139,36 @@ func (cn *conn) gname() string {
 	return strconv.FormatInt(int64(cn.namei), 10)
 }
 
+func (cn *conn) simpleQuery(q string) (res driver.Result, err error) {
+	defer errRecover(&err)
+
+	b := newWriteBuf('Q')
+	b.string(q)
+	cn.send(b)
+
+	for {
+		t, r := cn.recv1()
+		switch t {
+		case 'C':
+			res = parseComplete(r.string())
+		case 'Z':
+			// done
+			return
+		case 'E':
+			err = parseError(r)
+		case 'T':
+			// ignore
+		default:
+			errorf("unknown response for simple query: %q", t)
+		}
+	}
+	panic("not reached")
+}
+
 func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 	defer errRecover(&err)
 
-	st := &stmt{cn: cn, name: stmtName}
+	st := &stmt{cn: cn, name: stmtName, query: q}
 
 	b := newWriteBuf('P')
 	b.string(st.name)
@@ -200,6 +228,12 @@ func (cn *conn) Close() (err error) {
 func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err error) {
 	defer errRecover(&err)
 
+	// Check to see if we can use the "simpleQuery" interface, which is
+	// *much* faster than going through prepare/exec
+	if len(args) == 0 {
+		return cn.simpleQuery(query)
+	}
+
 	// Use the unnamed statement to defer planning until bind
 	// time, or else value-based selectivity estimates cannot be
 	// used.
@@ -249,14 +283,14 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 
 func (cn *conn) recv1() (byte, *readBuf) {
 	x := make([]byte, 5)
-	_, err := io.ReadFull(cn.c, x)
+	_, err := io.ReadFull(cn.buf, x)
 	if err != nil {
 		panic(err)
 	}
 
 	b := readBuf(x[1:])
 	y := make([]byte, b.int32()-4)
-	_, err = io.ReadFull(cn.c, y)
+	_, err = io.ReadFull(cn.buf, y)
 	if err != nil {
 		panic(err)
 	}
@@ -344,6 +378,7 @@ func (cn *conn) auth(r *readBuf, o Values) {
 type stmt struct {
 	cn      *conn
 	name    string
+	query   string
 	cols    []string
 	nparams int
 	ooid    []int
@@ -386,6 +421,10 @@ func (st *stmt) Query(v []driver.Value) (_ driver.Rows, err error) {
 
 func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 	defer errRecover(&err)
+
+	if len(v) == 0 {
+		return st.cn.simpleQuery(st.query)
+	}
 	st.exec(v)
 
 	for {
