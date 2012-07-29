@@ -168,7 +168,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Result, err error) {
 func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 	defer errRecover(&err)
 
-	st := &stmt{cn: cn, name: stmtName}
+	st := &stmt{cn: cn, name: stmtName, query: q}
 
 	b := newWriteBuf('P')
 	b.string(st.name)
@@ -378,6 +378,7 @@ func (cn *conn) auth(r *readBuf, o Values) {
 type stmt struct {
 	cn      *conn
 	name    string
+	query   string
 	cols    []string
 	nparams int
 	ooid    []int
@@ -420,6 +421,10 @@ func (st *stmt) Query(v []driver.Value) (_ driver.Rows, err error) {
 
 func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 	defer errRecover(&err)
+
+	if len(v) == 0 {
+		return st.cn.simpleQuery(st.query)
+	}
 	st.exec(v)
 
 	for {
