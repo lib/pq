@@ -156,6 +156,8 @@ func (cn *conn) simpleQuery(q string) (res driver.Result, err error) {
 			return
 		case 'E':
 			err = parseError(r)
+		case 'N':
+			// ignore
 		case 'T':
 			// ignore
 		default:
