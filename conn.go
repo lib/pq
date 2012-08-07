@@ -204,7 +204,7 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 		case 'n':
 			// no data
 		case 'Z':
-			return st, nil
+			return st, err
 		case 'E':
 			err = parseError(r)
 		default:
