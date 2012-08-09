@@ -1,7 +1,6 @@
 package pq
 
 import (
-	"bufio"
 	"crypto/md5"
 	"crypto/tls"
 	"database/sql"
@@ -35,7 +34,6 @@ func init() {
 
 type conn struct {
 	c     net.Conn
-	buf   *bufio.Reader
 	namei int
 }
 
@@ -73,7 +71,7 @@ func Open(name string) (_ driver.Conn, err error) {
 		return nil, err
 	}
 
-	cn := &conn{c: c, buf: bufio.NewReader(c)}
+	cn := &conn{c: c}
 	cn.ssl(o)
 	cn.startup(o)
 	return cn, nil
@@ -285,14 +283,14 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 
 func (cn *conn) recv1() (byte, *readBuf) {
 	x := make([]byte, 5)
-	_, err := io.ReadFull(cn.buf, x)
+	_, err := io.ReadFull(cn.c, x)
 	if err != nil {
 		panic(err)
 	}
 
 	b := readBuf(x[1:])
 	y := make([]byte, b.int32()-4)
-	_, err = io.ReadFull(cn.buf, y)
+	_, err = io.ReadFull(cn.c, y)
 	if err != nil {
 		panic(err)
 	}
