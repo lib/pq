@@ -73,8 +73,9 @@ func Open(name string) (_ driver.Conn, err error) {
 		return nil, err
 	}
 
-	cn := &conn{c: c, buf: bufio.NewReader(c)}
+	cn := &conn{c: c}
 	cn.ssl(o)
+	cn.buf = bufio.NewReader(cn.c)
 	cn.startup(o)
 	return cn, nil
 }
