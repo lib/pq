@@ -20,28 +20,33 @@ const (
 
 type Error error
 
-type PGError struct {
+type PGError interface {
+	Error() string
+	Fatal() bool
+	Get(k byte) (v string)
+}
+type pgError struct {
 	c map[byte]string
 }
 
-func parseError(r *readBuf) *PGError {
-	err := &PGError{make(map[byte]string)}
+func parseError(r *readBuf) *pgError {
+	err := &pgError{make(map[byte]string)}
 	for t := r.byte(); t != 0; t = r.byte() {
 		err.c[t] = r.string()
 	}
 	return err
 }
 
-func (err *PGError) Get(k byte) (v string) {
+func (err *pgError) Get(k byte) (v string) {
 	v, _ = err.c[k]
 	return
 }
 
-func (err *PGError) Fatal() bool {
+func (err *pgError) Fatal() bool {
 	return err.Get('S') == Efatal
 }
 
-func (err *PGError) Error() string {
+func (err *pgError) Error() string {
 	var s string
 	for k, v := range err.c {
 		s += fmt.Sprintf(" %c:%q", k, v)
@@ -53,11 +58,11 @@ func errorf(s string, args ...interface{}) {
 	panic(Error(fmt.Errorf("pq: %s", fmt.Sprintf(s, args...))))
 }
 
-type UserFacingPGError struct {
-	PGError
+type SimplePGError struct {
+	pgError
 }
 
-func (err *UserFacingPGError) Error() string {
+func (err *SimplePGError) Error() string {
 	return "pq: " + err.Get('M')
 }
 
@@ -68,9 +73,9 @@ func errRecover(err *error, propagatePGError bool) {
 		// Do nothing
 	case runtime.Error:
 		panic(v)
-	case *PGError:
+	case *pgError:
 		if propagatePGError {
-			*err = &UserFacingPGError{*v}
+			*err = &SimplePGError{*v}
 		} else if v.Fatal() {
 			*err = driver.ErrBadConn
 		} else {

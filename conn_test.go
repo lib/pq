@@ -254,7 +254,7 @@ func TestPGError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 
-	if err,ok := err.(*PGError); !ok {
+	if err,ok := err.(PGError); !ok {
 		t.Fatalf("expected a PGError, got: %v", err)
 	}
 }
@@ -273,7 +273,7 @@ func TestBadConn(t *testing.T) {
 
 	func() {
 		defer errRecover(&err, false)
-		e := &PGError{c: make(map[byte]string)}
+		e := &pgError{c: make(map[byte]string)}
 		e.c['S'] = Efatal
 		panic(e)
 	}()
@@ -289,7 +289,7 @@ func TestErrorOnExec(t *testing.T) {
 
 	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
 	_, err := db.Exec(sql)
-	_, ok := err.(*PGError)
+	_, ok := err.(PGError)
 	if !ok {
 		t.Fatalf("expected PGError, was: %#v", err)
 	}
@@ -315,7 +315,7 @@ func TestErrorOnQuery(t *testing.T) {
 		t.Fatal("unexpected row, want error")
 	}
 
-	_, ok := r.Err().(*PGError)
+	_, ok := r.Err().(PGError)
 	if !ok {
 		t.Fatalf("expected PGError, was: %#v", r.Err())
 	}
