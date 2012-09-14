@@ -263,7 +263,7 @@ func TestBadConn(t *testing.T) {
 	var err error
 
 	func() {
-		defer errRecover(&err)
+		defer errRecover(&err, false)
 		panic(io.EOF)
 	}()
 
@@ -272,7 +272,7 @@ func TestBadConn(t *testing.T) {
 	}
 
 	func() {
-		defer errRecover(&err)
+		defer errRecover(&err, false)
 		e := &PGError{c: make(map[byte]string)}
 		e.c['S'] = Efatal
 		panic(e)

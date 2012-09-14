@@ -53,7 +53,15 @@ func errorf(s string, args ...interface{}) {
 	panic(Error(fmt.Errorf("pq: %s", fmt.Sprintf(s, args...))))
 }
 
-func errRecover(err *error) {
+type UserFacingPGError struct {
+	PGError
+}
+
+func (err *UserFacingPGError) Error() string {
+	return "pq: " + err.Get('M')
+}
+
+func errRecover(err *error, propagatePGError bool) {
 	e := recover()
 	switch v := e.(type) {
 	case nil:
@@ -61,7 +69,9 @@ func errRecover(err *error) {
 	case runtime.Error:
 		panic(v)
 	case *PGError:
-		if v.Fatal() {
+		if propagatePGError {
+			*err = &UserFacingPGError{*v}
+		} else if v.Fatal() {
 			*err = driver.ErrBadConn
 		} else {
 			*err = v
