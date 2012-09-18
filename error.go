@@ -66,7 +66,16 @@ func (err *SimplePGError) Error() string {
 	return "pq: " + err.Get('M')
 }
 
-func errRecover(err *error, propagatePGError bool) {
+func errRecoverPropagate(err *error) {
+	e := recover()
+	if e, ok := e.(*pgError); ok {
+		*err = &SimplePGError{*e}
+	} else {
+		errRecover(err)
+	}
+}
+
+func errRecover(err *error) {
 	e := recover()
 	switch v := e.(type) {
 	case nil:
@@ -74,9 +83,7 @@ func errRecover(err *error, propagatePGError bool) {
 	case runtime.Error:
 		panic(v)
 	case *pgError:
-		if propagatePGError {
-			*err = &SimplePGError{*v}
-		} else if v.Fatal() {
+		if v.Fatal() {
 			*err = driver.ErrBadConn
 		} else {
 			*err = v

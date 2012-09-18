@@ -38,7 +38,7 @@ type conn struct {
 }
 
 func Open(name string) (_ driver.Conn, err error) {
-	defer errRecover(&err, true)
+	defer errRecoverPropagate(&err)
 
 	o := make(Values)
 
@@ -138,7 +138,7 @@ func (cn *conn) gname() string {
 }
 
 func (cn *conn) simpleQuery(q string) (res driver.Result, err error) {
-	defer errRecover(&err, false)
+	defer errRecover(&err)
 
 	b := newWriteBuf('Q')
 	b.string(q)
@@ -166,7 +166,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Result, err error) {
 }
 
 func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
-	defer errRecover(&err, false)
+	defer errRecover(&err)
 
 	st := &stmt{cn: cn, name: stmtName, query: q}
 
@@ -218,7 +218,7 @@ func (cn *conn) Prepare(q string) (driver.Stmt, error) {
 }
 
 func (cn *conn) Close() (err error) {
-	defer errRecover(&err, false)
+	defer errRecover(&err)
 	cn.send(newWriteBuf('X'))
 
 	return cn.c.Close()
@@ -226,7 +226,7 @@ func (cn *conn) Close() (err error) {
 
 // Implement the optional "Execer" interface for one-shot queries
 func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err error) {
-	defer errRecover(&err, false)
+	defer errRecover(&err)
 
 	// Check to see if we can use the "simpleQuery" interface, which is
 	// *much* faster than going through prepare/exec
@@ -390,7 +390,7 @@ func (st *stmt) Close() (err error) {
 		return nil
 	}
 
-	defer errRecover(&err, false)
+	defer errRecover(&err)
 
 	w := newWriteBuf('C')
 	w.byte('S')
@@ -414,13 +414,13 @@ func (st *stmt) Close() (err error) {
 }
 
 func (st *stmt) Query(v []driver.Value) (_ driver.Rows, err error) {
-	defer errRecover(&err, false)
+	defer errRecover(&err)
 	st.exec(v)
 	return &rows{st: st}, nil
 }
 
 func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
-	defer errRecover(&err, false)
+	defer errRecover(&err)
 
 	if len(v) == 0 {
 		return st.cn.simpleQuery(st.query)
@@ -544,7 +544,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 		return io.EOF
 	}
 
-	defer errRecover(&err, false)
+	defer errRecover(&err)
 
 	for {
 		t, r := rs.st.cn.recv1()

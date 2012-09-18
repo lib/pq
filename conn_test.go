@@ -254,7 +254,7 @@ func TestPGError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 
-	if err,ok := err.(PGError); !ok {
+	if err, ok := err.(PGError); !ok {
 		t.Fatalf("expected a PGError, got: %v", err)
 	}
 }
@@ -263,7 +263,7 @@ func TestBadConn(t *testing.T) {
 	var err error
 
 	func() {
-		defer errRecover(&err, false)
+		defer errRecover(&err)
 		panic(io.EOF)
 	}()
 
@@ -272,7 +272,7 @@ func TestBadConn(t *testing.T) {
 	}
 
 	func() {
-		defer errRecover(&err, false)
+		defer errRecover(&err)
 		e := &pgError{c: make(map[byte]string)}
 		e.c['S'] = Efatal
 		panic(e)
