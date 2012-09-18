@@ -68,10 +68,18 @@ func (err *SimplePGError) Error() string {
 
 func errRecoverPropagate(err *error) {
 	e := recover()
-	if e, ok := e.(*pgError); ok {
-		*err = &SimplePGError{*e}
-	} else {
-		errRecover(err)
+	switch v := e.(type) {
+	case nil:
+		// Do nothing
+	case *pgError:
+		// Propagate SimplePGError on pgError
+		*err = &SimplePGError{*v}
+	default:
+		// Otherwise re-panic and handle in errRecover
+		defer func() {
+			defer errRecover(err)
+			panic(e)
+		}()
 	}
 }
 
