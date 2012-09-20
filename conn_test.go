@@ -254,7 +254,7 @@ func TestPGError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 
-	if err != driver.ErrBadConn {
+	if err, ok := err.(PGError); !ok {
 		t.Fatalf("expected a PGError, got: %v", err)
 	}
 }

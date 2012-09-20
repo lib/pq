@@ -66,6 +66,20 @@ func (err *SimplePGError) Error() string {
 	return "pq: " + err.Get('M')
 }
 
+func errRecoverWithPGReason(err *error) {
+	e := recover()
+	switch v := e.(type) {
+	case nil:
+		// Do nothing
+	case *pgError:
+		// Return a SimplePGError in place
+		*err = &SimplePGError{*v}
+	default:
+		// Otherwise re-panic
+		panic(e)
+	}
+}
+
 func errRecover(err *error) {
 	e := recover()
 	switch v := e.(type) {

@@ -39,6 +39,7 @@ type conn struct {
 
 func Open(name string) (_ driver.Conn, err error) {
 	defer errRecover(&err)
+	defer errRecoverWithPGReason(&err)
 
 	o := make(Values)
 
