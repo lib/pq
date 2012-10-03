@@ -441,3 +441,27 @@ func BenchmarkResultParsing(b *testing.B) {
 		res.Close()
 	}
 }
+
+func Test64BitErrorChecking(t *testing.T) {
+	defer func() {
+		if err := recover(); err != nil {
+			t.Fatal("panic due to 0xFFFFFFFF != -1 " +
+				"when int is 64 bits")
+		}
+	}()
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	r, err := db.Query(`SELECT *
+FROM (VALUES (0::integer, NULL::text), (1, 'test string')) AS t;`)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer r.Close()
+
+	for r.Next() {
+	}
+}
