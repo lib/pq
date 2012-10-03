@@ -416,3 +416,33 @@ func TestNullAfterNonNull(t *testing.T) {
 		t.Fatalf("expected n to 2, not %d", n.Int64)
 	}
 }
+
+func Test64BitErrorChecking(t *testing.T) {
+	defer func() {
+		if err := recover(); err != nil {
+			t.Fatal("panic due to 0xFFFFFFFF != -1 when int is 64 bits")
+		}
+	}()
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TEMP TABLE temp (id int, t TEXT)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec("INSERT INTO temp VALUES (0, NULL), (1, 'test string')")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := db.Query("SELECT * FROM temp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	for r.Next() {
+	}
+}
