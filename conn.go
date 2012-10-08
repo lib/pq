@@ -158,9 +158,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Result, err error) {
 			return
 		case 'E':
 			err = parseError(r)
-		case 'N':
-			// ignore
-		case 'T':
+		case 'T', 'N':
 			// ignore
 		default:
 			errorf("unknown response for simple query: %q", t)
@@ -190,7 +188,7 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 	for {
 		t, r := cn.recv1()
 		switch t {
-		case '1', '2':
+		case '1', '2', 'N':
 		case 't':
 			st.nparams = int(r.int16())
 		case 'T':
@@ -276,7 +274,7 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 		case 'E':
 			panic(parseError(r))
 		case 'N':
-			// TODO(bmizerany): log notices?
+			// ignore
 		default:
 			return
 		}
@@ -494,6 +492,8 @@ func (st *stmt) exec(v []driver.Value) {
 				panic(err)
 			}
 			return
+		case 'N':
+			// ignore
 		default:
 			errorf("unexpected bind response: %q", t)
 		}
@@ -555,7 +555,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 		switch t {
 		case 'E':
 			err = parseError(r)
-		case 'C', 'S':
+		case 'C', 'S', 'N':
 			continue
 		case 'Z':
 			rs.done = true
