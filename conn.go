@@ -19,7 +19,7 @@ import (
 
 var (
 	ErrSSLNotSupported = errors.New("pq: SSL is not enabled on the server")
-	ErrNotSupported    = errors.New("pq: this is postgres, a real database, this isn't a valid command")
+	ErrNotSupported    = errors.New("pq: invalid command")
 )
 
 type drv struct{}
