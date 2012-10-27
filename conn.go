@@ -358,6 +358,19 @@ func (cn *conn) auth(r *readBuf, o Values) {
 	switch code := r.int32(); code {
 	case 0:
 		// OK
+	case 3:
+		w := newWriteBuf('p')
+		w.string(o.Get("password"))
+		cn.send(w)
+
+		t, r := cn.recv()
+		if t != 'R' {
+			errorf("unexpected password response: %q", t)
+		}
+
+		if r.int32() != 0 {
+			errorf("unexpected authentication response: %q", t)
+		}
 	case 5:
 		s := string(r.next(4))
 		w := newWriteBuf('p')
