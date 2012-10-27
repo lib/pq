@@ -9,7 +9,7 @@ import (
 )
 
 func encode(x interface{}) []byte {
-	const timeFormat = "2006-01-02 15:04:05.0000-07"
+	const timeFormat = "2006-01-02 15:04:05.0000-07:00"
 
 	switch v := x.(type) {
 	case int64:
@@ -42,13 +42,13 @@ func decode(s []byte, typ int) interface{} {
 		}
 		return d
 	case t_timestamptz:
-		return mustParse("2006-01-02 15:04:05-07", s)
+		return mustParse("2006-01-02 15:04:05-07:00", s)
 	case t_timestamp:
 		return mustParse("2006-01-02 15:04:05", s)
 	case t_time:
 		return mustParse("15:04:05", s)
 	case t_timetz:
-		return mustParse("15:04:05-07", s)
+		return mustParse("15:04:05-07:00", s)
 	case t_date:
 		return mustParse("2006-01-02", s)
 	case t_bool:
