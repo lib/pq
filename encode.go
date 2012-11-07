@@ -9,8 +9,6 @@ import (
 )
 
 func encode(x interface{}) []byte {
-	const timeFormat = "2006-01-02 15:04:05.0000-07"
-
 	switch v := x.(type) {
 	case int64:
 		return []byte(fmt.Sprintf("%d", v))
@@ -23,7 +21,7 @@ func encode(x interface{}) []byte {
 	case bool:
 		return []byte(fmt.Sprintf("%t", v))
 	case time.Time:
-		return []byte(v.Format(timeFormat))
+		return []byte(v.Format(time.RFC3339Nano))
 	default:
 		errorf("encode: unknown type for %T", v)
 	}
