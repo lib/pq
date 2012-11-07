@@ -79,6 +79,11 @@ func mustParse(f string, s []byte) time.Time {
 	if str[len(str)-2] == '.' {
 		str += "0"
 	}
+
+	// check for a 30-minute-offset timezone
+	if str[len(str)-3] == ':' {
+		f += ":00"
+	}
 	t, err := time.Parse(f, str)
 	if err != nil {
 		errorf("decode: %s", err)
