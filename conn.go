@@ -53,6 +53,9 @@ func Open(name string) (_ driver.Conn, err error) {
 	o.Set("host", "localhost")
 	o.Set("port", "5432")
 
+        // Set the "lossless floating point" flag
+        o.Set("extra_float_digits", "3")
+
 	// Default the username, but ignore errors, because a user
 	// passed in via environment variable or connection string
 	// would be okay.  This can result in connections failing
