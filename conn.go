@@ -87,7 +87,7 @@ func Open(name string) (_ driver.Conn, err error) {
 	// * Explicitly passed connection information
 	o.Set("host", "localhost")
 	o.Set("port", "5432")
-
+	o.Set("extra_float_digits", "3")
 	for k, v := range parseEnviron(os.Environ()) {
 		o.Set(k, v)
 	}
