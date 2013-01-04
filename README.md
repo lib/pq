@@ -78,13 +78,16 @@ code still exists in here.
 
 * Andy Balholm (andybalholm)
 * Ben Berkert (benburkert)
+* Bjørn Madsen (aeons)
 * Blake Gentry (bgentry)
 * Brad Fitzpatrick (bradfitz)
 * Daniel Farina (fdr)
 * Everyone at The Go Team
 * Federico Romero (federomero)
 * Heroku (heroku)
+* John Gallagher (jgallagher)
 * Keith Rarick (kr)
+* Marc Brinkmann (mbr)
 * Mike Lewis (mikelikespie)
 * Ryan Smith (ryandotsmith)
 * Samuel Stauffer (samuel)
