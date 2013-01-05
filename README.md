@@ -86,6 +86,7 @@ code still exists in here.
 * Federico Romero (federomero)
 * Heroku (heroku)
 * John Gallagher (jgallagher)
+* Kamil Kisiel (kisielk)
 * Keith Rarick (kr)
 * Marc Brinkmann (mbr)
 * Martin Olsen (martinolsen)
