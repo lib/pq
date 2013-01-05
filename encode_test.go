@@ -88,3 +88,15 @@ func TestTimestampWithTimeZone(t *testing.T) {
 		}
 	}
 }
+
+func TestStringWithNul(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	hello0world := string("hello\x00world")
+	_, err := db.Query("SELECT $1::text", &hello0world)
+	if err == nil {
+		t.Fatal("Postgres accepts a string with nul in it; " +
+			"injection attacks may be plausible")
+	}
+}
