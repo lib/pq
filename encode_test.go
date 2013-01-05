@@ -89,6 +89,43 @@ func TestTimestampWithTimeZone(t *testing.T) {
 	}
 }
 
+func TestTimestampWithOutTimezone(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	r, err := db.Query("SELECT '2000-01-01T00:00:00'::timestamp")
+	if err != nil {
+		t.Fatalf("Could not run query: ", err)
+	}
+
+	n := r.Next()
+
+	if n != true {
+		t.Fatal("Expected at least one row")
+	}
+
+	var result time.Time
+	err = r.Scan(&result)
+	if err != nil {
+		t.Fatalf("Did not expect error scanning row: %v", err)
+	}
+
+	expected, err := time.Parse(time.RFC3339, "2000-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("Could not parse test time literal: %v", err)
+	}
+
+	if !result.Equal(expected) {
+		t.Fatalf("Expected time to match %v: got mismatch %v",
+			expected, result)
+	}
+
+	n = r.Next()
+	if n != false {
+		t.Fatal("Expected only one row")
+	}
+}
+
 func TestStringWithNul(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
