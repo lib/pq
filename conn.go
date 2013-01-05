@@ -395,8 +395,6 @@ func (cn *conn) auth(r *readBuf, o Values) {
 	}
 }
 
-type oid uint32
-
 type stmt struct {
 	cn        *conn
 	name      string
