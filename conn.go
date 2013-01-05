@@ -191,14 +191,19 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 		case '1', '2', 'N':
 		case 't':
 			st.nparams = int(r.int16())
+			st.paramTyps = make([]oid, st.nparams, st.nparams)
+
+			for i := 0; i < st.nparams; i += 1 {
+				st.paramTyps[i] = r.oid()
+			}
 		case 'T':
 			n := r.int16()
 			st.cols = make([]string, n)
-			st.ooid = make([]int, n)
+			st.rowTyps = make([]oid, n)
 			for i := range st.cols {
 				st.cols[i] = r.string()
 				r.next(6)
-				st.ooid[i] = r.int32()
+				st.rowTyps[i] = r.oid()
 				r.next(8)
 			}
 		case 'n':
@@ -390,14 +395,17 @@ func (cn *conn) auth(r *readBuf, o Values) {
 	}
 }
 
+type oid uint32
+
 type stmt struct {
-	cn      *conn
-	name    string
-	query   string
-	cols    []string
-	nparams int
-	ooid    []int
-	closed  bool
+	cn        *conn
+	name      string
+	query     string
+	cols      []string
+	nparams   int
+	rowTyps   []oid
+	paramTyps []oid
+	closed    bool
 }
 
 func (st *stmt) Close() (err error) {
@@ -470,11 +478,11 @@ func (st *stmt) exec(v []driver.Value) {
 	w.string(st.name)
 	w.int16(0)
 	w.int16(len(v))
-	for _, x := range v {
+	for i, x := range v {
 		if x == nil {
 			w.int32(-1)
 		} else {
-			b := encode(x)
+			b := encode(x, st.paramTyps[i])
 			w.int32(len(b))
 			w.bytes(b)
 		}
@@ -584,7 +592,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 					dest[i] = nil
 					continue
 				}
-				dest[i] = decode(r.next(l), rs.st.ooid[i])
+				dest[i] = decode(r.next(l), rs.st.rowTyps[i])
 			}
 			return
 		default:

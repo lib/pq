@@ -13,6 +13,12 @@ func (b *readBuf) int32() (n int) {
 	return
 }
 
+func (b *readBuf) oid() (n oid) {
+	n = oid(binary.BigEndian.Uint32(*b))
+	*b = (*b)[4:]
+	return
+}
+
 func (b *readBuf) int16() (n int) {
 	n = int(binary.BigEndian.Uint16(*b))
 	*b = (*b)[2:]

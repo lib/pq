@@ -100,3 +100,21 @@ func TestStringWithNul(t *testing.T) {
 			"injection attacks may be plausible")
 	}
 }
+
+func TestByteToText(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	b := []byte("hello world")
+	row := db.QueryRow("SELECT $1::text", b)
+
+	var result []byte
+	err := row.Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(result) != string(b) {
+		t.Fatalf("expected %v but got %v", b, result)
+	}
+}
