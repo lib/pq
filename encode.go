@@ -48,15 +48,15 @@ func decode(s []byte, typ oid) interface{} {
 		}
 		return d
 	case t_timestamptz:
-		return mustParse("2006-01-02 15:04:05.999999-07", typ, s)
+		return mustParse("2006-01-02 15:04:05-07", s)
 	case t_timestamp:
-		return mustParse("2006-01-02 15:04:05.999999", typ, s)
+		return mustParse("2006-01-02 15:04:05", s)
 	case t_time:
-		return mustParse("15:04:05", typ, s)
+		return mustParse("15:04:05", s)
 	case t_timetz:
-		return mustParse("15:04:05-07", typ, s)
+		return mustParse("15:04:05-07", s)
 	case t_date:
-		return mustParse("2006-01-02", typ, s)
+		return mustParse("2006-01-02", s)
 	case t_bool:
 		return s[0] == 't'
 	case t_int8, t_int2, t_int4:
@@ -80,7 +80,7 @@ func decode(s []byte, typ oid) interface{} {
 	return s
 }
 
-func mustParse(f string, typ oid, s []byte) time.Time {
+func mustParse(f string, s []byte) time.Time {
 	str := string(s)
 	// Special case until time.Parse bug is fixed:
 	// http://code.google.com/p/go/issues/detail?id=3487
@@ -89,8 +89,7 @@ func mustParse(f string, typ oid, s []byte) time.Time {
 	}
 
 	// check for a 30-minute-offset timezone
-	if (typ == t_timestamptz || typ == t_timetz) &&
-		str[len(str)-3] == ':' {
+	if str[len(str)-3] == ':' {
 		f += ":00"
 	}
 	t, err := time.Parse(f, str)
