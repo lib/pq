@@ -88,6 +88,7 @@ code still exists in here.
 * John Gallagher (jgallagher)
 * Keith Rarick (kr)
 * Marc Brinkmann (mbr)
+* Martin Olsen (martinolsen)
 * Mike Lewis (mikelikespie)
 * Ryan Smith (ryandotsmith)
 * Samuel Stauffer (samuel)
