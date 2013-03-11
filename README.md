@@ -2,11 +2,11 @@
 
 ## Install
 
-	go get github.com/bmizerany/pq
+	go get github.com/lib/pq
 
 ## Docs
 
-<http://go.pkgdoc.org/github.com/bmizerany/pq>
+<http://go.pkgdoc.org/github.com/lib/pq>
 
 ## Use
 
