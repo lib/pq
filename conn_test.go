@@ -465,3 +465,38 @@ FROM (VALUES (0::integer, NULL::text), (1, 'test string')) AS t;`)
 	for r.Next() {
 	}
 }
+
+// Open transaction, issue INSERT query inside transaction, rollback
+// transaction, issue SELECT query to same db used to create the tx.  No rows
+// should be returned.
+func TestRollback(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TEMP TABLE temp (a int)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlInsert := "INSERT INTO temp VALUES (1)"
+	sqlSelect := "SELECT * FROM temp"
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tx.Query(sqlInsert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = tx.Rollback()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := db.Query(sqlSelect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Next() returns false if query returned no rows.
+	if r.Next() {
+		t.Fatal("Transaction rollback failed")
+	}
+}
