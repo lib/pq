@@ -13,8 +13,8 @@ func (b *readBuf) int32() (n int) {
 	return
 }
 
-func (b *readBuf) oid() (n oid) {
-	n = oid(binary.BigEndian.Uint32(*b))
+func (b *readBuf) oid() (n Oid) {
+	n = Oid(binary.BigEndian.Uint32(*b))
 	*b = (*b)[4:]
 	return
 }

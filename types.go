@@ -1,9 +1,9 @@
 package pq
 
-type oid uint32
+type Oid uint32
 
 const (
-	t_bool                                  oid = 16
+	t_bool                                  Oid = 16
 	t_bytea                                     = 17
 	t_char                                      = 18
 	t_name                                      = 19
