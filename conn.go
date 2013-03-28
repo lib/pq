@@ -191,7 +191,7 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 		case '1', '2', 'N':
 		case 't':
 			st.nparams = int(r.int16())
-			st.paramTyps = make([]oid, st.nparams, st.nparams)
+			st.paramTyps = make([]Oid, st.nparams, st.nparams)
 
 			for i := 0; i < st.nparams; i += 1 {
 				st.paramTyps[i] = r.oid()
@@ -199,7 +199,7 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 		case 'T':
 			n := r.int16()
 			st.cols = make([]string, n)
-			st.rowTyps = make([]oid, n)
+			st.rowTyps = make([]Oid, n)
 			for i := range st.cols {
 				st.cols[i] = r.string()
 				r.next(6)
@@ -404,8 +404,8 @@ type stmt struct {
 	query     string
 	cols      []string
 	nparams   int
-	rowTyps   []oid
-	paramTyps []oid
+	rowTyps   []Oid
+	paramTyps []Oid
 	closed    bool
 }
 

@@ -8,20 +8,20 @@ import (
 	"time"
 )
 
-func encode(x interface{}, pgtypoid oid) []byte {
+func encode(x interface{}, pgtypOid Oid) []byte {
 	switch v := x.(type) {
 	case int64:
 		return []byte(fmt.Sprintf("%d", v))
 	case float32, float64:
 		return []byte(fmt.Sprintf("%f", v))
 	case []byte:
-		if pgtypoid == t_bytea {
+		if pgtypOid == T_bytea {
 			return []byte(fmt.Sprintf("\\x%x", v))
 		}
 
 		return v
 	case string:
-		if pgtypoid == t_bytea {
+		if pgtypOid == T_bytea {
 			return []byte(fmt.Sprintf("\\x%x", v))
 		}
 
@@ -37,9 +37,9 @@ func encode(x interface{}, pgtypoid oid) []byte {
 	panic("not reached")
 }
 
-func decode(s []byte, typ oid) interface{} {
+func decode(s []byte, typ Oid) interface{} {
 	switch typ {
-	case t_bytea:
+	case T_bytea:
 		s = s[2:] // trim off "\\x"
 		d := make([]byte, hex.DecodedLen(len(s)))
 		_, err := hex.Decode(d, s)
@@ -47,27 +47,27 @@ func decode(s []byte, typ oid) interface{} {
 			errorf("%s", err)
 		}
 		return d
-	case t_timestamptz:
+	case T_timestamptz:
 		return mustParse("2006-01-02 15:04:05-07", typ, s)
-	case t_timestamp:
+	case T_timestamp:
 		return mustParse("2006-01-02 15:04:05", typ, s)
-	case t_time:
+	case T_time:
 		return mustParse("15:04:05", typ, s)
-	case t_timetz:
+	case T_timetz:
 		return mustParse("15:04:05-07", typ, s)
-	case t_date:
+	case T_date:
 		return mustParse("2006-01-02", typ, s)
-	case t_bool:
+	case T_bool:
 		return s[0] == 't'
-	case t_int8, t_int2, t_int4:
+	case T_int8, T_int2, T_int4:
 		i, err := strconv.ParseInt(string(s), 10, 64)
 		if err != nil {
 			errorf("%s", err)
 		}
 		return i
-	case t_float4, t_float8:
+	case T_float4, T_float8:
 		bits := 64
-		if typ == t_float4 {
+		if typ == T_float4 {
 			bits = 32
 		}
 		f, err := strconv.ParseFloat(string(s), bits)
@@ -80,7 +80,7 @@ func decode(s []byte, typ oid) interface{} {
 	return s
 }
 
-func mustParse(f string, typ oid, s []byte) time.Time {
+func mustParse(f string, typ Oid, s []byte) time.Time {
 	str := string(s)
 
 	// Special case until time.Parse bug is fixed:
@@ -90,7 +90,7 @@ func mustParse(f string, typ oid, s []byte) time.Time {
 	}
 
 	// check for a 30-minute-offset timezone
-	if (typ == t_timestamptz || typ == t_timetz) &&
+	if (typ == T_timestamptz || typ == T_timetz) &&
 		str[len(str)-3] == ':' {
 		f += ":00"
 	}
