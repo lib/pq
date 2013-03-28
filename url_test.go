@@ -36,7 +36,8 @@ func TestInvalidProtocolParseURL(t *testing.T) {
 	default:
 		msg := "invalid connection protocol: http"
 		if err.Error() != msg {
-			t.Fatal("Unexpected error message:\n+ %s\n- %s", err.Error(), msg)
+			t.Fatalf("Unexpected error message:\n+ %s\n- %s",
+				err.Error(), msg)
 		}
 	}
 }
