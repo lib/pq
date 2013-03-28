@@ -212,9 +212,8 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 			return st, err
 		case 'E':
 			err = parseError(r)
-		case 'C': // command complete
-			// Do we need to do anything else, perhaps depending upon the
-			// command tag?
+		case 'C':
+			// command complete
 			return st, err
 		default:
 			errorf("unexpected describe rows response: %q", t)
