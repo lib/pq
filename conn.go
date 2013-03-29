@@ -9,12 +9,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/lib/pq/oid"
 	"io"
 	"net"
 	"os"
 	"os/user"
 	"path"
-	"pq/oid"
 	"strconv"
 	"strings"
 )
