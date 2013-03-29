@@ -4,24 +4,25 @@ import (
 	"database/sql/driver"
 	"encoding/hex"
 	"fmt"
+	"pq/oid"
 	"strconv"
 	"time"
 )
 
-func encode(x interface{}, pgtypOid Oid) []byte {
+func encode(x interface{}, pgtypOid oid.Oid) []byte {
 	switch v := x.(type) {
 	case int64:
 		return []byte(fmt.Sprintf("%d", v))
 	case float32, float64:
 		return []byte(fmt.Sprintf("%f", v))
 	case []byte:
-		if pgtypOid == T_bytea {
+		if pgtypOid == oid.T_bytea {
 			return []byte(fmt.Sprintf("\\x%x", v))
 		}
 
 		return v
 	case string:
-		if pgtypOid == T_bytea {
+		if pgtypOid == oid.T_bytea {
 			return []byte(fmt.Sprintf("\\x%x", v))
 		}
 
@@ -37,9 +38,9 @@ func encode(x interface{}, pgtypOid Oid) []byte {
 	panic("not reached")
 }
 
-func decode(s []byte, typ Oid) interface{} {
+func decode(s []byte, typ oid.Oid) interface{} {
 	switch typ {
-	case T_bytea:
+	case oid.T_bytea:
 		s = s[2:] // trim off "\\x"
 		d := make([]byte, hex.DecodedLen(len(s)))
 		_, err := hex.Decode(d, s)
@@ -47,27 +48,27 @@ func decode(s []byte, typ Oid) interface{} {
 			errorf("%s", err)
 		}
 		return d
-	case T_timestamptz:
+	case oid.T_timestamptz:
 		return mustParse("2006-01-02 15:04:05-07", typ, s)
-	case T_timestamp:
+	case oid.T_timestamp:
 		return mustParse("2006-01-02 15:04:05", typ, s)
-	case T_time:
+	case oid.T_time:
 		return mustParse("15:04:05", typ, s)
-	case T_timetz:
+	case oid.T_timetz:
 		return mustParse("15:04:05-07", typ, s)
-	case T_date:
+	case oid.T_date:
 		return mustParse("2006-01-02", typ, s)
-	case T_bool:
+	case oid.T_bool:
 		return s[0] == 't'
-	case T_int8, T_int2, T_int4:
+	case oid.T_int8, oid.T_int2, oid.T_int4:
 		i, err := strconv.ParseInt(string(s), 10, 64)
 		if err != nil {
 			errorf("%s", err)
 		}
 		return i
-	case T_float4, T_float8:
+	case oid.T_float4, oid.T_float8:
 		bits := 64
-		if typ == T_float4 {
+		if typ == oid.T_float4 {
 			bits = 32
 		}
 		f, err := strconv.ParseFloat(string(s), bits)
@@ -80,7 +81,7 @@ func decode(s []byte, typ Oid) interface{} {
 	return s
 }
 
-func mustParse(f string, typ Oid, s []byte) time.Time {
+func mustParse(f string, typ oid.Oid, s []byte) time.Time {
 	str := string(s)
 
 	// Special case until time.Parse bug is fixed:
@@ -90,7 +91,7 @@ func mustParse(f string, typ Oid, s []byte) time.Time {
 	}
 
 	// check for a 30-minute-offset timezone
-	if (typ == T_timestamptz || typ == T_timetz) &&
+	if (typ == oid.T_timestamptz || typ == oid.T_timetz) &&
 		str[len(str)-3] == ':' {
 		f += ":00"
 	}
