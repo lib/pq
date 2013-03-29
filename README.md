@@ -85,6 +85,8 @@ code still exists in here.
 * Everyone at The Go Team
 * Federico Romero (federomero)
 * Heroku (heroku)
+* Jason McVetta (jmcvetta)
+* Joakim Sernbrant (serbaut)
 * John Gallagher (jgallagher)
 * Kamil Kisiel (kisielk)
 * Keith Rarick (kr)
