@@ -93,7 +93,13 @@ func mustParse(f string, typ oid.Oid, s []byte) time.Time {
 	// check for a 30-minute-offset timezone
 	if (typ == oid.T_timestamptz || typ == oid.T_timetz) &&
 		str[len(str)-3] == ':' {
-		f += ":00"
+		f += ":04"
+
+		// check for a timezone before 1895 
+		// eg: (0001-01-01 00:34:08+00:34:08)
+		if len(str) > len(f) {
+			f += ":05"
+		}
 	}
 	t, err := time.Parse(f, str)
 	if err != nil {
