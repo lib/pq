@@ -1,4 +1,7 @@
 language: go
 
 script:
- - go test -v
+ - env PGUSER=postgres go test -v
+
+before_script:
+ - psql -c 'create database pqgotest;' -U postgres
