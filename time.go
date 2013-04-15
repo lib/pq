@@ -21,4 +21,3 @@ func (nt NullTime) Value() (driver.Value, error) {
 	return nt.Time, nil
 }
 
-
