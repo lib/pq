@@ -17,7 +17,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"runtime"
 )
 
 var (
@@ -60,18 +59,19 @@ func Open(name string) (_ driver.Conn, err error) {
 	// would be okay.  This can result in connections failing
 	// *sometimes* if the client relies on being able to determine
 	// the current username and there are intermittent problems.
-	if runtime.GOOS != "windows"{
-		u, err := user.Current()
-		if err == nil {
-			o.Set("user", u.Username)
-		}
-	}
 
 	for k, v := range parseEnviron(os.Environ()) {
 		o.Set(k, v)
 	}
 
 	parseOpts(name, o)
+
+	if o.Get("user") == "" {
+		u, err := user.Current()
+		if err == nil {
+			o.Set("user", u.Username)
+		}
+	}
 
 	c, err := net.Dial(network(o))
 	if err != nil {
