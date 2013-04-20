@@ -159,7 +159,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Result, err error) {
 			return
 		case 'E':
 			err = parseError(r)
-		case 'T', 'N', 'S':
+		case 'T', 'N', 'S', 'D':
 			// ignore
 		default:
 			errorf("unknown response for simple query: %q", t)
