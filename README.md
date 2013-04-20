@@ -90,6 +90,7 @@ code still exists in here.
 * John Gallagher (jgallagher)
 * Kamil Kisiel (kisielk)
 * Keith Rarick (kr)
+* Maciek Sakrejda (deafbybeheading)
 * Marc Brinkmann (mbr)
 * Martin Olsen (martinolsen)
 * Mike Lewis (mikelikespie)
