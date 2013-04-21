@@ -462,7 +462,7 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 		case 'Z':
 			// done
 			return
-		case 'S', 'N', 'D':
+		case 'T', 'N', 'S', 'D':
 			// Ignore
 		default:
 			errorf("unknown exec response: %q", t)
