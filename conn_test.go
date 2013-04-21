@@ -58,8 +58,25 @@ func TestExec(t *testing.T) {
 	}
 
 	if n, _ := r.RowsAffected(); n != 3 {
-		t.Fatalf("expected 3 row affected, not %d", n)
+		t.Fatalf("expected 3 rows affected, not %d", n)
 	}
+
+	r, err = db.Exec("SELECT g FROM generate_series(1, 2) g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := r.RowsAffected(); n != 2 {
+		t.Fatalf("expected 2 rows affected, not %d", n)
+	}
+
+	r, err = db.Exec("SELECT g FROM generate_series(1, $1) g", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := r.RowsAffected(); n != 3 {
+		t.Fatalf("expected 3 rows affected, not %d", n)
+	}
+
 }
 
 func TestStatment(t *testing.T) {
