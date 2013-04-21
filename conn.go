@@ -462,9 +462,7 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 		case 'Z':
 			// done
 			return
-		case 'D':
-			errorf("unexpected data row returned in Exec; check your query")
-		case 'S', 'N':
+		case 'S', 'N', 'D':
 			// Ignore
 		default:
 			errorf("unknown exec response: %q", t)
