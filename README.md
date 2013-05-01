@@ -6,7 +6,7 @@
 
 ## Docs
 
-<http://go.pkgdoc.org/github.com/lib/pq>
+<http://godoc.org/github.com/lib/pq>
 
 ## Use
 
