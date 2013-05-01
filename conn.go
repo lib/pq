@@ -1,3 +1,4 @@
+// Package pq is a pure Go Postgres driver for the database/sql package.
 package pq
 
 import (
@@ -392,7 +393,7 @@ func (cn *conn) auth(r *readBuf, o Values) {
 		}
 
 		if r.int32() != 0 {
-			errorf("unexpected authentication resoonse: %q", t)
+			errorf("unexpected authentication response: %q", t)
 		}
 	default:
 		errorf("unknown authentication response: %d", code)
