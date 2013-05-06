@@ -84,6 +84,7 @@ code still exists in here.
 * Daniel Farina (fdr)
 * Everyone at The Go Team
 * Federico Romero (federomero)
+* Gary Burd (garyburd)
 * Heroku (heroku)
 * Jason McVetta (jmcvetta)
 * Joakim Sernbrant (serbaut)
