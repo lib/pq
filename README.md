@@ -83,6 +83,7 @@ code still exists in here.
 * Brad Fitzpatrick (bradfitz)
 * Daniel Farina (fdr)
 * Everyone at The Go Team
+* Ewan Chou (coocood)
 * Federico Romero (federomero)
 * Gary Burd (garyburd)
 * Heroku (heroku)
