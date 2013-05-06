@@ -55,21 +55,23 @@ func Open(name string) (_ driver.Conn, err error) {
 	o.Set("host", "localhost")
 	o.Set("port", "5432")
 
-	// Default the username, but ignore errors, because a user
-	// passed in via environment variable or connection string
-	// would be okay.  This can result in connections failing
-	// *sometimes* if the client relies on being able to determine
-	// the current username and there are intermittent problems.
-	u, err := user.Current()
-	if err == nil {
-		o.Set("user", u.Username)
-	}
-
 	for k, v := range parseEnviron(os.Environ()) {
 		o.Set(k, v)
 	}
 
 	parseOpts(name, o)
+
+	// If a user is not provided by any other means, the last
+	// resort is to use the current operating system provided user
+	// name.
+	if o.Get("user") == "" {
+		u, err := user.Current()
+		if err != nil {
+			return nil, err
+		} else {
+			o.Set("user", u.Username)
+		}
+	}
 
 	c, err := net.Dial(network(o))
 	if err != nil {
