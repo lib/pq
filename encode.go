@@ -1,4 +1,5 @@
 package pq
+
 import "fmt"
 import "time"
 
@@ -23,11 +24,11 @@ func encode(x interface{}, pgtypoid oid) []byte {
 	case bool:
 		return []byte(fmt.Sprintf("%t", v))
 	case time.Time:
-		return []byte(v.Format(time.RFC3339Nano))
+		return []byte(v.Format("2006-01-02 15:04:05.999999999Z07:00"))
+		// return []byte(v.Format(time.RFC3339Nano))
 	default:
 		errorf("encode: unknown type for %T", v)
 	}
 
 	panic("not reached")
 }
-
