@@ -1,3 +1,4 @@
+// Package pq is a pure Go Postgres driver for the database/sql package.
 package pq
 
 import (
@@ -9,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/lib/pq/oid"
 	"io"
 	"net"
 	"os"
@@ -53,21 +55,23 @@ func Open(name string) (_ driver.Conn, err error) {
 	o.Set("host", "localhost")
 	o.Set("port", "5432")
 
-	// Default the username, but ignore errors, because a user
-	// passed in via environment variable or connection string
-	// would be okay.  This can result in connections failing
-	// *sometimes* if the client relies on being able to determine
-	// the current username and there are intermittent problems.
-	u, err := user.Current()
-	if err == nil {
-		o.Set("user", u.Username)
-	}
-
 	for k, v := range parseEnviron(os.Environ()) {
 		o.Set(k, v)
 	}
 
 	parseOpts(name, o)
+
+	// If a user is not provided by any other means, the last
+	// resort is to use the current operating system provided user
+	// name.
+	if o.Get("user") == "" {
+		u, err := user.Current()
+		if err != nil {
+			return nil, err
+		} else {
+			o.Set("user", u.Username)
+		}
+	}
 
 	c, err := net.Dial(network(o))
 	if err != nil {
@@ -158,7 +162,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Result, err error) {
 			return
 		case 'E':
 			err = parseError(r)
-		case 'T', 'N', 'S':
+		case 'T', 'N', 'S', 'D':
 			// ignore
 		default:
 			errorf("unknown response for simple query: %q", t)
@@ -191,7 +195,7 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 		case '1', '2', 'N':
 		case 't':
 			st.nparams = int(r.int16())
-			st.paramTyps = make([]oid, st.nparams, st.nparams)
+			st.paramTyps = make([]oid.Oid, st.nparams, st.nparams)
 
 			for i := 0; i < st.nparams; i += 1 {
 				st.paramTyps[i] = r.oid()
@@ -199,7 +203,7 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 		case 'T':
 			n := r.int16()
 			st.cols = make([]string, n)
-			st.rowTyps = make([]oid, n)
+			st.rowTyps = make([]oid.Oid, n)
 			for i := range st.cols {
 				st.cols[i] = r.string()
 				r.next(6)
@@ -212,6 +216,9 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 			return st, err
 		case 'E':
 			err = parseError(r)
+		case 'C':
+			// command complete
+			return st, err
 		default:
 			errorf("unexpected describe rows response: %q", t)
 		}
@@ -388,7 +395,7 @@ func (cn *conn) auth(r *readBuf, o Values) {
 		}
 
 		if r.int32() != 0 {
-			errorf("unexpected authentication resoonse: %q", t)
+			errorf("unexpected authentication response: %q", t)
 		}
 	default:
 		errorf("unknown authentication response: %d", code)
@@ -401,8 +408,8 @@ type stmt struct {
 	query     string
 	cols      []string
 	nparams   int
-	rowTyps   []oid
-	paramTyps []oid
+	rowTyps   []oid.Oid
+	paramTyps []oid.Oid
 	closed    bool
 }
 
@@ -458,9 +465,7 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 		case 'Z':
 			// done
 			return
-		case 'D':
-			errorf("unexpected data row returned in Exec; check your query")
-		case 'S', 'N':
+		case 'T', 'N', 'S', 'D':
 			// Ignore
 		default:
 			errorf("unknown exec response: %q", t)

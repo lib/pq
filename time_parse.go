@@ -1,7 +1,9 @@
 package pq
-import "time"
 
-func mustParse(f string, typ oid, s []byte) time.Time {
+import "time"
+import "github.com/lib/pq/oid"
+
+func mustParse(f string, typ oid.Oid, s []byte) time.Time {
 	str := string(s)
 
 	// Special case until time.Parse bug is fixed:
@@ -11,7 +13,7 @@ func mustParse(f string, typ oid, s []byte) time.Time {
 	}
 
 	// check for a 30-minute-offset timezone
-	if (typ == t_timestamptz || typ == t_timetz) &&
+	if (typ == oid.T_timestamptz || typ == oid.T_timetz) &&
 		str[len(str)-3] == ':' {
 		f += ":00"
 	}
@@ -21,5 +23,3 @@ func mustParse(f string, typ oid, s []byte) time.Time {
 	}
 	return t
 }
-
-

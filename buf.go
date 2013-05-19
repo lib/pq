@@ -3,6 +3,7 @@ package pq
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/lib/pq/oid"
 )
 
 type readBuf []byte
@@ -13,8 +14,8 @@ func (b *readBuf) int32() (n int) {
 	return
 }
 
-func (b *readBuf) oid() (n oid) {
-	n = oid(binary.BigEndian.Uint32(*b))
+func (b *readBuf) oid() (n oid.Oid) {
+	n = oid.Oid(binary.BigEndian.Uint32(*b))
 	*b = (*b)[4:]
 	return
 }

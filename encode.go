@@ -1,22 +1,25 @@
 package pq
 
-import "fmt"
-import "time"
+import (
+	"fmt"
+	"github.com/lib/pq/oid"
+	"time"
+)
 
-func encode(x interface{}, pgtypoid oid) []byte {
+func encode(x interface{}, pgtypOid oid.Oid) []byte {
 	switch v := x.(type) {
 	case int64:
 		return []byte(fmt.Sprintf("%d", v))
 	case float32, float64:
 		return []byte(fmt.Sprintf("%f", v))
 	case []byte:
-		if pgtypoid == t_bytea {
+		if pgtypOid == oid.T_bytea {
 			return []byte(fmt.Sprintf("\\x%x", v))
 		}
 
 		return v
 	case string:
-		if pgtypoid == t_bytea {
+		if pgtypOid == oid.T_bytea {
 			return []byte(fmt.Sprintf("\\x%x", v))
 		}
 

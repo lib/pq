@@ -96,7 +96,7 @@ func TestTimestampWithOutTimezone(t *testing.T) {
 	test := func(ts, pgts string) {
 		r, err := db.Query("SELECT $1::timestamp", pgts)
 		if err != nil {
-			t.Fatalf("Could not run query: ", err)
+			t.Fatalf("Could not run query: %v", err)
 		}
 
 		n := r.Next()

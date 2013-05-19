@@ -2,18 +2,18 @@
 
 ## Install
 
-	go get github.com/bmizerany/pq
+	go get github.com/lib/pq
 
 ## Docs
 
-<http://go.pkgdoc.org/github.com/bmizerany/pq>
+<http://godoc.org/github.com/lib/pq>
 
 ## Use
 
 	package main
 
 	import (
-		_ "github.com/bmizerany/pq"
+		_ "github.com/lib/pq"
 		"database/sql"
 	)
 
@@ -83,11 +83,16 @@ code still exists in here.
 * Brad Fitzpatrick (bradfitz)
 * Daniel Farina (fdr)
 * Everyone at The Go Team
+* Ewan Chou (coocood)
 * Federico Romero (federomero)
+* Gary Burd (garyburd)
 * Heroku (heroku)
+* Jason McVetta (jmcvetta)
+* Joakim Sernbrant (serbaut)
 * John Gallagher (jgallagher)
 * Kamil Kisiel (kisielk)
 * Keith Rarick (kr)
+* Maciek Sakrejda (deafbybeheading)
 * Marc Brinkmann (mbr)
 * Martin Olsen (martinolsen)
 * Mike Lewis (mikelikespie)
