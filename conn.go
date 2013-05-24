@@ -228,6 +228,10 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 }
 
 func (cn *conn) Prepare(q string) (driver.Stmt, error) {
+	if strings.HasPrefix(strings.ToUpper(q), "LISTEN ") {
+		return &notificationStmnt{cn, q}, nil
+	}
+
 	return cn.prepareTo(q, cn.gname())
 }
 
