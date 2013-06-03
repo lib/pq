@@ -14,7 +14,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/user"
 	"path"
 	"strconv"
 	"strings"
@@ -65,11 +64,11 @@ func Open(name string) (_ driver.Conn, err error) {
 	// resort is to use the current operating system provided user
 	// name.
 	if o.Get("user") == "" {
-		u, err := user.Current()
+		u, err := userCurrent()
 		if err != nil {
 			return nil, err
 		} else {
-			o.Set("user", u.Username)
+			o.Set("user", u)
 		}
 	}
 
