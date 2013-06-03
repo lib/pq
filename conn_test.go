@@ -517,3 +517,12 @@ func TestRollback(t *testing.T) {
 		t.Fatal("Transaction rollback failed")
 	}
 }
+
+func TestConnTrailingSpace(t *testing.T) {
+    o := make(Values)
+	expected := Values{"dbname": "hello", "user": "goodbye"}
+	parseOpts("dbname=hello user=goodbye ", o)
+	if !reflect.DeepEqual(expected, o) {
+		t.Fatalf("Expected: %#v Got: %#v", expected, o)
+	}
+}
