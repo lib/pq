@@ -10,7 +10,6 @@ func userCurrent() (string, error) {
 	u, err := user.Current()
 	if err != nil {
 		return "", err
-	} else {
-		return u.Username, nil
 	}
+	return u.Username, nil
 }
