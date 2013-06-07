@@ -78,6 +78,7 @@ code still exists in here.
 
 * Andy Balholm (andybalholm)
 * Ben Berkert (benburkert)
+* Bill Mill (llimllib)
 * Bjørn Madsen (aeons)
 * Blake Gentry (bgentry)
 * Brad Fitzpatrick (bradfitz)
