@@ -82,6 +82,7 @@ code still exists in here.
 * Bjørn Madsen (aeons)
 * Blake Gentry (bgentry)
 * Brad Fitzpatrick (bradfitz)
+* Chris Walsh (cwds)
 * Daniel Farina (fdr)
 * Everyone at The Go Team
 * Ewan Chou (coocood)
