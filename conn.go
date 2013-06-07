@@ -112,6 +112,8 @@ func parseOpts(name string, o Values) {
 		return
 	}
 
+	name = strings.TrimSpace(name)
+
 	ps := strings.Split(name, " ")
 	for _, p := range ps {
 		kv := strings.Split(p, "=")
