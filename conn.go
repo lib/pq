@@ -485,6 +485,9 @@ func (cn *conn) prepareToSimpleStmt(q, stmtName string) (_ *stmt, err error) {
 }
 
 func (cn *conn) Prepare(q string) (driver.Stmt, error) {
+	if len(q) >= 4 && strings.EqualFold(q[:4], "COPY") {
+		return cn.prepareCopyIn(q)
+	}
 	return cn.prepareTo(q, cn.gname())
 }
 
