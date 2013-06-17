@@ -271,3 +271,36 @@ func TestByteaOutputFormats(t *testing.T) {
 	testByteaOutputFormat("hex")
 	testByteaOutputFormat("escape")
 }
+
+func TestEncodeText(t *testing.T) {
+	if esc := escapeText("hallo\tescape"); string(esc) != "hallo\\tescape" {
+		t.Fatal(string(esc))
+	}
+	if esc := escapeText("hallo\\tescape\n"); string(esc) != "hallo\\\\tescape\\n" {
+		t.Fatal(string(esc))
+	}
+	if esc := escapeText("\n\r\t\f"); string(esc) != "\\n\\r\\t\f" {
+		t.Fatal(string(esc))
+	}
+
+}
+
+func BenchmarkEncodeText(b *testing.B) {
+	longString := ""
+	for i := 0; i < 100; i++ {
+		longString += "123456789\n"
+	}
+	for i := 0; i < b.N; i++ {
+		escapeText(longString)
+	}
+}
+
+func BenchmarkEncodeTextNoEscape(b *testing.B) {
+	longString := ""
+	for i := 0; i < 1000; i++ {
+		longString += "a"
+	}
+	for i := 0; i < b.N; i++ {
+		escapeText(longString)
+	}
+}

@@ -101,8 +101,25 @@ func encodeText(x interface{}) []byte {
 }
 
 func escapeText(text string) []byte {
-	result := make([]byte, 0, len(text)+8)
-	for _, c := range []byte(text) {
+	escapeNeeded := false
+	startPos := 0
+	var c byte
+
+	byteText := []byte(text)
+
+	for startPos, c = range byteText {
+		if c == '\\' || c == '\n' || c == '\r' || c == '\t' {
+			escapeNeeded = true
+			break
+		}
+	}
+	if !escapeNeeded {
+		return byteText
+	}
+
+	result := make([]byte, startPos, len(text)+8)
+	copy(result[:startPos], byteText[:startPos])
+	for _, c := range byteText[startPos:] {
 		switch c {
 		case '\\':
 			result = append(result, '\\', '\\')
