@@ -76,6 +76,49 @@ func decode(s []byte, typ oid.Oid) interface{} {
 	return s
 }
 
+// encodeText encodes item in text format as required by COPY
+func encodeText(x interface{}) []byte {
+	switch v := x.(type) {
+	case int64:
+		return []byte(fmt.Sprintf("%d", v))
+	case float32, float64:
+		return []byte(fmt.Sprintf("%f", v))
+	case []byte:
+		return []byte(fmt.Sprintf("\\\\x%x", v))
+	case string:
+		return escapeText(v)
+	case bool:
+		return []byte(fmt.Sprintf("%t", v))
+	case time.Time:
+		return []byte(v.Format(time.RFC3339Nano))
+	case nil:
+		return []byte("\\N")
+	default:
+		errorf("encode: unknown type for %T", v)
+	}
+
+	panic("not reached")
+}
+
+func escapeText(text string) []byte {
+	result := make([]byte, 0, len(text)+8)
+	for _, c := range []byte(text) {
+		switch c {
+		case '\\':
+			result = append(result, '\\', '\\')
+		case '\n':
+			result = append(result, '\\', 'n')
+		case '\r':
+			result = append(result, '\\', 'r')
+		case '\t':
+			result = append(result, '\\', 't')
+		default:
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
 func mustParse(f string, typ oid.Oid, s []byte) time.Time {
 	str := string(s)
 
