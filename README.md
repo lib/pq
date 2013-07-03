@@ -10,35 +10,32 @@
 
 ## Use
 
-	package main
+```go
+package main
 
-	import (
-		_ "github.com/lib/pq"
-		"database/sql"
-	)
+import (
+	_ "github.com/lib/pq"
+	"database/sql"
+)
 
-	func main() {
-		db, err := sql.Open("postgres", "user=pqgotest dbname=pqgotest sslmode=verify-full")
-		// ...
-	}
+func main() {
+	db, err := sql.Open("postgres", "user=pqgotest dbname=pqgotest sslmode=verify-full")
+	// ...
+}
+```
 
 **Connection String Parameters**
 
-These are a subset of the libpq connection parameters.  In addition, a
-number of the [environment
-variables](http://www.postgresql.org/docs/9.1/static/libpq-envars.html)
-supported by libpq are also supported.  Just like libpq, these have
-lower precedence than explicitly provided connection parameters.
+These are a subset of the libpq connection parameters.  In addition, a number of the [environment variables](http://www.postgresql.org/docs/9.1/static/libpq-envars.html) supported by libpq are also supported.  Just like libpq, these have lower precedence than explicitly provided connection parameters.
 
-See http://www.postgresql.org/docs/9.1/static/libpq-connect.html.
+See: http://www.postgresql.org/docs/9.1/static/libpq-connect.html
 
 * `dbname` - The name of the database to connect to
 * `user` - The user to sign in as
 * `password` - The user's password
 * `host` - The host to connect to. Values that start with `/` are for unix domain sockets. (default is `localhost`)
 * `port` - The port to bind to. (default is `5432`)
-* `sslmode` - Whether or not to use SSL (default is `require`, this is not the default for libpq)
-	Valid values are:
+* `sslmode` - Whether or not to use SSL (default is `require`, this is not the default for libpq). Valid values are:
 	* `disable` - No SSL
 	* `require` - Always SSL (skip verification)
 	* `verify-full` - Always SSL (require verification)
