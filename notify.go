@@ -3,91 +3,221 @@
 package pq
 
 import (
-	"database/sql/driver"
+	"io"
+	"log"
+	"sync"
+	"time"
 )
 
-type notification struct {
-	bePid   int
-	relname string
-	extra   string
+// Special bePid value issued on reconnection.
+const Reconnected int = -1
+
+// The minimum/initial back-off for reconnection.
+const MinReconnectDelay time.Duration = 3 * time.Second
+
+// The maximum back-off for reconnection.
+const MaxReconnectDelay time.Duration = 15 * time.Minute
+
+type Notification struct {
+	BePid   int
+	RelName string
+	Extra   string
 }
 
-func recvNotify(r *readBuf) notification {
+func recvNotification(r *readBuf) Notification {
 	bePid := r.int32()
 	relname := r.string()
 	extra := r.string()
 
-	return notification{bePid, relname, extra}
+	return Notification{bePid, relname, extra}
 }
 
-type notificationRows struct {
-	ns *notificationStmnt
+type message struct {
+	typ byte
+	buf *readBuf
 }
 
-func (rs *notificationRows) Columns() []string {
-	return []string{
-		"bePid",
-		"relname",
-		"extra",
-	}
+type Listener struct {
+	name      string
+	cn        *conn
+	lock      *sync.Mutex
+	channels  map[string]map[chan<- *Notification]bool
+	replyChan chan message
 }
 
-func (rs *notificationRows) Close() error {
-	return nil
-}
-
-func (rs *notificationRows) Next(dest []driver.Value) error {
-	for {
-		t, r := rs.ns.cn.recv1()
-		switch t {
-		case 'A':
-			n := recvNotify(r)
-			dest[0] = n.bePid
-			dest[1] = n.relname
-			dest[2] = n.extra
-			return nil
-		}
-	}
-
-	panic("not reached")
-}
-
-type notificationStmnt struct {
-	cn *conn
-	q  string
-}
-
-func (ns *notificationStmnt) Close() error {
-	// We know the query string starts with "LISTEN ".
-	_, err := ns.cn.Exec("UN"+ns.q, []driver.Value{})
-
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (ns *notificationStmnt) NumInput() int {
-	// PostgreSQL doesn't seem to support constructs like
-	// "LISTEN $1" anyway.
-	return 0
-}
-
-func (ns *notificationStmnt) Exec(args []driver.Value) (driver.Result, error) {
-	panic("unsupported")
-}
-
-func (ns *notificationStmnt) Query(args []driver.Value) (driver.Rows, error) {
-	if len(args) != 0 {
-		return nil, ErrNotSupported
-	}
-
-	_, err := ns.cn.Exec(ns.q, args)
+func NewListener(name string) (*Listener, error) {
+	cn, err := Open(name)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return &notificationRows{ns}, nil
+	l := &Listener{
+		name,
+		cn.(*conn),
+		new(sync.Mutex),
+		make(map[string]map[chan<- *Notification]bool),
+		make(chan message)}
+
+	go l.listen()
+
+	return l, nil
+}
+
+func (l *Listener) recv2() (byte, *readBuf, error) {
+	x := make([]byte, 5)
+	_, err := io.ReadFull(l.cn.buf, x)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	b := readBuf(x[1:])
+	y := make([]byte, b.int32()-4)
+	_, err = io.ReadFull(l.cn.buf, y)
+	if err != nil {
+		return x[0], nil, err
+	}
+
+	return x[0], (*readBuf)(&y), err
+}
+
+func (l *Listener) listen() {
+	for {
+		t, r, err := l.recv2()
+
+		if err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				log.Println("Reconnecting...")
+				l.cn = reconnect(l.name)
+
+				// Subscribe to notifications again.
+				for relname := range l.channels {
+					_, err := l.cn.simpleQuery("LISTEN " + relname)
+					if err != nil {
+						panic("LISTEN on reconnect failed for " + relname)
+					}
+				}
+
+				// Notify everyone that we have reconnected.
+				for relname, chans := range l.channels {
+					for ch := range chans {
+						ch <- &Notification{Reconnected, relname, ""}
+					}
+				}
+
+				continue
+			} else {
+				return
+			}
+		}
+
+		switch t {
+		case 'A':
+			n := recvNotification(r)
+			l.dispatch(&n)
+		default:
+			l.replyChan <- message{t, r}
+		}
+	}
+}
+
+func reconnect(name string) *conn {
+	delay := MinReconnectDelay
+
+	for {
+		cn, err := Open(name)
+
+		if err == nil {
+			return cn.(*conn)
+		}
+
+		time.Sleep(delay)
+		delay *= 2
+
+		if delay > MaxReconnectDelay {
+			delay = MaxReconnectDelay
+		}
+	}
+}
+
+func (l *Listener) dispatch(n *Notification) {
+	data, ok := l.channels[n.RelName]
+
+	if ok {
+		for ch := range data {
+			ch <- n
+		}
+	}
+}
+
+func (l *Listener) Close() error {
+	return l.cn.Close()
+}
+
+func (l *Listener) Listen(relname string, c chan<- *Notification) error {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+
+	data, ok := l.channels[relname]
+
+	if !ok {
+		data = make(map[chan<- *Notification]bool, 1)
+		l.channels[relname] = data
+	}
+
+	data[c] = true
+
+	if len(data) == 1 {
+		return l.simpleQuery2("LISTEN " + relname)
+	}
+
+	return nil
+}
+
+func (l *Listener) simpleQuery2(q string) (err error) {
+	defer errRecover(&err)
+
+	b := newWriteBuf('Q')
+	b.string(q)
+	l.cn.send(b)
+
+	for {
+		m := <-l.replyChan
+		t, r := m.typ, m.buf
+		switch t {
+		case 'C':
+			// ignore
+		case 'Z':
+			// done
+			return
+		case 'E':
+			err = parseError(r)
+		case 'T', 'N', 'S', 'D':
+			// ignore
+		default:
+			errorf("unknown response for simple query: %q", t)
+		}
+	}
+	panic("not reached")
+}
+
+func (l *Listener) Unlisten(relname string, c chan<- *Notification) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+
+	data, ok := l.channels[relname]
+
+	if !ok {
+		return
+	}
+
+	delete(data, c)
+
+	if len(data) == 0 {
+		err := l.simpleQuery2("UNLISTEN " + relname)
+
+		if err != nil {
+			panic("UNLISTEN " + relname + " failed")
+		}
+	}
 }

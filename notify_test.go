@@ -1,98 +1,81 @@
 package pq
 
 import (
-	"database/sql"
 	"testing"
 )
 
-func waitForSingleEvent(db *sql.DB, t *testing.T, doneChan chan error) (string, string) {
-	var err error
-
-	defer func() { doneChan <- err }()
-
-	rows, err := db.Query("LISTEN notify_test")
+func TestNewListener(t *testing.T) {
+	l, err := NewListener("dbname=pqgotest sslmode=disable")
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	defer rows.Close()
-
-	doneChan <- nil
-
-	if !rows.Next() {
-		t.Fatal("failed")
-	}
-
-	var bePid int
-	var relname string
-	var extra string
-
-	err = rows.Scan(&bePid, &relname, &extra)
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return relname, extra
+	defer l.Close()
 }
 
 func TestListen(t *testing.T) {
-	db := openTestConn(t)
-	defer db.Close()
+	channel := make(chan *Notification)
 
-	doneChan := make(chan error)
-
-	go func() {
-		relname, extra := waitForSingleEvent(db, t, doneChan)
-
-		if relname != "notify_test" {
-			t.Fatal("wrong relname", relname)
-		}
-
-		if extra != "" {
-			t.Fatal("wrong extra", extra)
-		}
-	}()
-
-	// Wait for LISTEN to happen.
-	<-doneChan
-
-	_, err := db.Exec("NOTIFY notify_test")
+	l, err := NewListener("dbname=pqgotest sslmode=disable")
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	<-doneChan
+	defer l.Close()
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	err = l.Listen("notify_test", channel)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec("NOTIFY notify_test")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	n := <-channel
+
+	if n.relname != "notify_test" {
+		t.Errorf("Notification relname invalid: %v", n.relname)
+	}
 }
 
 func TestNotifyExtra(t *testing.T) {
-	db := openTestConn(t)
-	defer db.Close()
+	channel := make(chan *Notification)
 
-	doneChan := make(chan error)
-
-	go func() {
-		relname, extra := waitForSingleEvent(db, t, doneChan)
-
-		if relname != "notify_test" {
-			t.Fatal("wrong relname", relname)
-		}
-
-		if extra != "something" {
-			t.Fatal("wrong extra", extra)
-		}
-	}()
-
-	// Wait for LISTEN to happen.
-	<-doneChan
-
-	_, err := db.Exec("NOTIFY notify_test, 'something'")
+	l, err := NewListener("dbname=pqgotest sslmode=disable")
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	<-doneChan
+	defer l.Close()
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	err = l.Listen("notify_test", channel)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec("NOTIFY notify_test, 'something'")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	n := <-channel
+
+	if n.extra != "something" {
+		t.Errorf("Notification extra invalid: %v", n.extra)
+	}
 }
