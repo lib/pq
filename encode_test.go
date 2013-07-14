@@ -9,7 +9,7 @@ import (
 func TestScanTimestamp(t *testing.T) {
 	var nt NullTime
 	tn := time.Now()
-	(&nt).Scan(tn)
+	nt.Scan(tn)
 	if !nt.Valid {
 		t.Errorf("Expected Valid=false")
 	}
@@ -20,7 +20,7 @@ func TestScanTimestamp(t *testing.T) {
 
 func TestScanNilTimestamp(t *testing.T) {
 	var nt NullTime
-	(&nt).Scan(nil)
+	nt.Scan(nil)
 	if nt.Valid {
 		t.Errorf("Expected Valid=false")
 	}

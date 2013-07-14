@@ -102,8 +102,7 @@ func (vs Values) Set(k, v string) {
 }
 
 func (vs Values) Get(k string) (v string) {
-	v, _ = vs[k]
-	return
+	return vs[k]
 }
 
 func parseOpts(name string, o Values) {
@@ -198,7 +197,7 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 			st.nparams = int(r.int16())
 			st.paramTyps = make([]oid.Oid, st.nparams, st.nparams)
 
-			for i := 0; i < st.nparams; i += 1 {
+			for i := range st.paramTyps {
 				st.paramTyps[i] = r.oid()
 			}
 		case 'T':
@@ -590,7 +589,10 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 			return io.EOF
 		case 'D':
 			n := r.int16()
-			for i := 0; i < len(dest) && i < n; i++ {
+			if n < len(dest) {
+				dest = dest[:n]
+			}
+			for i := range dest {
 				l := r.int32()
 				if l == -1 {
 					dest[i] = nil
