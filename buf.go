@@ -48,12 +48,6 @@ func (b *readBuf) byte() byte {
 
 type writeBuf []byte
 
-func newWriteBuf(c byte) *writeBuf {
-	b := make(writeBuf, 5)
-	b[0] = c
-	return &b
-}
-
 func (b *writeBuf) int32(n int) {
 	x := make([]byte, 4)
 	binary.BigEndian.PutUint32(x, uint32(n))
