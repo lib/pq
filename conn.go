@@ -528,20 +528,10 @@ func (st *stmt) NumInput() int {
 	return st.nparams
 }
 
-type result int64
-
-func (i result) RowsAffected() (int64, error) {
-	return int64(i), nil
-}
-
-func (i result) LastInsertId() (int64, error) {
-	return 0, ErrNotSupported
-}
-
 func parseComplete(s string) driver.Result {
 	parts := strings.Split(s, " ")
 	n, _ := strconv.ParseInt(parts[len(parts)-1], 10, 64)
-	return result(n)
+	return driver.RowsAffected(n)
 }
 
 type rows struct {
