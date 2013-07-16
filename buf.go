@@ -26,10 +26,8 @@ func (b *readBuf) int16() (n int) {
 	return
 }
 
-var stringTerm = []byte{0}
-
 func (b *readBuf) string() string {
-	i := bytes.Index(*b, stringTerm)
+	i := bytes.IndexByte(*b, 0)
 	if i < 0 {
 		errorf("invalid message format; expected string terminator")
 	}
