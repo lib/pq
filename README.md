@@ -58,6 +58,10 @@ Example:
 
 	PGHOST=/var/run/postgresql go test github.com/lib/pq
 
+Optionally, a benchmark suite can be run as part of the tests:
+
+	PGHOST=/var/run/postgresql go test -bench .
+
 ## Features
 
 * SSL
@@ -87,6 +91,7 @@ code still exists in here.
 * Chris Walsh (cwds)
 * Daniel Farina (fdr)
 * Everyone at The Go Team
+* Evan Shaw (edsrzf)
 * Ewan Chou (coocood)
 * Federico Romero (federomero)
 * Gary Burd (garyburd)
