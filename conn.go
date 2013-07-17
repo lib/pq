@@ -194,8 +194,8 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 		switch t {
 		case '1', '2', 'N':
 		case 't':
-			st.nparams = int(r.int16())
-			st.paramTyps = make([]oid.Oid, st.nparams, st.nparams)
+			nparams := int(r.int16())
+			st.paramTyps = make([]oid.Oid, nparams)
 
 			for i := range st.paramTyps {
 				st.paramTyps[i] = r.oid()
@@ -407,7 +407,6 @@ type stmt struct {
 	name      string
 	query     string
 	cols      []string
-	nparams   int
 	rowTyps   []oid.Oid
 	paramTyps []oid.Oid
 	closed    bool
@@ -525,7 +524,7 @@ func (st *stmt) exec(v []driver.Value) {
 }
 
 func (st *stmt) NumInput() int {
-	return st.nparams
+	return len(st.paramTyps)
 }
 
 func parseComplete(s string) driver.Result {
