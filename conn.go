@@ -3,6 +3,7 @@ package pq
 
 import (
 	"bufio"
+	"container/list"
 	"crypto/md5"
 	"crypto/tls"
 	"database/sql"
@@ -35,9 +36,10 @@ func init() {
 }
 
 type conn struct {
-	c     net.Conn
-	buf   *bufio.Reader
-	namei int
+	c             net.Conn
+	buf           *bufio.Reader
+	namei         int
+	singlerowmode bool
 }
 
 func Open(name string) (_ driver.Conn, err error) {
@@ -80,6 +82,9 @@ func Open(name string) (_ driver.Conn, err error) {
 	cn := &conn{c: c}
 	cn.ssl(o)
 	cn.buf = bufio.NewReader(cn.c)
+	if o.Get("singlerowmode") == "true" {
+		cn.singlerowmode = true
+	}
 	cn.startup(o)
 	return cn, nil
 }
@@ -445,7 +450,15 @@ func (st *stmt) Close() (err error) {
 func (st *stmt) Query(v []driver.Value) (_ driver.Rows, err error) {
 	defer errRecover(&err)
 	st.exec(v)
-	return &rows{st: st}, nil
+	r := &rows{st: st}
+	if st.cn.singlerowmode {
+		return r, nil
+	}
+
+	// fetch all rows
+	rc := &rowscomplete{}
+	err = rc.load(r)
+	return rc, err
 }
 
 func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
@@ -605,6 +618,66 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 	}
 
 	panic("not reached")
+}
+
+type rowscomplete struct {
+	rows    *list.List
+	current *list.Element
+	done    bool
+	cols    []string
+}
+
+func (rs *rowscomplete) load(r *rows) (err error) {
+	defer r.Close()
+
+	rs.rows = list.New()
+	rs.cols = r.st.cols
+
+	// fetch all records
+	for {
+		dest := make([]driver.Value, len(rs.cols))
+		if err = r.Next(dest); err != nil {
+			break
+		}
+		rs.rows.PushBack(dest)
+	}
+
+	if err == io.EOF {
+		return nil
+	}
+
+	return
+}
+
+func (rs *rowscomplete) Close() error {
+	return nil
+}
+
+func (rs *rowscomplete) Columns() []string {
+	return rs.cols
+}
+
+func (rs *rowscomplete) Next(dest []driver.Value) (err error) {
+	if rs.done {
+		return io.EOF
+	}
+
+	if rs.current == nil {
+		rs.current = rs.rows.Front()
+	} else {
+		rs.current = rs.current.Next()
+	}
+
+	if rs.current == nil {
+		rs.done = true
+		return io.EOF
+	}
+
+	for i, v := range rs.current.Value.([]driver.Value) {
+		dest[i] = v
+	}
+
+	return nil
 }
 
 func md5s(s string) string {
