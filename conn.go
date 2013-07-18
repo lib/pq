@@ -3,7 +3,6 @@ package pq
 
 import (
 	"bufio"
-	"container/list"
 	"crypto/md5"
 	"crypto/tls"
 	"database/sql"
@@ -621,8 +620,8 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 }
 
 type rowscomplete struct {
-	rows    *list.List
-	current *list.Element
+	rows    [][]driver.Value
+	current int
 	done    bool
 	cols    []string
 }
@@ -630,8 +629,9 @@ type rowscomplete struct {
 func (rs *rowscomplete) load(r *rows) (err error) {
 	defer r.Close()
 
-	rs.rows = list.New()
+	rs.rows = make([][]driver.Value, 0)
 	rs.cols = r.st.cols
+	rs.current = -1
 
 	// fetch all records
 	for {
@@ -639,7 +639,7 @@ func (rs *rowscomplete) load(r *rows) (err error) {
 		if err = r.Next(dest); err != nil {
 			break
 		}
-		rs.rows.PushBack(dest)
+		rs.rows = append(rs.rows, dest)
 	}
 
 	if err == io.EOF {
@@ -662,18 +662,13 @@ func (rs *rowscomplete) Next(dest []driver.Value) (err error) {
 		return io.EOF
 	}
 
-	if rs.current == nil {
-		rs.current = rs.rows.Front()
-	} else {
-		rs.current = rs.current.Next()
-	}
-
-	if rs.current == nil {
+	rs.current++
+	if rs.current > len(rs.rows)-1 {
 		rs.done = true
 		return io.EOF
 	}
 
-	for i, v := range rs.current.Value.([]driver.Value) {
+	for i, v := range rs.rows[rs.current] {
 		dest[i] = v
 	}
 
