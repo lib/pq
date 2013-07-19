@@ -38,8 +38,7 @@ func parseError(r *readBuf) *pgError {
 }
 
 func (err *pgError) Get(k byte) (v string) {
-	v, _ = err.c[k]
-	return
+	return err.c[k]
 }
 
 func (err *pgError) Fatal() bool {
