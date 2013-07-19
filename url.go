@@ -59,7 +59,7 @@ func ParseURL(url string) (string, error) {
 	}
 
 	q := u.Query()
-	for k, _ := range q {
+	for k := range q {
 		accrue(k, q.Get(k))
 	}
 
