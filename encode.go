@@ -84,7 +84,7 @@ func decode(s []byte, typ oid.Oid) interface{} {
 func mustParse(f string, typ oid.Oid, s []byte) time.Time {
 	str := string(s)
 	// 加入这条防止time.Time为空时写入的数据无法读取的错误
-	if str == "0001-01-01 08:26:44+08:26:44" {
+	if str[:10] == "0001-01-01" {
 		return time.Time{}
 	}
 	// Special case until time.Parse bug is fixed:
