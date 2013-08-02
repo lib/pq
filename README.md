@@ -56,7 +56,7 @@ variables.
 
 Example:
 
-	PGHOST=/var/run/postgresql go test pq
+	PGHOST=/var/run/postgresql go test github.com/lib/pq
 
 ## Features
 
