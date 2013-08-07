@@ -138,6 +138,8 @@ func reconnect(name string) *conn {
 			delay = MaxReconnectDelay
 		}
 	}
+
+	panic("not reached")
 }
 
 func (l *Listener) dispatch(n *Notification) {
