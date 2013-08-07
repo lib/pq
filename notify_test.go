@@ -42,8 +42,8 @@ func TestListen(t *testing.T) {
 
 	n := <-channel
 
-	if n.relname != "notify_test" {
-		t.Errorf("Notification relname invalid: %v", n.relname)
+	if n.RelName != "notify_test" {
+		t.Errorf("Notification RelName invalid: %v", n.RelName)
 	}
 }
 
@@ -75,7 +75,7 @@ func TestNotifyExtra(t *testing.T) {
 
 	n := <-channel
 
-	if n.extra != "something" {
-		t.Errorf("Notification extra invalid: %v", n.extra)
+	if n.Extra != "something" {
+		t.Errorf("Notification extra invalid: %v", n.Extra)
 	}
 }
