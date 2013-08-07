@@ -1,34 +1,47 @@
 package pq
 
 import (
+	"os"
 	"testing"
 )
 
-func TestNewListener(t *testing.T) {
-	l, err := NewListener("dbname=pqgotest sslmode=disable")
+func newTestListener(t *testing.T) *Listener {
+	datname := os.Getenv("PGDATABASE")
+	sslmode := os.Getenv("PGSSLMODE")
+
+	if datname == "" {
+		os.Setenv("PGDATABASE", "pqgotest")
+	}
+
+	if sslmode == "" {
+		os.Setenv("PGSSLMODE", "disable")
+	}
+
+	l, err := NewListener("")
 
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	return l
+}
+
+func TestNewListener(t *testing.T) {
+	l := newTestListener(t)
 
 	defer l.Close()
 }
 
 func TestListen(t *testing.T) {
 	channel := make(chan *Notification)
-
-	l, err := NewListener("dbname=pqgotest sslmode=disable")
-
-	if err != nil {
-		t.Fatal(err)
-	}
+	l := newTestListener(t)
 
 	defer l.Close()
 
 	db := openTestConn(t)
 	defer db.Close()
 
-	err = l.Listen("notify_test", channel)
+	err := l.Listen("notify_test", channel)
 
 	if err != nil {
 		t.Fatal(err)
@@ -49,19 +62,14 @@ func TestListen(t *testing.T) {
 
 func TestNotifyExtra(t *testing.T) {
 	channel := make(chan *Notification)
-
-	l, err := NewListener("dbname=pqgotest sslmode=disable")
-
-	if err != nil {
-		t.Fatal(err)
-	}
+	l := newTestListener(t)
 
 	defer l.Close()
 
 	db := openTestConn(t)
 	defer db.Close()
 
-	err = l.Listen("notify_test", channel)
+	err := l.Listen("notify_test", channel)
 
 	if err != nil {
 		t.Fatal(err)
