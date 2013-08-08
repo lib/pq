@@ -221,5 +221,7 @@ func (l *Listener) Unlisten(relname string, c chan<- *Notification) {
 		if err != nil {
 			panic("UNLISTEN " + relname + " failed")
 		}
+
+		delete(l.channels, relname)
 	}
 }
