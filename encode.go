@@ -94,6 +94,12 @@ func mustParse(f string, typ oid.Oid, s []byte) time.Time {
 	if (typ == oid.T_timestamptz || typ == oid.T_timetz) &&
 		str[len(str)-3] == ':' {
 		f += ":00"
+		
+		// when a datetime str like 0001-01-01 08:05:57+08:05:57
+		// should remove end 3 byte for prevent parse error
+		if len(str) == 28 && str[len(str)-6] == ':' {
+			str = str[:25]
+		}
 	}
 	t, err := time.Parse(f, str)
 	if err != nil {
