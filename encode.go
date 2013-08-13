@@ -90,14 +90,34 @@ func mustParse(f string, typ oid.Oid, s []byte) time.Time {
 		str += "0"
 	}
 
-	// check for a 30-minute-offset timezone
+	tzOffsetSeconds := 0
+	// check for a sub-hour timezone
 	if (typ == oid.T_timestamptz || typ == oid.T_timetz) &&
 		str[len(str)-3] == ':' {
 		f += ":00"
+		// check for a sub-minute offset
+		if str[len(str)-6] == ':' {
+			// parse out seconds separately since time.Parse
+			// balks at sub-minute time zone offsets (even
+			// though time.Location supports them)
+			tzOffsetSeconds, err := strconv.Atoi(str[len(str)-2:])
+			if err != nil {
+				errorf("decode: could not strip second time zone offset: %s", err)
+			}
+			if str[len(str)-9] == '-' {
+				tzOffsetSeconds *= -1
+			}
+			// and then pretend the string doesn't include
+			// this offset so we can parse it normally
+			str = str[:len(str)-3]
+		}
 	}
 	t, err := time.Parse(f, str)
 	if err != nil {
 		errorf("decode: %s", err)
+	}
+	if tzOffsetSeconds != 0 {
+		return t.Add(time.Duration(tzOffsetSeconds) * time.Second)
 	}
 	return t
 }
