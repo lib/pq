@@ -89,6 +89,32 @@ func TestTimestampWithTimeZone(t *testing.T) {
 	}
 }
 
+func TestTimestamptzOddTZ(t *testing.T) {
+	// This tests timestamps with odd time zones (namely,
+	// sub-minute offsets). We can't test it above since there
+	// are separate issues with formatting these.
+	db := openTestConn(t)
+	defer db.Close()
+
+	refTime := time.Date(1000, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+	var gotTime time.Time
+	_, err := db.Exec("SET timezone to 'UTC'")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	row := db.QueryRow("SELECT timestamptz '1000-01-01 00:00:00'")
+	err = row.Scan(&gotTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !refTime.Equal(gotTime) {
+		t.Errorf("timestamps not equal: %s != %s", refTime, gotTime)
+	}
+}
+
 func TestTimestampWithOutTimezone(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
