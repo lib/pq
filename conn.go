@@ -163,7 +163,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Result, err error) {
 		t, r := cn.recv1()
 		switch t {
 		case 'C':
-			res = parseComplete(r.string())
+			res = parseComplete(r.string(), cn)
 		case 'Z':
 			// done
 			return
@@ -474,7 +474,7 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 		case 'E':
 			err = parseError(r)
 		case 'C':
-			res = parseComplete(r.string())
+			res = parseComplete(r.string(), st.cn)
 		case 'Z':
 			// done
 			return
@@ -541,10 +541,43 @@ func (st *stmt) NumInput() int {
 	return len(st.paramTyps)
 }
 
-func parseComplete(s string) driver.Result {
+type result struct {
+	rowsAffected int64
+	lastInsertId int64
+	// result must access connection for last ID query
+	connection *conn
+}
+
+func (i result) RowsAffected() (int64, error) {
+	return i.rowsAffected, nil
+}
+
+func (i result) LastInsertId() (int64, error) {
+	// last id always will be greater than zero
+	// if we already queried last ID then no need to do it again - used saved value
+	if i.lastInsertId > 0 {
+		return i.lastInsertId, nil
+	}
+
+	stmt, err := i.connection.Prepare("SELECT LASTVAL()") // only in 8.1+ version
+	if err == nil {
+		defer stmt.Close()
+		rows, err := stmt.Query(make([]driver.Value, 0))
+		if err == nil {
+			values := make([]driver.Value, 1)
+			err = rows.Next(values)
+			i.lastInsertId = values[0].(int64)
+			rows.Close()
+		}
+		return i.lastInsertId, err
+	}
+	return i.lastInsertId, err
+}
+
+func parseComplete(s string, connection *conn) driver.Result {
 	parts := strings.Split(s, " ")
 	n, _ := strconv.ParseInt(parts[len(parts)-1], 10, 64)
-	return driver.RowsAffected(n)
+	return result{rowsAffected: n, connection: connection}
 }
 
 type rows struct {
