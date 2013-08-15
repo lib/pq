@@ -3,8 +3,10 @@
 package pq
 
 import (
+	"errors"
+	"fmt"
 	"io"
-	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -17,6 +19,8 @@ const MinReconnectDelay time.Duration = 3 * time.Second
 
 // The maximum back-off for reconnection.
 const MaxReconnectDelay time.Duration = 15 * time.Minute
+
+var errClosed = errors.New("listener closed")
 
 type Notification struct {
 	BePid   int
@@ -40,6 +44,7 @@ type message struct {
 type Listener struct {
 	name      string
 	cn        *conn
+	closed    bool
 	lock      *sync.Mutex
 	channels  map[string]map[chan<- *Notification]bool
 	replyChan chan message
@@ -55,6 +60,7 @@ func NewListener(name string) (*Listener, error) {
 	l := &Listener{
 		name,
 		cn.(*conn),
+		false,
 		new(sync.Mutex),
 		make(map[string]map[chan<- *Notification]bool),
 		make(chan message)}
@@ -68,6 +74,11 @@ func (l *Listener) recv2() (byte, *readBuf, error) {
 	x := make([]byte, 5)
 	_, err := io.ReadFull(l.cn.buf, x)
 	if err != nil {
+		if l.closed {
+			// Listener.Close() called.
+			return 0, nil, errClosed
+		}
+
 		return 0, nil, err
 	}
 
@@ -75,6 +86,11 @@ func (l *Listener) recv2() (byte, *readBuf, error) {
 	y := make([]byte, b.int32()-4)
 	_, err = io.ReadFull(l.cn.buf, y)
 	if err != nil {
+		if l.closed {
+			// Listener.Close() called.
+			return 0, nil, errClosed
+		}
+
 		return x[0], nil, err
 	}
 
@@ -87,15 +103,12 @@ func (l *Listener) listen() {
 
 		if err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				log.Println("Reconnecting...")
 				l.cn = reconnect(l.name)
+				err = l.relisten()
 
-				// Subscribe to notifications again.
-				for relname := range l.channels {
-					_, err := l.cn.simpleQuery("LISTEN " + relname)
-					if err != nil {
-						panic("LISTEN on reconnect failed for " + relname)
-					}
+				if err != nil {
+					// Just reconnect if LISTEN fails.
+					continue
 				}
 
 				// Notify everyone that we have reconnected.
@@ -106,8 +119,10 @@ func (l *Listener) listen() {
 				}
 
 				continue
-			} else {
+			} else if err == errClosed {
 				return
+			} else {
+				panic(err)
 			}
 		}
 
@@ -119,6 +134,17 @@ func (l *Listener) listen() {
 			l.replyChan <- message{t, r}
 		}
 	}
+}
+
+func (l *Listener) relisten() error {
+	for relname := range l.channels {
+		_, err := l.cn.simpleQuery("LISTEN " + quoteRelname(relname))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func reconnect(name string) *conn {
@@ -153,6 +179,8 @@ func (l *Listener) dispatch(n *Notification) {
 }
 
 func (l *Listener) Close() error {
+	l.closed = true
+
 	return l.cn.Close()
 }
 
@@ -170,10 +198,14 @@ func (l *Listener) Listen(relname string, c chan<- *Notification) error {
 	data[c] = true
 
 	if len(data) == 1 {
-		return l.simpleQuery2("LISTEN " + relname)
+		return l.simpleQuery2("LISTEN " + quoteRelname(relname))
 	}
 
 	return nil
+}
+
+func quoteRelname(relname string) string {
+	return fmt.Sprintf(`"%s"`, strings.Replace(relname, `"`, `""`, -1))
 }
 
 func (l *Listener) simpleQuery2(q string) (err error) {
@@ -203,25 +235,27 @@ func (l *Listener) simpleQuery2(q string) (err error) {
 	panic("not reached")
 }
 
-func (l *Listener) Unlisten(relname string, c chan<- *Notification) {
+func (l *Listener) Unlisten(relname string, c chan<- *Notification) error {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 
 	data, ok := l.channels[relname]
 
 	if !ok {
-		return
+		return nil
 	}
 
 	delete(data, c)
 
 	if len(data) == 0 {
-		err := l.simpleQuery2("UNLISTEN " + relname)
+		err := l.simpleQuery2("UNLISTEN " + quoteRelname(relname))
 
 		if err != nil {
-			panic("UNLISTEN " + relname + " failed")
+			return err
 		}
 
 		delete(l.channels, relname)
 	}
+
+	return nil
 }
