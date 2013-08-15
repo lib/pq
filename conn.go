@@ -38,7 +38,14 @@ type conn struct {
 	c             net.Conn
 	buf           *bufio.Reader
 	namei         int
+	scratch       [512]byte
 	singlerowmode bool
+}
+
+func (c *conn) writeBuf(b byte) *writeBuf {
+	c.scratch[0] = b
+	w := writeBuf(c.scratch[:5])
+	return &w
 }
 
 func Open(name string) (_ driver.Conn, err error) {
@@ -106,8 +113,7 @@ func (vs Values) Set(k, v string) {
 }
 
 func (vs Values) Get(k string) (v string) {
-	v, _ = vs[k]
-	return
+	return vs[k]
 }
 
 func parseOpts(name string, o Values) {
@@ -153,7 +159,7 @@ func (cn *conn) gname() string {
 func (cn *conn) simpleQuery(q string) (res driver.Result, err error) {
 	defer errRecover(&err)
 
-	b := newWriteBuf('Q')
+	b := cn.writeBuf('Q')
 	b.string(q)
 	cn.send(b)
 
@@ -181,28 +187,28 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 
 	st := &stmt{cn: cn, name: stmtName, query: q}
 
-	b := newWriteBuf('P')
+	b := cn.writeBuf('P')
 	b.string(st.name)
 	b.string(q)
 	b.int16(0)
 	cn.send(b)
 
-	b = newWriteBuf('D')
+	b = cn.writeBuf('D')
 	b.byte('S')
 	b.string(st.name)
 	cn.send(b)
 
-	cn.send(newWriteBuf('S'))
+	cn.send(cn.writeBuf('S'))
 
 	for {
 		t, r := cn.recv1()
 		switch t {
 		case '1', '2', 'N':
 		case 't':
-			st.nparams = int(r.int16())
-			st.paramTyps = make([]oid.Oid, st.nparams, st.nparams)
+			nparams := int(r.int16())
+			st.paramTyps = make([]oid.Oid, nparams)
 
-			for i := 0; i < st.nparams; i += 1 {
+			for i := range st.paramTyps {
 				st.paramTyps[i] = r.oid()
 			}
 		case 'T':
@@ -238,7 +244,7 @@ func (cn *conn) Prepare(q string) (driver.Stmt, error) {
 
 func (cn *conn) Close() (err error) {
 	defer errRecover(&err)
-	cn.send(newWriteBuf('X'))
+	cn.send(cn.writeBuf('X'))
 
 	return cn.c.Close()
 }
@@ -301,20 +307,27 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 }
 
 func (cn *conn) recv1() (byte, *readBuf) {
-	x := make([]byte, 5)
+	x := cn.scratch[:5]
 	_, err := io.ReadFull(cn.buf, x)
 	if err != nil {
 		panic(err)
 	}
+	c := x[0]
 
 	b := readBuf(x[1:])
-	y := make([]byte, b.int32()-4)
+	n := b.int32() - 4
+	var y []byte
+	if n <= len(cn.scratch) {
+		y = cn.scratch[:n]
+	} else {
+		y = make([]byte, n)
+	}
 	_, err = io.ReadFull(cn.buf, y)
 	if err != nil {
 		panic(err)
 	}
 
-	return x[0], (*readBuf)(&y)
+	return c, (*readBuf)(&y)
 }
 
 func (cn *conn) ssl(o Values) {
@@ -330,11 +343,11 @@ func (cn *conn) ssl(o Values) {
 		errorf(`unsupported sslmode %q; only "require" (default), "verify-full", and "disable" supported`, mode)
 	}
 
-	w := newWriteBuf(0)
+	w := cn.writeBuf(0)
 	w.int32(80877103)
 	cn.send(w)
 
-	b := make([]byte, 1)
+	b := cn.scratch[:1]
 	_, err := io.ReadFull(cn.c, b)
 	if err != nil {
 		panic(err)
@@ -348,7 +361,7 @@ func (cn *conn) ssl(o Values) {
 }
 
 func (cn *conn) startup(o Values) {
-	w := newWriteBuf(0)
+	w := cn.writeBuf(0)
 	w.int32(196608)
 	w.string("user")
 	w.string(o.Get("user"))
@@ -376,7 +389,7 @@ func (cn *conn) auth(r *readBuf, o Values) {
 	case 0:
 		// OK
 	case 3:
-		w := newWriteBuf('p')
+		w := cn.writeBuf('p')
 		w.string(o.Get("password"))
 		cn.send(w)
 
@@ -390,7 +403,7 @@ func (cn *conn) auth(r *readBuf, o Values) {
 		}
 	case 5:
 		s := string(r.next(4))
-		w := newWriteBuf('p')
+		w := cn.writeBuf('p')
 		w.string("md5" + md5s(md5s(o.Get("password")+o.Get("user"))+s))
 		cn.send(w)
 
@@ -412,7 +425,6 @@ type stmt struct {
 	name      string
 	query     string
 	cols      []string
-	nparams   int
 	rowTyps   []oid.Oid
 	paramTyps []oid.Oid
 	closed    bool
@@ -425,12 +437,12 @@ func (st *stmt) Close() (err error) {
 
 	defer errRecover(&err)
 
-	w := newWriteBuf('C')
+	w := st.cn.writeBuf('C')
 	w.byte('S')
 	w.string(st.name)
 	st.cn.send(w)
 
-	st.cn.send(newWriteBuf('S'))
+	st.cn.send(st.cn.writeBuf('S'))
 
 	t, _ := st.cn.recv()
 	if t != '3' {
@@ -489,7 +501,7 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 }
 
 func (st *stmt) exec(v []driver.Value) {
-	w := newWriteBuf('B')
+	w := st.cn.writeBuf('B')
 	w.string("")
 	w.string(st.name)
 	w.int16(0)
@@ -506,12 +518,12 @@ func (st *stmt) exec(v []driver.Value) {
 	w.int16(0)
 	st.cn.send(w)
 
-	w = newWriteBuf('E')
+	w = st.cn.writeBuf('E')
 	w.string("")
 	w.int32(0)
 	st.cn.send(w)
 
-	st.cn.send(newWriteBuf('S'))
+	st.cn.send(st.cn.writeBuf('S'))
 
 	var err error
 	for {
@@ -538,23 +550,13 @@ func (st *stmt) exec(v []driver.Value) {
 }
 
 func (st *stmt) NumInput() int {
-	return st.nparams
-}
-
-type result int64
-
-func (i result) RowsAffected() (int64, error) {
-	return int64(i), nil
-}
-
-func (i result) LastInsertId() (int64, error) {
-	return 0, ErrNotSupported
+	return len(st.paramTyps)
 }
 
 func parseComplete(s string) driver.Result {
 	parts := strings.Split(s, " ")
 	n, _ := strconv.ParseInt(parts[len(parts)-1], 10, 64)
-	return result(n)
+	return driver.RowsAffected(n)
 }
 
 type rows struct {
@@ -602,7 +604,10 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 			return io.EOF
 		case 'D':
 			n := r.int16()
-			for i := 0; i < len(dest) && i < n; i++ {
+			if n < len(dest) {
+				dest = dest[:n]
+			}
+			for i := range dest {
 				l := r.int32()
 				if l == -1 {
 					dest[i] = nil

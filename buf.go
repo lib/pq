@@ -26,10 +26,8 @@ func (b *readBuf) int16() (n int) {
 	return
 }
 
-var stringTerm = []byte{0}
-
 func (b *readBuf) string() string {
-	i := bytes.Index(*b, stringTerm)
+	i := bytes.IndexByte(*b, 0)
 	if i < 0 {
 		errorf("invalid message format; expected string terminator")
 	}
@@ -49,12 +47,6 @@ func (b *readBuf) byte() byte {
 }
 
 type writeBuf []byte
-
-func newWriteBuf(c byte) *writeBuf {
-	b := make(writeBuf, 5)
-	b[0] = c
-	return &b
-}
 
 func (b *writeBuf) int32(n int) {
 	x := make([]byte, 4)
