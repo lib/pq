@@ -792,11 +792,15 @@ func parseEnviron(env []string) (out map[string]string) {
 		accrue := func(keyname string) {
 			out[keyname] = parts[1]
 		}
+		unsupported := func(keyname string) {
+			panic(fmt.Sprintf("setting %v not supported", keyname))
+		}
 
 		// The order of these is the same as is seen in the
-		// PostgreSQL 9.1 manual, with omissions briefly
-		// noted.
-		switch parts[0] {
+		// PostgreSQL 9.1 manual. Unsupported but well-defined
+		// keys cause a panic; these should be unset prior to
+		// exection.
+		switch p := parts[0]; p {
 		case "PGHOST":
 			accrue("host")
 		case "PGHOSTADDR":
@@ -809,8 +813,8 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("user")
 		case "PGPASSWORD":
 			accrue("password")
-		// skip PGPASSFILE, PGSERVICE, PGSERVICEFILE,
-		// PGREALM
+		case "PGPASSFILE", "PGSERVICE", "PGSERVICEFILE", "PGREALM":
+			unsupported(p)
 		case "PGOPTIONS":
 			accrue("options")
 		case "PGAPPNAME":
@@ -837,8 +841,8 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("connect_timeout")
 		case "PGCLIENTENCODING":
 			accrue("client_encoding")
-			// skip PGDATESTYLE, PGTZ, PGGEQO, PGSYSCONFDIR,
-			// PGLOCALEDIR
+		case "PGDATESTYLE", "PGTZ", "PGGEQO", "PGSYSCONFDIR", "PGLOCALEDIR":
+			unsupported(p)
 		}
 	}
 
