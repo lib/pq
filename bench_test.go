@@ -333,7 +333,7 @@ func TestDecodeBool(t *testing.T) {
 	db := openTestConn(t)
 	rows, err := db.Query("select true")
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	rows.Close()
 }
