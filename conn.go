@@ -3,7 +3,6 @@ package pq
 
 import (
 	"bufio"
-	"bytes"
 	"crypto/md5"
 	"crypto/tls"
 	"database/sql"
@@ -116,51 +115,74 @@ func (vs Values) Get(k string) (v string) {
 	return vs[k]
 }
 
+type scanner struct {
+	s []rune
+	i int
+}
+
+func NewScanner(s string) *scanner {
+	return &scanner{[]rune(s), 0}
+}
+
+// Next returns the next rune.
+// It returns 0, false if the end of the text has been reached.
+func (s *scanner) Next() (rune, bool) {
+	if s.i >= len(s.s) {
+		return 0, false
+	}
+	r := s.s[s.i]
+	s.i++
+	return r, true
+}
+
+// SkipSpaces returns the next non-whitespace rune.
+// It returns 0, false if the end of the text has been reached.
+func (s *scanner) SkipSpaces() (rune, bool) {
+	r, ok := s.Next()
+	for unicode.IsSpace(r) && ok {
+		r, ok = s.Next()
+	}
+	return r, ok
+}
+
 func parseOpts(name string, o Values) error {
-	scanner := bufio.NewScanner(strings.NewReader(name))
-	scanner.Split(bufio.ScanRunes)
+	s := NewScanner(name)
 
 top:
-	for scanner.Scan() {
-		var keyRunes []rune
-		var valRunes []rune
-		r := bytes.Runes(scanner.Bytes())[0]
-		if unicode.IsSpace(r) {
-			continue
+	for {
+		var (
+			keyRunes, valRunes []rune
+			r                  rune
+			ok                 bool
+		)
+
+		if r, ok = s.SkipSpaces(); !ok {
+			break
 		}
 
 		// Scan the key
 		for !unicode.IsSpace(r) && r != '=' {
 			keyRunes = append(keyRunes, r)
-			if !scanner.Scan() {
+			if r, ok = s.Next(); !ok {
 				break top
 			}
-			r = bytes.Runes(scanner.Bytes())[0]
 		}
 
-		// Skip any whitespace
-		for unicode.IsSpace(r) {
-			if !scanner.Scan() {
-				break top
+		// Skip any whitespace if we're not at the = yet
+		if r != '=' {
+			if r, ok = s.SkipSpaces(); !ok {
+				break
 			}
-			r = bytes.Runes(scanner.Bytes())[0]
 		}
 
 		// The current character should be =
 		if r != '=' {
 			return fmt.Errorf(`missing "=" after %q in connection info string"`, string(keyRunes))
 		}
-		if !scanner.Scan() {
-			break top
-		}
-		r = bytes.Runes(scanner.Bytes())[0]
 
-		// Skip any whitespace
-		for unicode.IsSpace(r) {
-			if !scanner.Scan() {
-				break top
-			}
-			r = bytes.Runes(scanner.Bytes())[0]
+		// Skip any whitespace after the =
+		if r, ok = s.SkipSpaces(); !ok {
+			break top
 		}
 
 		if r != '\'' {
@@ -169,18 +191,16 @@ top:
 					valRunes = append(valRunes, r)
 				}
 
-				if !scanner.Scan() {
+				if r, ok = s.Next(); !ok {
 					break
 				}
-				r = bytes.Runes(scanner.Bytes())[0]
 			}
 		} else {
 		quote:
 			for {
-				if !scanner.Scan() {
+				if r, ok = s.Next(); !ok {
 					return fmt.Errorf(`unterminated quoted string literal in connection string`)
 				}
-				r = bytes.Runes(scanner.Bytes())[0]
 				switch r {
 				case '\\':
 					continue
@@ -193,10 +213,6 @@ top:
 		}
 
 		o.Set(string(keyRunes), string(valRunes))
-	}
-
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("failed to scan options: %s", err)
 	}
 
 	return nil
