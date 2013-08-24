@@ -17,6 +17,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 var (
@@ -65,7 +66,9 @@ func Open(name string) (_ driver.Conn, err error) {
 		o.Set(k, v)
 	}
 
-	parseOpts(name, o)
+	if err := parseOpts(name, o); err != nil {
+		return nil, err
+	}
 
 	// If a user is not provided by any other means, the last
 	// resort is to use the current operating system provided user
@@ -112,21 +115,107 @@ func (vs Values) Get(k string) (v string) {
 	return vs[k]
 }
 
-func parseOpts(name string, o Values) {
-	if len(name) == 0 {
-		return
+type scanner struct {
+	s []rune
+	i int
+}
+
+func NewScanner(s string) *scanner {
+	return &scanner{[]rune(s), 0}
+}
+
+// Next returns the next rune.
+// It returns 0, false if the end of the text has been reached.
+func (s *scanner) Next() (rune, bool) {
+	if s.i >= len(s.s) {
+		return 0, false
 	}
+	r := s.s[s.i]
+	s.i++
+	return r, true
+}
 
-	name = strings.TrimSpace(name)
+// SkipSpaces returns the next non-whitespace rune.
+// It returns 0, false if the end of the text has been reached.
+func (s *scanner) SkipSpaces() (rune, bool) {
+	r, ok := s.Next()
+	for unicode.IsSpace(r) && ok {
+		r, ok = s.Next()
+	}
+	return r, ok
+}
 
-	ps := strings.Split(name, " ")
-	for _, p := range ps {
-		kv := strings.Split(p, "=")
-		if len(kv) < 2 {
-			errorf("invalid option: %q", p)
+func parseOpts(name string, o Values) error {
+	s := NewScanner(name)
+
+top:
+	for {
+		var (
+			keyRunes, valRunes []rune
+			r                  rune
+			ok                 bool
+		)
+
+		if r, ok = s.SkipSpaces(); !ok {
+			break
 		}
-		o.Set(kv[0], kv[1])
+
+		// Scan the key
+		for !unicode.IsSpace(r) && r != '=' {
+			keyRunes = append(keyRunes, r)
+			if r, ok = s.Next(); !ok {
+				break top
+			}
+		}
+
+		// Skip any whitespace if we're not at the = yet
+		if r != '=' {
+			if r, ok = s.SkipSpaces(); !ok {
+				break
+			}
+		}
+
+		// The current character should be =
+		if r != '=' {
+			return fmt.Errorf(`missing "=" after %q in connection info string"`, string(keyRunes))
+		}
+
+		// Skip any whitespace after the =
+		if r, ok = s.SkipSpaces(); !ok {
+			break top
+		}
+
+		if r != '\'' {
+			for !unicode.IsSpace(r) {
+				if r != '\\' {
+					valRunes = append(valRunes, r)
+				}
+
+				if r, ok = s.Next(); !ok {
+					break
+				}
+			}
+		} else {
+		quote:
+			for {
+				if r, ok = s.Next(); !ok {
+					return fmt.Errorf(`unterminated quoted string literal in connection string`)
+				}
+				switch r {
+				case '\\':
+					continue
+				case '\'':
+					break quote
+				default:
+					valRunes = append(valRunes, r)
+				}
+			}
+		}
+
+		o.Set(string(keyRunes), string(valRunes))
 	}
+
+	return nil
 }
 
 func (cn *conn) Begin() (driver.Tx, error) {
