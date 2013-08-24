@@ -3,6 +3,7 @@ package pq
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/md5"
 	"crypto/tls"
 	"database/sql"
@@ -17,6 +18,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 var (
@@ -65,7 +67,9 @@ func Open(name string) (_ driver.Conn, err error) {
 		o.Set(k, v)
 	}
 
-	parseOpts(name, o)
+	if err := parseOpts(name, o); err != nil {
+		return nil, err
+	}
 
 	// If a user is not provided by any other means, the last
 	// resort is to use the current operating system provided user
@@ -112,21 +116,90 @@ func (vs Values) Get(k string) (v string) {
 	return vs[k]
 }
 
-func parseOpts(name string, o Values) {
-	if len(name) == 0 {
-		return
-	}
+func parseOpts(name string, o Values) error {
+	scanner := bufio.NewScanner(strings.NewReader(name))
+	scanner.Split(bufio.ScanRunes)
 
-	name = strings.TrimSpace(name)
-
-	ps := strings.Split(name, " ")
-	for _, p := range ps {
-		kv := strings.Split(p, "=")
-		if len(kv) < 2 {
-			errorf("invalid option: %q", p)
+top:
+	for scanner.Scan() {
+		var keyRunes []rune
+		var valRunes []rune
+		r := bytes.Runes(scanner.Bytes())[0]
+		if unicode.IsSpace(r) {
+			continue
 		}
-		o.Set(kv[0], kv[1])
+
+		// Scan the key
+		for !unicode.IsSpace(r) && r != '=' {
+			keyRunes = append(keyRunes, r)
+			if !scanner.Scan() {
+				break top
+			}
+			r = bytes.Runes(scanner.Bytes())[0]
+		}
+
+		// Skip any whitespace
+		for unicode.IsSpace(r) {
+			if !scanner.Scan() {
+				break top
+			}
+			r = bytes.Runes(scanner.Bytes())[0]
+		}
+
+		// The current character should be =
+		if r != '=' {
+			return fmt.Errorf(`missing "=" after %q in connection info string"`, string(keyRunes))
+		}
+		if !scanner.Scan() {
+			break top
+		}
+		r = bytes.Runes(scanner.Bytes())[0]
+
+		// Skip any whitespace
+		for unicode.IsSpace(r) {
+			if !scanner.Scan() {
+				break top
+			}
+			r = bytes.Runes(scanner.Bytes())[0]
+		}
+
+		if r != '\'' {
+			for !unicode.IsSpace(r) {
+				if r != '\\' {
+					valRunes = append(valRunes, r)
+				}
+
+				if !scanner.Scan() {
+					break
+				}
+				r = bytes.Runes(scanner.Bytes())[0]
+			}
+		} else {
+		quote:
+			for {
+				if !scanner.Scan() {
+					return fmt.Errorf(`unterminated quoted string literal in connection string`)
+				}
+				r = bytes.Runes(scanner.Bytes())[0]
+				switch r {
+				case '\\':
+					continue
+				case '\'':
+					break quote
+				default:
+					valRunes = append(valRunes, r)
+				}
+			}
+		}
+
+		o.Set(string(keyRunes), string(valRunes))
 	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("failed to scan options: %s", err)
+	}
+
+	return nil
 }
 
 func (cn *conn) Begin() (driver.Tx, error) {

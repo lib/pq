@@ -518,11 +518,27 @@ func TestRollback(t *testing.T) {
 	}
 }
 
-func TestConnTrailingSpace(t *testing.T) {
-	o := make(Values)
-	expected := Values{"dbname": "hello", "user": "goodbye"}
-	parseOpts("dbname=hello user=goodbye ", o)
-	if !reflect.DeepEqual(expected, o) {
-		t.Fatalf("Expected: %#v Got: %#v", expected, o)
+func TestParseOpts(t *testing.T) {
+	tests := []struct {
+		in       string
+		expected Values
+		valid    bool
+	}{
+		{"dbname=hello user=goodbye", Values{"dbname": "hello", "user": "goodbye"}, true},
+		{"dbname=hello user=goodbye  ", Values{"dbname": "hello", "user": "goodbye"}, true},
+		{"dbname = hello user=goodbye", Values{"dbname": "hello", "user": "goodbye"}, true},
+		{"dbname=hello user =goodbye", Values{"dbname": "hello", "user": "goodbye"}, true},
+		{"dbname=hello user= goodbye", Values{"dbname": "hello", "user": "goodbye"}, true},
+		{"host=localhost password='correct horse battery staple'", Values{"host": "localhost", "password": "correct horse battery staple"}, true},
+	}
+
+	for _, test := range tests {
+		o := make(Values)
+		err := parseOpts(test.in, o)
+		if err != nil && test.valid {
+			t.Errorf("%q got unexpected error: %s", test.in, err)
+		} else if err == nil && !reflect.DeepEqual(test.expected, o) {
+			t.Errorf("%q got: %#v want: %#v", test.in, o, test.expected)
+		}
 	}
 }
