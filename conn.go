@@ -18,7 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 )
 
 var (
@@ -117,33 +116,33 @@ func (vs Values) Get(k string) (v string) {
 }
 
 type scanner struct {
-	s string
+	s []rune
 	i int
 }
 
 func NewScanner(s string) *scanner {
-	return &scanner{s, 0}
+	return &scanner{[]rune(s), 0}
 }
 
 // Next returns the next rune.
-// It returns 0, true if the end of the text has been reached.
+// It returns 0, false if the end of the text has been reached.
 func (s *scanner) Next() (rune, bool) {
 	if s.i >= len(s.s) {
-		return 0, true
+		return 0, false
 	}
-	r, n := utf8.DecodeRuneInString(s.s[s.i:])
-	s.i += n
-	return r, false
+	r := s.s[s.i]
+	s.i++
+	return r, true
 }
 
 // SkipSpaces returns the next non-whitespace rune.
-// It returns 0, true if the end of the text has been reached.
+// It returns 0, false if the end of the text has been reached.
 func (s *scanner) SkipSpaces() (rune, bool) {
-	r, end := s.Next()
-	for unicode.IsSpace(r) && !end {
-		r, end = s.Next()
+	r, ok := s.Next()
+	for unicode.IsSpace(r) && ok {
+		r, ok = s.Next()
 	}
-	return r, end
+	return r, ok
 }
 
 func parseOpts(name string, o Values) error {
@@ -154,23 +153,24 @@ top:
 		var (
 			keyRunes, valRunes []rune
 			r                  rune
-			end                bool
+			ok                 bool
 		)
 
-		if r, end = s.SkipSpaces(); end {
+		if r, ok = s.SkipSpaces(); !ok {
 			break
 		}
 
 		// Scan the key
 		for !unicode.IsSpace(r) && r != '=' {
 			keyRunes = append(keyRunes, r)
-			if r, end = s.Next(); end {
+			if r, ok = s.Next(); !ok {
 				break top
 			}
 		}
 
+		// Skip any whitespace if we're not at the = yet
 		if r != '=' {
-			if r, end = s.SkipSpaces(); end {
+			if r, ok = s.SkipSpaces(); !ok {
 				break
 			}
 		}
@@ -180,7 +180,8 @@ top:
 			return fmt.Errorf(`missing "=" after %q in connection info string"`, string(keyRunes))
 		}
 
-		if r, end = s.SkipSpaces(); end {
+		// Skip any whitespace after the =
+		if r, ok = s.SkipSpaces(); !ok {
 			break top
 		}
 
@@ -190,14 +191,14 @@ top:
 					valRunes = append(valRunes, r)
 				}
 
-				if r, end = s.Next(); end {
+				if r, ok = s.Next(); !ok {
 					break
 				}
 			}
 		} else {
 		quote:
 			for {
-				if r, end = s.Next(); end {
+				if r, ok = s.Next(); !ok {
 					return fmt.Errorf(`unterminated quoted string literal in connection string`)
 				}
 				switch r {
