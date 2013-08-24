@@ -116,51 +116,67 @@ func (vs Values) Get(k string) (v string) {
 	return vs[k]
 }
 
+type scanner struct {
+	*bufio.Scanner
+}
+
+func NewScanner(s string) scanner {
+	sc := scanner{bufio.NewScanner(strings.NewReader(s))}
+	sc.Split(bufio.ScanRunes)
+	return sc
+}
+
+func (s scanner) Next() (rune, error) {
+	if !s.Scan() {
+		return 0, io.EOF
+	}
+	return bytes.Runes(s.Bytes())[0], nil
+}
+
 func parseOpts(name string, o Values) error {
-	scanner := bufio.NewScanner(strings.NewReader(name))
-	scanner.Split(bufio.ScanRunes)
+	s := NewScanner(name)
+
+	var err error
 
 top:
-	for scanner.Scan() {
-		var keyRunes []rune
-		var valRunes []rune
-		r := bytes.Runes(scanner.Bytes())[0]
-		if unicode.IsSpace(r) {
+	for {
+		var keyRunes, valRunes []rune
+		var r rune
+
+		if r, err = s.Next(); err != nil {
+			break
+		} else if unicode.IsSpace(r) {
 			continue
 		}
 
 		// Scan the key
 		for !unicode.IsSpace(r) && r != '=' {
 			keyRunes = append(keyRunes, r)
-			if !scanner.Scan() {
+			if r, err = s.Next(); err != nil {
 				break top
 			}
-			r = bytes.Runes(scanner.Bytes())[0]
 		}
 
 		// Skip any whitespace
 		for unicode.IsSpace(r) {
-			if !scanner.Scan() {
+			if r, err = s.Next(); err != nil {
 				break top
 			}
-			r = bytes.Runes(scanner.Bytes())[0]
 		}
 
 		// The current character should be =
 		if r != '=' {
 			return fmt.Errorf(`missing "=" after %q in connection info string"`, string(keyRunes))
 		}
-		if !scanner.Scan() {
+		if r, err = s.Next(); err != nil {
 			break top
 		}
-		r = bytes.Runes(scanner.Bytes())[0]
 
 		// Skip any whitespace
 		for unicode.IsSpace(r) {
-			if !scanner.Scan() {
+			if r, err = s.Next(); err != nil {
 				break top
 			}
-			r = bytes.Runes(scanner.Bytes())[0]
 		}
 
 		if r != '\'' {
@@ -169,18 +185,16 @@ top:
 					valRunes = append(valRunes, r)
 				}
 
-				if !scanner.Scan() {
+				if r, err = s.Next(); err != nil {
 					break
 				}
-				r = bytes.Runes(scanner.Bytes())[0]
 			}
 		} else {
 		quote:
 			for {
-				if !scanner.Scan() {
+				if r, err = s.Next(); err != nil {
 					return fmt.Errorf(`unterminated quoted string literal in connection string`)
 				}
-				r = bytes.Runes(scanner.Bytes())[0]
 				switch r {
 				case '\\':
 					continue
@@ -195,7 +209,7 @@ top:
 		o.Set(string(keyRunes), string(valRunes))
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := s.Err(); err != nil {
 		return fmt.Errorf("failed to scan options: %s", err)
 	}
 
