@@ -3,7 +3,6 @@ package pq
 
 import (
 	"bufio"
-	"bytes"
 	"crypto/md5"
 	"crypto/tls"
 	"database/sql"
@@ -19,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 var (
@@ -117,50 +117,61 @@ func (vs Values) Get(k string) (v string) {
 }
 
 type scanner struct {
-	*bufio.Scanner
+	s string
+	i int
 }
 
-func NewScanner(s string) scanner {
-	sc := scanner{bufio.NewScanner(strings.NewReader(s))}
-	sc.Split(bufio.ScanRunes)
-	return sc
+func NewScanner(s string) *scanner {
+	return &scanner{s, 0}
 }
 
-func (s scanner) Next() (rune, error) {
-	if !s.Scan() {
-		return 0, io.EOF
+// Next returns the next rune.
+// It returns 0, true if the end of the text has been reached.
+func (s *scanner) Next() (rune, bool) {
+	if s.i >= len(s.s) {
+		return 0, true
 	}
-	return bytes.Runes(s.Bytes())[0], nil
+	r, n := utf8.DecodeRuneInString(s.s[s.i:])
+	s.i += n
+	return r, false
+}
+
+// SkipSpaces returns the next non-whitespace rune.
+// It returns 0, true if the end of the text has been reached.
+func (s *scanner) SkipSpaces() (rune, bool) {
+	r, end := s.Next()
+	for unicode.IsSpace(r) && !end {
+		r, end = s.Next()
+	}
+	return r, end
 }
 
 func parseOpts(name string, o Values) error {
 	s := NewScanner(name)
 
-	var err error
-
 top:
 	for {
-		var keyRunes, valRunes []rune
-		var r rune
+		var (
+			keyRunes, valRunes []rune
+			r                  rune
+			end                bool
+		)
 
-		if r, err = s.Next(); err != nil {
+		if r, end = s.SkipSpaces(); end {
 			break
-		} else if unicode.IsSpace(r) {
-			continue
 		}
 
 		// Scan the key
 		for !unicode.IsSpace(r) && r != '=' {
 			keyRunes = append(keyRunes, r)
-			if r, err = s.Next(); err != nil {
+			if r, end = s.Next(); end {
 				break top
 			}
 		}
 
-		// Skip any whitespace
-		for unicode.IsSpace(r) {
-			if r, err = s.Next(); err != nil {
-				break top
+		if r != '=' {
+			if r, end = s.SkipSpaces(); end {
+				break
 			}
 		}
 
@@ -168,15 +179,9 @@ top:
 		if r != '=' {
 			return fmt.Errorf(`missing "=" after %q in connection info string"`, string(keyRunes))
 		}
-		if r, err = s.Next(); err != nil {
-			break top
-		}
 
-		// Skip any whitespace
-		for unicode.IsSpace(r) {
-			if r, err = s.Next(); err != nil {
-				break top
-			}
+		if r, end = s.SkipSpaces(); end {
+			break top
 		}
 
 		if r != '\'' {
@@ -185,14 +190,14 @@ top:
 					valRunes = append(valRunes, r)
 				}
 
-				if r, err = s.Next(); err != nil {
+				if r, end = s.Next(); end {
 					break
 				}
 			}
 		} else {
 		quote:
 			for {
-				if r, err = s.Next(); err != nil {
+				if r, end = s.Next(); end {
 					return fmt.Errorf(`unterminated quoted string literal in connection string`)
 				}
 				switch r {
@@ -207,10 +212,6 @@ top:
 		}
 
 		o.Set(string(keyRunes), string(valRunes))
-	}
-
-	if err := s.Err(); err != nil {
-		return fmt.Errorf("failed to scan options: %s", err)
 	}
 
 	return nil
