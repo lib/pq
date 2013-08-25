@@ -266,7 +266,9 @@ func (d *decodeState) array(v reflect.Value) {
 		if op == scanEndArray {
 			break
 		}
-		if op != scanArrayValue {
+		if op == scanError {
+			d.error(d.scan.err)
+		} else if op != scanArrayValue {
 			d.error(errPhase)
 		}
 	}
@@ -323,18 +325,22 @@ func (d *decodeState) literalStore(item []byte, v reflect.Value, fromQuoted bool
 		d.saveError(fmt.Errorf("invalid use of ,string struct tag, trying to unmarshal %q into %v", item, v.Type()))
 		return
 	}
-	wantptr := item[0] == 'N' // null
+
+	wantptr := string(item) == "NULL"
 	v = d.indirect(v, wantptr)
 
-	switch c := item[0]; c {
-	case 'N': // null
+	// special cases for unquoted values (could be NULL or t/f)
+	switch str := string(item); str {
+	case "NULL":
 		switch v.Kind() {
 		case reflect.Interface, reflect.Ptr, reflect.Map, reflect.Slice:
 			v.Set(reflect.Zero(v.Type()))
 			// otherwise, ignore null for primitives/string
 		}
-	case 't', 'f': // true, false
-		value := c == 't'
+		return
+
+	case "t", "f": // true, false
+		value := str == "t"
 		switch v.Kind() {
 		default:
 			if fromQuoted {
@@ -345,7 +351,7 @@ func (d *decodeState) literalStore(item []byte, v reflect.Value, fromQuoted bool
 		case reflect.Bool:
 			v.SetBool(value)
 		case reflect.String:
-			v.SetString(string(c))
+			v.SetString(str)
 		case reflect.Interface:
 			if v.NumMethod() == 0 {
 				v.Set(reflect.ValueOf(value))
@@ -353,7 +359,12 @@ func (d *decodeState) literalStore(item []byte, v reflect.Value, fromQuoted bool
 				d.saveError(&UnmarshalTypeError{"bool", v.Type()})
 			}
 		}
+		return
 
+	}
+
+	// handle the value as a literal, either a quoted string or some other value
+	switch c := item[0]; c {
 	case '"': // string
 		s, ok := unquoteBytes(item)
 		if !ok {
@@ -492,13 +503,16 @@ func (d *decodeState) literalInterface() interface{} {
 	d.scan.undo(op)
 	item := d.data[start:d.off]
 
-	switch c := item[0]; c {
-	case 'N': // null
+	switch string(item) {
+	case "NULL":
 		return nil
+	case "t":
+		return true
+	case "f":
+		return false
+	}
 
-	case 't', 'f': // true, false
-		return c == 't'
-
+	switch c := item[0]; c {
 	case '"': // string
 		s, ok := unquote(item)
 		if !ok {

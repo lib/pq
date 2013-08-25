@@ -174,9 +174,6 @@ func stateBeginValue(s *scanner, c int) opcode {
 		s.step = stateBeginValueOrEmpty
 		s.pushParseState(parseArrayValue)
 		return scanBeginArray
-	case 'N': // beginning of null
-		s.step = stateN
-		return scanBeginLiteral
 	}
 	return s.error(c, "looking for beginning of value")
 }
@@ -248,33 +245,6 @@ func stateInUnquotedString(s *scanner, c int) opcode {
 func stateInStringEsc(s *scanner, c int) opcode {
 	s.step = stateInString
 	return scanContinue
-}
-
-// stateN is the state after reading `N`.
-func stateN(s *scanner, c int) opcode {
-	if c == 'U' {
-		s.step = stateNu
-		return scanContinue
-	}
-	return s.error(c, "in literal null (expecting 'U')")
-}
-
-// stateNu is the state after reading `NU`.
-func stateNu(s *scanner, c int) opcode {
-	if c == 'L' {
-		s.step = stateNul
-		return scanContinue
-	}
-	return s.error(c, "in literal null (expecting 'L')")
-}
-
-// stateNul is the state after reading `NUL`.
-func stateNul(s *scanner, c int) opcode {
-	if c == 'L' {
-		s.step = stateEndValue
-		return scanContinue
-	}
-	return s.error(c, "in literal null (expecting 'L')")
 }
 
 // stateError is the state after reaching a syntax error,

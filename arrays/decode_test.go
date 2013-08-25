@@ -157,20 +157,24 @@ func TestArrayNumbersAsStrings(t *testing.T) {
 func TestArrayNullsAsStrings(t *testing.T) {
 	var v []string
 
-	if err := Unmarshal([]byte("{\"null\", NULL}"), &v); err != nil {
+	if err := Unmarshal([]byte("{\"NULL\", NotANull, NULL}"), &v); err != nil {
 		t.Fatalf("Unexpected error, %v", err)
 	}
 
-	if expected := 2; len(v) != expected {
+	if expected := 3; len(v) != expected {
 		t.Errorf("Expected array to have length %d, got %d", expected, len(v))
 	}
 
-	if expected := "null"; v[0] != expected {
+	if expected := "NULL"; v[0] != expected {
 		t.Errorf("Expected array[0] to be '%s', got '%s'", expected, v[0])
 	}
 
-	if expected := ""; v[1] != expected {
+	if expected := "NotANull"; v[1] != expected {
 		t.Errorf("Expected array[1] to be '%s', got '%s'", expected, v[1])
+	}
+
+	if expected := ""; v[2] != expected {
+		t.Errorf("Expected array[2] to be '%s', got '%s'", expected, v[2])
 	}
 }
 
