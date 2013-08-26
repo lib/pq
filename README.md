@@ -45,6 +45,10 @@ See http://www.postgresql.org/docs/9.1/static/libpq-connect.html.
 	* `require` - Always SSL (skip verification)
 	* `verify-full` - Always SSL (require verification)
 
+Use single quotes for values that contain whitespace:
+
+    "user=pqgotest password='with spaces'"
+
 See http://golang.org/pkg/database/sql to learn how to use with `pq` through the `database/sql` package.
 
 ## Tests
