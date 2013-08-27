@@ -4,20 +4,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
-
-	"github.com/lib/pq/oid"
 )
-
-// Register tests that the 'hstore' extension is created in the database,
-// and must be called prior to any queries that use the Hstore type.
-func Register(db *sql.DB) {
-	// TODO: assert db is postgres driver
-	var hstoreOid int
-	if err := db.QueryRow("SELECT 'hstore'::regtype::oid").Scan(&hstoreOid); err != nil {
-		panic(err)
-	}
-	oid.T_hstore = oid.Oid(hstoreOid)
-}
 
 // Hstore represents the PostgreSQL extension data type 'hstore', which stores
 // sets of key/value pairs in the database. It corresponds closely to Go's

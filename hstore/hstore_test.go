@@ -38,8 +38,6 @@ func TestHstore(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	Register(db)
-
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +99,6 @@ func mapsEqual(m1, m2 map[string]string) bool {
 var db *sql.DB
 
 func ExampleHstore() {
-	Register(db)
 	rows, err := db.Query("SELECT attributes FROM people")
 	if err != nil {
 		log.Fatal(err)
