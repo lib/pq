@@ -152,7 +152,7 @@ func (cn *conn) gname() string {
 	return strconv.FormatInt(int64(cn.namei), 10)
 }
 
-func (cn *conn) simpleQuery(q string) (res driver.Result, err error) {
+func (cn *conn) simpleExec(q string) (res driver.Result, err error) {
 	defer errRecover(&err)
 
 	b := cn.writeBuf('Q')
@@ -178,7 +178,45 @@ func (cn *conn) simpleQuery(q string) (res driver.Result, err error) {
 	panic("not reached")
 }
 
+func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
+	defer errRecover(&err)
+
+	st := &stmt{cn: cn, name: "", query: q}
+
+	b := cn.writeBuf('Q')
+	b.string(q)
+	cn.send(b)
+
+	res = &rows{st: st}
+
+	for {
+		t, r := cn.recv1()
+		switch t {
+		case 'C':
+			// done
+			return
+		case 'Z':
+			// done
+			return
+		case 'E':
+			st.lasterr = parseError(r)
+			return
+		case 'T':
+			st.cols, st.rowTyps = parseMeta(r)
+			// After we get the meta, we want to kick out to Next()
+			return
+		default:
+			errorf("unknown response for simple query: %q", t)
+		}
+	}
+	panic("not reached")
+}
+
 func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
+	return cn.prepareToSimpleStmt(q, stmtName)
+}
+
+func (cn *conn) prepareToSimpleStmt(q, stmtName string) (_ *stmt, err error) {
 	defer errRecover(&err)
 
 	st := &stmt{cn: cn, name: stmtName, query: q}
@@ -208,15 +246,7 @@ func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
 				st.paramTyps[i] = r.oid()
 			}
 		case 'T':
-			n := r.int16()
-			st.cols = make([]string, n)
-			st.rowTyps = make([]oid.Oid, n)
-			for i := range st.cols {
-				st.cols[i] = r.string()
-				r.next(6)
-				st.rowTyps[i] = r.oid()
-				r.next(8)
-			}
+			st.cols, st.rowTyps = parseMeta(r)
 		case 'n':
 			// no data
 		case 'Z':
@@ -245,14 +275,33 @@ func (cn *conn) Close() (err error) {
 	return cn.c.Close()
 }
 
-// Implement the optional "Execer" interface for one-shot queries
-func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err error) {
+// Implement the "Queryer" interface
+func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err error) {
 	defer errRecover(&err)
 
 	// Check to see if we can use the "simpleQuery" interface, which is
 	// *much* faster than going through prepare/exec
 	if len(args) == 0 {
 		return cn.simpleQuery(query)
+	}
+
+	st, err := cn.prepareToSimpleStmt(query, "")
+	if err != nil {
+		panic(err)
+	}
+
+	st.exec(args)
+	return &rows{st: st}, nil
+}
+
+// Implement the optional "Execer" interface for one-shot queries
+func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err error) {
+	defer errRecover(&err)
+
+	// Check to see if we can use the "simpleExec" interface, which is
+	// *much* faster than going through prepare/exec
+	if len(args) == 0 {
+		return cn.simpleExec(query)
 	}
 
 	// Use the unnamed statement to defer planning until bind
@@ -424,6 +473,7 @@ type stmt struct {
 	rowTyps   []oid.Oid
 	paramTyps []oid.Oid
 	closed    bool
+	lasterr   error
 }
 
 func (st *stmt) Close() (err error) {
@@ -464,7 +514,7 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 	defer errRecover(&err)
 
 	if len(v) == 0 {
-		return st.cn.simpleQuery(st.query)
+		return st.cn.simpleExec(st.query)
 	}
 	st.exec(v)
 
@@ -575,6 +625,10 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 		return io.EOF
 	}
 
+	if rs.st.lasterr != nil {
+		return rs.st.lasterr
+	}
+
 	defer errRecover(&err)
 
 	for {
@@ -616,6 +670,19 @@ func md5s(s string) string {
 	h := md5.New()
 	h.Write([]byte(s))
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func parseMeta(r *readBuf) (cols []string, rowTyps []oid.Oid) {
+	n := r.int16()
+	cols = make([]string, n)
+	rowTyps = make([]oid.Oid, n)
+	for i := range cols {
+		cols[i] = r.string()
+		r.next(6)
+		rowTyps[i] = r.oid()
+		r.next(8)
+	}
+	return
 }
 
 // parseEnviron tries to mimic some of libpq's environment handling
