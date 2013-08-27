@@ -167,3 +167,8 @@ const (
 	T_int8range            = 3926
 	T__int8range           = 3927
 )
+
+// T_hstore is the oid of the hstore datatype, which, because hstore is
+// a user-installed extension, will differ for each installation, and therefore
+// this value must be set at runtime.
+var T_hstore Oid
