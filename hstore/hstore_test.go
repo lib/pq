@@ -1,17 +1,44 @@
-package pq
+package hstore
 
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"log"
 	"testing"
+
+	_ "github.com/lib/pq"
 )
+
+type Fatalistic interface {
+	Fatal(args ...interface{})
+}
+
+func openTestConn(t Fatalistic) *sql.DB {
+	datname := os.Getenv("PGDATABASE")
+	sslmode := os.Getenv("PGSSLMODE")
+
+	if datname == "" {
+		os.Setenv("PGDATABASE", "pqgotest")
+	}
+
+	if sslmode == "" {
+		os.Setenv("PGSSLMODE", "disable")
+	}
+
+	conn, err := sql.Open("postgres", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return conn
+}
 
 func TestHstore(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	RegisterHstore(db)
+	Register(db)
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -74,7 +101,7 @@ func mapsEqual(m1, m2 map[string]string) bool {
 var db *sql.DB
 
 func ExampleHstore() {
-	RegisterHstore(db)
+	Register(db)
 	rows, err := db.Query("SELECT attributes FROM people")
 	if err != nil {
 		log.Fatal(err)

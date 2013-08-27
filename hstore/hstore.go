@@ -1,17 +1,16 @@
-package pq
+package hstore
 
 import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
 
-	"github.com/lib/pq/hstore"
 	"github.com/lib/pq/oid"
 )
 
-// RegisterHstore tests that the 'hstore' extension is created in the database,
+// Register tests that the 'hstore' extension is created in the database,
 // and must be called prior to any queries that use the Hstore type.
-func RegisterHstore(db *sql.DB) {
+func Register(db *sql.DB) {
 	// TODO: assert db is postgres driver
 	var hstoreOid int
 	if err := db.QueryRow("SELECT 'hstore'::regtype::oid").Scan(&hstoreOid); err != nil {
@@ -36,9 +35,9 @@ var ErrInvalidHstoreScan = errors.New("invalid hstore scan type")
 func (hs *Hstore) Scan(src interface{}) error {
 	switch src := src.(type) {
 	case string:
-		*hs = Hstore(hstore.Decode(src))
+		*hs = Hstore(Decode(src))
 	case []byte:
-		*hs = Hstore(hstore.Decode(string(src)))
+		*hs = Hstore(Decode(string(src)))
 	case nil:
 		*hs = nil
 	default:
@@ -57,7 +56,7 @@ func (hs Hstore) Value() (driver.Value, error) {
 	if !hs.Valid() {
 		return nil, nil
 	}
-	return hstore.Encode(hs), nil
+	return Encode(hs), nil
 }
 
 var _ driver.Valuer = Hstore{}
