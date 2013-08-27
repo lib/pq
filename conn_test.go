@@ -166,7 +166,7 @@ func TestEncodeDecode(t *testing.T) {
 	defer db.Close()
 
 	q := `
-		SELECT 
+		SELECT
 			'\x000102'::bytea,
 			'foobar'::text,
 			NULL::integer,
@@ -174,7 +174,7 @@ func TestEncodeDecode(t *testing.T) {
 			0::boolean,
 			123,
 			3.14::float8
-		WHERE 
+		WHERE
 			    '\x000102'::bytea = $1
 			AND 'foobar'::text = $2
 			AND $3::integer is NULL
@@ -348,6 +348,21 @@ func TestErrorOnQuery(t *testing.T) {
 
 	if r.Next() {
 		t.Fatal("unexpected row")
+	}
+}
+
+func TestSimpleQuery(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	r, err := db.Query("select 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	if !r.Next() {
+		t.Fatal("expected row")
 	}
 }
 
