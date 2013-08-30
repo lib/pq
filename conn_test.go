@@ -259,6 +259,16 @@ func TestNoData(t *testing.T) {
 		}
 		t.Fatal("unexpected row")
 	}
+
+	_, err = db.Query("SELECT * FROM nonexistenttable WHERE age=$1", 20)
+	if err == nil {
+		t.Fatal("Should have raised an error on non existent table")
+	}
+
+	_, err = db.Query("SELECT * FROM nonexistenttable")
+	if err == nil {
+		t.Fatal("Should have raised an error on non existent table")
+	}
 }
 
 func TestPGError(t *testing.T) {
@@ -327,18 +337,15 @@ func TestErrorOnQuery(t *testing.T) {
 
 	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
 	r, err := db.Query(sql)
-	if err != nil {
-		t.Fatal(err)
+	if r != nil {
+		t.Fatal("Should not return rows")
 	}
-	defer r.Close()
-
-	if r.Next() {
-		t.Fatal("unexpected row, want error")
+	if err == nil {
+		t.Fatal("Should have raised error")
 	}
-
-	_, ok := r.Err().(PGError)
+	_, ok := err.(PGError)
 	if !ok {
-		t.Fatalf("expected PGError, was: %#v", r.Err())
+		t.Fatalf("expected PGError, was: %#v", err)
 	}
 
 	r, err = db.Query("SELECT 1 WHERE true = false") // returns no rows
