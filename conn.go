@@ -289,6 +289,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 			return
 		case 'E':
 			st.lasterr = parseError(r)
+			err = st.lasterr
 			return
 		case 'T':
 			st.cols, st.rowTyps = parseMeta(r)
