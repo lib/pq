@@ -280,6 +280,16 @@ func TestPGError(t *testing.T) {
 	}
 }
 
+func TestMissingTableError(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Query("SELECT * FROM NonExistentTable")
+	if err == nil {
+		t.Fatalf("expected error from select on non-existent table")
+	}
+}
+
 func TestBadConn(t *testing.T) {
 	var err error
 
