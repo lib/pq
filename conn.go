@@ -276,21 +276,24 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 	b.string(q)
 	cn.send(b)
 
-	res = &rows{st: st}
-
 	for {
 		t, r := cn.recv1()
 		switch t {
-		case 'C':
-			// done
-			return
+		case 'C', 'N':
+			// Ignore--we may need to consume Complete
+			// here if the query finishes with an error,
+			// and NoticeResponse if we get a notice (we
+			// should communicate these rather than
+			// ignoring them, but there's not a great way
+			// to expose them right now)
 		case 'Z':
 			// done
 			return
 		case 'E':
-			st.lasterr = parseError(r)
-			return
+			res = nil
+			err = parseError(r)
 		case 'T':
+			res = &rows{st: st}
 			st.cols, st.rowTyps = parseMeta(r)
 			// After we get the meta, we want to kick out to Next()
 			return
@@ -593,10 +596,8 @@ func (st *stmt) Close() (err error) {
 	return nil
 }
 
-func (st *stmt) Query(v []driver.Value) (_ driver.Rows, err error) {
-	defer errRecover(&err)
-	st.exec(v)
-	return &rows{st: st}, nil
+func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) {
+	return st.cn.Query(st.query, v)
 }
 
 func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
