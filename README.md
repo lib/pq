@@ -104,6 +104,7 @@ code still exists in here.
 * Joakim Sernbrant (serbaut)
 * John Gallagher (jgallagher)
 * Kamil Kisiel (kisielk)
+* Kelly Dunn (kellydunn)
 * Keith Rarick (kr)
 * Maciek Sakrejda (deafbybeheading)
 * Marc Brinkmann (mbr)
