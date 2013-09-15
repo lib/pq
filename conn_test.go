@@ -395,11 +395,42 @@ func TestBindError(t *testing.T) {
 	defer r.Close()
 }
 
+var envParseTests = []struct {
+	Expected map[string]string
+	ExpectPanic bool
+	Env []string
+}{
+	{
+		Env: []string{"PGDATABASE=hello", "PGUSER=goodbye"},
+		Expected: map[string]string{"dbname": "hello", "user": "goodbye"},
+	},
+	{
+		Env: []string{"PGDATESTYLE=ISO, MDY"},
+		Expected: map[string]string{},
+	},
+	{
+		Env: []string{"PGDATESTYLE=ISO, YMD"},
+		ExpectPanic: true,
+	},
+}
+
 func TestParseEnviron(t *testing.T) {
-	expected := map[string]string{"dbname": "hello", "user": "goodbye"}
-	results := parseEnviron([]string{"PGDATABASE=hello", "PGUSER=goodbye"})
-	if !reflect.DeepEqual(expected, results) {
-		t.Fatalf("Expected: %#v Got: %#v", expected, results)
+	for i, tt := range envParseTests {
+		tryParse := func(env []string) (result map[string]string, panicked bool) {
+			defer func() {
+				if p := recover(); p != nil {
+					panicked = true
+				}
+			}()
+			return parseEnviron(env), false
+		}
+		results, gotPanic := tryParse(tt.Env)
+		if gotPanic != tt.ExpectPanic {
+			t.Errorf("%d: Expected panic: %#v Got: %#v", i, tt.ExpectPanic, gotPanic)
+		}
+		if !reflect.DeepEqual(tt.Expected, results) {
+			t.Errorf("%d: Expected: %#v Got: %#v", i, tt.Expected, results)
+		}
 	}
 }
 
@@ -570,6 +601,42 @@ func TestParseOpts(t *testing.T) {
 			t.Errorf("%q got unexpected error: %s", test.in, err)
 		} else if err == nil && !reflect.DeepEqual(test.expected, o) {
 			t.Errorf("%q got: %#v want: %#v", test.in, o, test.expected)
+		}
+	}
+}
+
+
+var utf8tests = []struct{
+	Value string
+	Valid bool
+}{
+	{"unicode", true},
+	{"utf-8", true},
+	{"utf_8", true},
+	{"UTF-8", true},
+	{"UTF8", true},
+	{"utf8", true},
+	{"u n ic_ode", true},
+	{"ut_f%8", true},
+	{"ubf8", false},
+	{"punycode", false},
+}
+
+func TestMustBeUTF8(t *testing.T) {
+	for i, tt := range utf8tests {
+		result := func() (valid bool) {
+			valid = true
+			defer func() {
+				if err := recover(); err != nil {
+					valid = false
+				}
+			}()
+			mustBeUtf8(tt.Value)
+			return
+		}()
+		if result != tt.Valid {
+			t.Errorf("%d: got %v is valid utf8 name: %v; want %v",
+				i, tt.Value, result, tt.Valid)
 		}
 	}
 }

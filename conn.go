@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -792,10 +793,22 @@ func parseEnviron(env []string) (out map[string]string) {
 		accrue := func(keyname string) {
 			out[keyname] = parts[1]
 		}
+		unsupported := func() {
+			panic(fmt.Sprintf("setting %v not supported", parts[0]))
+		}
+		mustBe := func(expected string) {
+			if parts[1] != expected {
+				panic(fmt.Sprintf("setting %v must be absent or %v; got %v",
+					parts[0], expected, parts[1]))
+			}
+		}
 
 		// The order of these is the same as is seen in the
-		// PostgreSQL 9.1 manual, with omissions briefly
-		// noted.
+		// PostgreSQL 9.1 manual. Unsupported but well-defined
+		// keys cause a panic; these should be unset prior to
+		// execution. Options which pq expects to be set to a
+		// certain value are allowed, but must be set to that
+		// value if present (they can, of course, be absent).
 		switch parts[0] {
 		case "PGHOST":
 			accrue("host")
@@ -809,8 +822,8 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("user")
 		case "PGPASSWORD":
 			accrue("password")
-		// skip PGPASSFILE, PGSERVICE, PGSERVICEFILE,
-		// PGREALM
+		case "PGPASSFILE", "PGSERVICE", "PGSERVICEFILE", "PGREALM":
+			unsupported()
 		case "PGOPTIONS":
 			accrue("options")
 		case "PGAPPNAME":
@@ -836,11 +849,24 @@ func parseEnviron(env []string) (out map[string]string) {
 		case "PGCONNECT_TIMEOUT":
 			accrue("connect_timeout")
 		case "PGCLIENTENCODING":
-			accrue("client_encoding")
-			// skip PGDATESTYLE, PGTZ, PGGEQO, PGSYSCONFDIR,
-			// PGLOCALEDIR
+			mustBeUtf8(parts[1])
+		case "PGDATESTYLE":
+			mustBe("ISO, MDY")
+		case "PGTZ", "PGGEQO", "PGSYSCONFDIR", "PGLOCALEDIR":
+			unsupported()
 		}
 	}
 
 	return out
+}
+
+var notUTF8re = regexp.MustCompile("[^a-zA-Z0-9]")
+
+func mustBeUtf8(value string) {
+	// Recognize all sorts of silly things as utf-8, like Postgres does
+	encoding := notUTF8re.ReplaceAllLiteralString(strings.ToLower(value),
+		"")
+	if encoding != "utf8" && encoding != "unicode" {
+		panic("setting PGCLIENT_ENCODING must be absent or 'UTF8'")
+	}
 }
