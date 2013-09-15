@@ -110,6 +110,7 @@ code still exists in here.
 * Matt Robenolt (mattrobenolt)
 * Martin Olsen (martinolsen)
 * Mike Lewis (mikelikespie)
+* Nicolas Patry (Narsil)
 * Ryan Smith (ryandotsmith)
 * Samuel Stauffer (samuel)
 * notedit (notedit)
