@@ -5,11 +5,10 @@ import (
 )
 
 func newLock() (*Lock, error) {
-	lock, err := NewLock("")
+	lock, err := NewLock("", StringAsKey("pg"), StringAsKey("lock"))
 	if err != nil {
 		return nil, err
 	}
-	lock.Key = StringAsKey("lock")
 	return lock, nil
 }
 
