@@ -19,7 +19,7 @@ func StringAsKey(name string) int32 {
 }
 
 func NewLock(dataSourceName string) (*Lock, error) {
-	conn, err := sql.Open("postgres", "")
+	conn, err := sql.Open("postgres", dataSourceName)
 	if err != nil {
 		return nil, err
 	}
