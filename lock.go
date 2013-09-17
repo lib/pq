@@ -2,20 +2,12 @@ package pq
 
 import (
 	"database/sql"
-	"hash/crc32"
 )
 
 type Lock struct {
 	key   int32
 	space int32
 	conn  *sql.DB
-}
-
-func StringAsKey(name string) int32 {
-	hash := crc32.NewIEEE()
-	hash.Write([]byte(name))
-	i := int32(hash.Sum32())
-	return i
 }
 
 func NewLock(dataSourceName string, space int32, key int32) (*Lock, error) {

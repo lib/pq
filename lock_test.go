@@ -2,10 +2,18 @@ package pq
 
 import (
 	"testing"
+	"hash/crc32"
 )
 
+func stringToInt(name string) int32 {
+	hash := crc32.NewIEEE()
+	hash.Write([]byte(name))
+	i := int32(hash.Sum32())
+	return i
+}
+
 func newLock() (*Lock, error) {
-	lock, err := NewLock("", StringAsKey("pg"), StringAsKey("lock"))
+	lock, err := NewLock("", stringToInt("pg"), stringToInt("lock"))
 	if err != nil {
 		return nil, err
 	}
