@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 var (
@@ -305,6 +306,14 @@ func BenchmarkEncodeBool(b *testing.B) {
 	}
 }
 
+var testTimestamptz = time.Date(2001, time.January, 1, 0, 0, 0, 0, time.Local)
+
+func BenchmarkEncodeTimestamptz(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		encode(testTimestamptz, oid.T_timestamptz)
+	}
+}
+
 var testIntBytes = []byte("1234")
 
 func BenchmarkDecodeInt64(b *testing.B) {
@@ -336,4 +345,12 @@ func TestDecodeBool(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows.Close()
+}
+
+var testTimestamptzBytes = []byte("2013-09-17 22:15:32.360754-07")
+
+func BenchmarkDecodeTimestamptz(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		decode(testTimestamptzBytes, oid.T_timestamptz)
+	}
 }
