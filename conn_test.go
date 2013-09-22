@@ -395,21 +395,57 @@ func TestBindError(t *testing.T) {
 	defer r.Close()
 }
 
+// TestReturning tests that an INSERT query using the RETURNING clause returns a row.
+func TestReturning(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TEMP TABLE distributors (did integer default 0, dname text)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.Query("INSERT INTO distributors (did, dname) VALUES (DEFAULT, 'XYZ Widgets') " +
+		"RETURNING did;")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rows.Next() {
+		t.Fatal("no rows")
+	}
+	var did int
+	err = rows.Scan(&did)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if did != 0 {
+		t.Fatalf("bad value for did: got %d, want %d", did, 0)
+	}
+
+	if rows.Next() {
+		t.Fatal("unexpected next row")
+	}
+	err = rows.Err()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 var envParseTests = []struct {
-	Expected map[string]string
+	Expected    map[string]string
 	ExpectPanic bool
-	Env []string
+	Env         []string
 }{
 	{
-		Env: []string{"PGDATABASE=hello", "PGUSER=goodbye"},
+		Env:      []string{"PGDATABASE=hello", "PGUSER=goodbye"},
 		Expected: map[string]string{"dbname": "hello", "user": "goodbye"},
 	},
 	{
-		Env: []string{"PGDATESTYLE=ISO, MDY"},
+		Env:      []string{"PGDATESTYLE=ISO, MDY"},
 		Expected: map[string]string{},
 	},
 	{
-		Env: []string{"PGDATESTYLE=ISO, YMD"},
+		Env:         []string{"PGDATESTYLE=ISO, YMD"},
 		ExpectPanic: true,
 	},
 }
@@ -605,8 +641,7 @@ func TestParseOpts(t *testing.T) {
 	}
 }
 
-
-var utf8tests = []struct{
+var utf8tests = []struct {
 	Value string
 	Valid bool
 }{
