@@ -545,27 +545,6 @@ func TestNullAfterNonNull(t *testing.T) {
 	}
 }
 
-// Stress test the performance of parsing results from the wire.
-func BenchmarkResultParsing(b *testing.B) {
-	b.StopTimer()
-
-	db := openTestConn(b)
-	defer db.Close()
-	_, err := db.Exec("BEGIN")
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	b.StartTimer()
-	for i := 0; i < b.N; i++ {
-		res, err := db.Query("SELECT generate_series(1, 50000)")
-		if err != nil {
-			b.Fatal(err)
-		}
-		res.Close()
-	}
-}
-
 func Test64BitErrorChecking(t *testing.T) {
 	defer func() {
 		if err := recover(); err != nil {
