@@ -358,6 +358,24 @@ func TestErrorOnQuery(t *testing.T) {
 	}
 }
 
+func TestErrorOnQueryRow(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
+	r := db.QueryRow(sql)
+	var v int
+	err := r.Scan(&v)
+	if err == nil {
+		t.Fatal("Should have raised error")
+	}
+
+	_, ok := err.(PGError)
+	if !ok {
+		t.Fatalf("expected PGError, got %#v", err)
+	}
+}
+
 func TestSimpleQuery(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
