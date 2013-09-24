@@ -116,11 +116,13 @@ func (vs Values) Get(k string) (v string) {
 	return vs[k]
 }
 
+// scanner implements a tokenizer for libpq-style option strings.
 type scanner struct {
 	s []rune
 	i int
 }
 
+// NewScanner returns a new scanner initialized with the option string s.
 func NewScanner(s string) *scanner {
 	return &scanner{[]rune(s), 0}
 }
@@ -146,6 +148,7 @@ func (s *scanner) SkipSpaces() (rune, bool) {
 	return r, ok
 }
 
+// parseOpts parses the options from name and adds them to the Values.
 func parseOpts(name string, o Values) error {
 	s := NewScanner(name)
 

@@ -617,9 +617,14 @@ func TestParseOpts(t *testing.T) {
 		{"dbname=hello user= goodbye", Values{"dbname": "hello", "user": "goodbye"}, true},
 		{"host=localhost password='correct horse battery staple'", Values{"host": "localhost", "password": "correct horse battery staple"}, true},
 		{"dbname=データベース password=パスワード", Values{"dbname": "データベース", "password": "パスワード"}, true},
+
 		// The parser ignores spaces after = and interprets the next set of non-whitespace characters as the value.
-		// This seems to be how the C library does it.
 		{"user= password=foo", Values{"user": "password=foo"}, true},
+
+		// The parser ignores trailing keys
+		{"user=foo blah", Values{"user": "foo"}, true},
+		{"user=foo blah   ", Values{"user": "foo"}, true},
+		{"user=foo blah=   ", Values{"user": "foo"}, true},
 
 		// No '=' after the key
 		{"dbname user=goodbye", Values{}, false},
