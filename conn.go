@@ -149,6 +149,8 @@ func (s *scanner) SkipSpaces() (rune, bool) {
 }
 
 // parseOpts parses the options from name and adds them to the Values.
+//
+// The parsing code is based on conninfo_parse from libpq's fe-connect.c
 func parseOpts(name string, o Values) error {
 	s := NewScanner(name)
 
