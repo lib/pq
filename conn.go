@@ -345,6 +345,8 @@ func (cn *conn) prepareToSimpleStmt(q, stmtName string) (_ *stmt, err error) {
 			}
 		case 'T':
 			st.cols, st.rowTyps = parseMeta(r)
+		case 'S':
+			// ParameterStatus, ignore
 		case 'n':
 			// no data
 		case 'Z':
@@ -675,6 +677,8 @@ func (st *stmt) exec(v []driver.Value) {
 				panic(err)
 			}
 			return
+		case 'S':
+			// ParameterStatus, ignore
 		case 'N':
 			// ignore
 		default:
