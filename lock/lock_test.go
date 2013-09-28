@@ -1,4 +1,4 @@
-package pq
+package lock
 
 import (
 	"testing"
@@ -29,7 +29,10 @@ func HammerLock(l *Lock, loops int, cdone chan bool) {
 }
 
 func TestLock(t *testing.T) {
-	l, _ := newLock()
+	l, err := newLock()
+	if err != nil {
+		t.Fatal(err)
+	}
 	c := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go HammerLock(l, 10, c)
