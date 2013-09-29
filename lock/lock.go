@@ -17,6 +17,7 @@ type Lock struct {
 
 var ErrLockNotHeld = errors.New("lock wasn't held")
 
+// Create a new Lock based on the given data-source name and keys.
 func NewLock(dataSourceName string, space int32, key int32) (*Lock, error) {
 	conn, err := sql.Open("postgres", dataSourceName)
 	if err != nil {
@@ -34,7 +35,7 @@ func (l *Lock) Lock() error {
 	return l.lock("SELECT pg_advisory_lock($1, $2)", l.space, l.key)
 }
 
-// RLock locks rw for reading.
+// RLock locks l for reading.
 func (l *Lock) RLock() error {
 	return l.lock("SELECT pg_advisory_lock_shared($1, $2)", l.space, l.key)
 }
@@ -49,7 +50,7 @@ func (l *Lock) Unlock() error {
 	return l.unlock("SELECT pg_advisory_unlock($1, $2)", l.space, l.key)
 }
 
-// RUnlock undoes a single RLock call
+// RUnlock undoes a single RLock call.
 func (l *Lock) RUnlock() error {
 	return l.unlock("SELECT pg_advisory_unlock_shared($1, $2)", l.space, l.key)
 }
