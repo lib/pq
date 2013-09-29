@@ -1,3 +1,5 @@
+// Lock interface around PostgresSQL advisory locking, see docs:
+// http://www.postgresql.org/docs/current/static/explicit-locking.html#ADVISORY-LOCKS
 package lock
 
 import (
