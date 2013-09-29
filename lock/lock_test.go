@@ -1,8 +1,8 @@
 package lock
 
 import (
-	"testing"
 	"hash/crc32"
+	"testing"
 )
 
 func stringToInt(name string) int32 {
@@ -12,12 +12,12 @@ func stringToInt(name string) int32 {
 	return i
 }
 
-func newLock() (*Lock, error) {
-	lock, err := NewLock("", stringToInt("pg"), stringToInt("lock"))
+func newLock(name string, t *testing.T) *Lock {
+	lock, err := NewLock("", stringToInt("pg"), stringToInt(name))
 	if err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
-	return lock, nil
+	return lock
 }
 
 func HammerLock(l *Lock, loops int, cdone chan bool) {
@@ -29,15 +29,58 @@ func HammerLock(l *Lock, loops int, cdone chan bool) {
 }
 
 func TestLock(t *testing.T) {
-	l, err := newLock()
-	if err != nil {
-		t.Fatal(err)
-	}
+	l := newLock("lock", t)
 	c := make(chan bool)
 	for i := 0; i < 10; i++ {
 		go HammerLock(l, 10, c)
 	}
 	for i := 0; i < 10; i++ {
 		<-c
+	}
+}
+
+func TestNotHeld(t *testing.T) {
+	l := newLock("held", t)
+	l.Lock()
+	l.Unlock()
+	err := l.Unlock()
+	if err != ErrLockNotHeld {
+		t.Fatal(err)
+	}
+}
+
+func TestSharedLocker(t *testing.T) {
+	w := newLock("shared", t)
+	l := newLock("shared", t)
+	wlocked := make(chan bool, 1)
+	rlocked := make(chan bool, 1)
+	wl := w.Locker()
+	rl := l.RLocker()
+	n := 10
+	go func() {
+		for i := 0; i < n; i++ {
+			rl.Lock()
+			rl.Lock()
+			rlocked <- true
+			wl.Lock()
+			wlocked <- true
+		}
+	}()
+	for i := 0; i < n; i++ {
+		<-rlocked
+		rl.Unlock()
+		select {
+		case <-wlocked:
+			t.Fatal("RLocker() didn't read-lock it")
+		default:
+		}
+		rl.Unlock()
+		<-wlocked
+		select {
+		case <-rlocked:
+			t.Fatal("RLocker() didn't respect the write lock")
+		default:
+		}
+		wl.Unlock()
 	}
 }
