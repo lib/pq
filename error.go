@@ -22,6 +22,7 @@ type Error error
 
 type PGError interface {
 	Error() string
+	ErrorCode() string
 	Fatal() bool
 	Get(k byte) (v string)
 }
@@ -43,6 +44,11 @@ func (err *pgError) Get(k byte) (v string) {
 
 func (err *pgError) Fatal() bool {
 	return err.Get('S') == Efatal
+}
+
+// Returns the Postgresql Error Code for this error.
+func (err *pgError) ErrorCode() string {
+	return err.Get('C')
 }
 
 func (err *pgError) Error() string {
