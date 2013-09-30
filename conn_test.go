@@ -290,7 +290,7 @@ func TestNoData(t *testing.T) {
 	}
 }
 
-func TestPGError(t *testing.T) {
+func TestError(t *testing.T) {
 	// Don't use the normal connection setup, this is intended to
 	// blow up in the startup packet from a non-existent user.
 	db, err := openTestConnConninfo("user=thisuserreallydoesntexist")
@@ -304,8 +304,8 @@ func TestPGError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 
-	if err, ok := err.(PGError); !ok {
-		t.Fatalf("expected a PGError, got: %v", err)
+	if err != driver.ErrBadConn {
+		t.Fatalf("expected driver.ErrBadConn, got: %v", err)
 	}
 }
 
@@ -323,8 +323,7 @@ func TestBadConn(t *testing.T) {
 
 	func() {
 		defer errRecover(&err)
-		e := &pgError{c: make(map[byte]string)}
-		e.c['S'] = Efatal
+		e := &Error{Severity: Efatal}
 		panic(e)
 	}()
 
@@ -339,9 +338,9 @@ func TestErrorOnExec(t *testing.T) {
 
 	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
 	_, err := db.Exec(sql)
-	_, ok := err.(PGError)
+	_, ok := err.(*Error)
 	if !ok {
-		t.Fatalf("expected PGError, was: %#v", err)
+		t.Fatalf("expected Error, was: %#v", err)
 	}
 
 	_, err = db.Exec("SELECT 1 WHERE true = false") // returns no rows
@@ -362,9 +361,9 @@ func TestErrorOnQuery(t *testing.T) {
 	if err == nil {
 		t.Fatal("Should have raised error")
 	}
-	_, ok := err.(PGError)
+	_, ok := err.(*Error)
 	if !ok {
-		t.Fatalf("expected PGError, was: %#v", err)
+		t.Fatalf("expected Error, was: %#v", err)
 	}
 
 	r, err = db.Query("SELECT 1 WHERE true = false") // returns no rows
@@ -389,9 +388,9 @@ func TestErrorOnQueryRow(t *testing.T) {
 		t.Fatal("Should have raised error")
 	}
 
-	_, ok := err.(PGError)
+	_, ok := err.(*Error)
 	if !ok {
-		t.Fatalf("expected PGError, got %#v", err)
+		t.Fatalf("expected Error, got %#v", err)
 	}
 }
 
