@@ -28,11 +28,11 @@
 
 These are a subset of the libpq connection parameters.  In addition, a
 number of the [environment
-variables](http://www.postgresql.org/docs/9.1/static/libpq-envars.html)
+variables](http://www.postgresql.org/docs/current/static/libpq-envars.html)
 supported by libpq are also supported.  Just like libpq, these have
 lower precedence than explicitly provided connection parameters.
 
-See http://www.postgresql.org/docs/9.1/static/libpq-connect.html.
+See http://www.postgresql.org/docs/current/static/libpq-connect.html.
 
 * `dbname` - The name of the database to connect to
 * `user` - The user to sign in as
