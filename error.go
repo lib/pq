@@ -18,65 +18,83 @@ const (
 	Elog     = "LOG"
 )
 
-type Error error
-
-type PGError interface {
-	Error() string
-	Fatal() bool
-	Get(k byte) (v string)
+// Error represents an error communicating with the server.
+//
+// See http://www.postgresql.org/docs/current/static/protocol-error-fields.html for details of the fields
+type Error struct {
+	Severity         string
+	Code             ErrorCode
+	Message          string
+	Detail           string
+	Hint             string
+	Position         string
+	InternalPosition string
+	InternalQuery    string
+	Where            string
+	Schema           string
+	Table            string
+	Column           string
+	DataTypeName     string
+	Constraint       string
+	File             string
+	Line             string
+	Routine          string
 }
-type pgError struct {
-	c map[byte]string
-}
 
-func parseError(r *readBuf) *pgError {
-	err := &pgError{make(map[byte]string)}
+func parseError(r *readBuf) *Error {
+	err := new(Error)
 	for t := r.byte(); t != 0; t = r.byte() {
-		err.c[t] = r.string()
+		msg := r.string()
+		switch t {
+		case 'S':
+			err.Severity = msg
+		case 'C':
+			err.Code = msg
+		case 'M':
+			err.Message = msg
+		case 'D':
+			err.Detail = msg
+		case 'H':
+			err.Hint = msg
+		case 'P':
+			err.Position = msg
+		case 'p':
+			err.InternalPosition = msg
+		case 'q':
+			err.InternalQuery = msg
+		case 'W':
+			err.Where = msg
+		case 's':
+			err.Schema = msg
+		case 't':
+			err.Table = msg
+		case 'c':
+			err.Column = msg
+		case 'd':
+			err.DataTypeName = msg
+		case 'n':
+			err.Constraint = msg
+		case 'F':
+			err.File = msg
+		case 'L':
+			err.Line = msg
+		case 'R':
+			err.Routine = msg
+		}
 	}
 	return err
 }
 
-func (err *pgError) Get(k byte) (v string) {
-	return err.c[k]
+func (err *Error) Fatal() bool {
+	return err.Severity == Efatal
 }
 
-func (err *pgError) Fatal() bool {
-	return err.Get('S') == Efatal
-}
-
-func (err *pgError) Error() string {
-	var s string
-	for k, v := range err.c {
-		s += fmt.Sprintf(" %c:%q", k, v)
-	}
-	return "pq: " + s[1:]
+func (err Error) Error() string {
+	return "pq: " + err.Message
 }
 
 func errorf(s string, args ...interface{}) {
-	panic(Error(fmt.Errorf("pq: %s", fmt.Sprintf(s, args...))))
-}
-
-type SimplePGError struct {
-	pgError
-}
-
-func (err *SimplePGError) Error() string {
-	return "pq: " + err.Get('M')
-}
-
-func errRecoverWithPGReason(err *error) {
-	e := recover()
-	switch v := e.(type) {
-	case nil:
-		// Do nothing
-	case *pgError:
-		// Return a SimplePGError in place
-		*err = &SimplePGError{*v}
-	default:
-		// Otherwise re-panic
-		panic(e)
-	}
+	panic(fmt.Errorf("pq: %s", fmt.Sprintf(s, args...)))
 }
 
 func errRecover(err *error) {
@@ -86,7 +104,7 @@ func errRecover(err *error) {
 		// Do nothing
 	case runtime.Error:
 		panic(v)
-	case *pgError:
+	case *Error:
 		if v.Fatal() {
 			*err = driver.ErrBadConn
 		} else {
