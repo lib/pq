@@ -90,7 +90,7 @@ func fakeConn(content string, prefixLen int) *conn {
 func BenchmarkMockSelectString(b *testing.B) {
 	b.StopTimer()
 	// taken from a recorded run of BenchmarkSelectString
-	// See: http://www.postgresql.org/docs/9.2/static/protocol-message-formats.html
+	// See: http://www.postgresql.org/docs/current/static/protocol-message-formats.html
 	const response = "1\x00\x00\x00\x04" +
 		"t\x00\x00\x00\x06\x00\x00" +
 		"T\x00\x00\x00!\x00\x01?column?\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\xc1\xff\xfe\xff\xff\xff\xff\x00\x00" +
