@@ -18,10 +18,10 @@ const (
 	Elog     = "LOG"
 )
 
-// ErrorCodeNames is a mapping between five digit Error Codes and the human
+// errorCodeNames is a mapping between five digit Error Codes and the human
 // readable "Condition Name" for that error. It is derived from the list at
 // http://www.postgresql.org/docs/9.3/static/errcodes-appendix.html
-var ErrorCodeNames = map[string]string {
+var errorCodeNames = map[string]string{
 	// Class 00 — Successful Completion
 	"00000": "successful_completion",
 	// Class 01 — Warning
@@ -302,11 +302,21 @@ type Error error
 
 type PGError interface {
 	Error() string
+
+	// Returns the Postgresql Error Code for this error.
 	ErrorCode() string
+
+	// Returns the Postgresql "Condition Name" for this error. Note that
+	// in some cases multiple codes have the same name; if you need to
+	// distinguish between these use pgError.ErrorCode().
 	ErrorCodeName() string
+
+	// Is this a fatal error?
 	Fatal() bool
+
 	Get(k byte) (v string)
 }
+
 type pgError struct {
 	c map[byte]string
 }
@@ -327,16 +337,12 @@ func (err *pgError) Fatal() bool {
 	return err.Get('S') == Efatal
 }
 
-// Returns the Postgresql Error Code for this error.
 func (err *pgError) ErrorCode() string {
 	return err.Get('C')
 }
 
-// Returns the Postgresql "Condition Name" for this error. Note that in some
-// cases multiple codes have the same name; if your code needs to distinguish
-// between these errors you should use pgError.ErrorCode() instead.
 func (err *pgError) ErrorCodeName() string {
-	return ErrorCodeNames[err.ErrorCode()]
+	return errorCodeNames[err.ErrorCode()]
 }
 
 func (err *pgError) Error() string {
