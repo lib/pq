@@ -388,9 +388,11 @@ func TestErrorOnQueryRow(t *testing.T) {
 		t.Fatal("Should have raised error")
 	}
 
-	_, ok := err.(*Error)
+	e, ok := err.(*Error)
 	if !ok {
 		t.Fatalf("expected Error, got %#v", err)
+	} else if e.Code.Name() != "unique_violation" {
+		t.Fatalf("expected unique_violation, got %s (%+v", e.Code.Name(), err)
 	}
 }
 
