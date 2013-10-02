@@ -41,10 +41,10 @@ func (h HstoreWithNulls) put(key string, value interface{}) {
 	}
 }
 
-// s should be with sql.NullString or string
+// escapes and quotes hstore keys/values
+// s should be a sql.NullString or string
 func hQuote(s interface{}) string {
-	// escapes and quotes hstore keys/values
-	str := ""
+	var str string
 	switch v := s.(type) {
 	case sql.NullString:
 		if !v.Valid {
@@ -53,13 +53,12 @@ func hQuote(s interface{}) string {
 		str = v.String
 	case string:
 		str = v
+	default:
+		panic("not a string or sql.NullString")
 	}
 
-	if len(str) == 4 && strings.ToLower(str) == "null" {
-		return `"` + str + `"`
-	}
-	s1 := strings.Replace(str, "\\", "\\\\", -1)
-	return `"` + strings.Replace(s1, "\"", "\\\"", -1) + `"`
+	str = strings.Replace(str, "\\", "\\\\", -1)
+	return `"` + strings.Replace(str, "\"", "\\\"", -1) + `"`
 }
 
 func hstoreScan(h hstorable, value interface{}) error {
