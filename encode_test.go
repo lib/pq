@@ -222,3 +222,83 @@ func TestByteToText(t *testing.T) {
 		t.Fatalf("expected %v but got %v", b, result)
 	}
 }
+
+func TestSelectIntArray(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	row := db.QueryRow("SELECT '{1,2,3}'::int[]")
+
+	var result []int
+	err := row.Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result) != 3 {
+		t.Errorf("Expected result to have 3 elements, got %d.\n#v", len(result), result)
+	}
+
+	if result[0] != 1 {
+		t.Errorf("Expected result[0] to equal 1, got %d", result[0])
+	}
+
+	if result[1] != 2 {
+		t.Errorf("Expected result[1] to equal 2, got %d", result[1])
+	}
+
+	if result[2] != 3 {
+		t.Errorf("Expected result[2] to equal 3, got %d", result[2])
+	}
+}
+
+func TestSelectStringArray(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	row := db.QueryRow("SELECT '{\"hello\", \"world\"}'::varchar[]")
+
+	var result []string
+	err := row.Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result) != 2 {
+		t.Errorf("Expected result to have 2 elements, got %d.\n#v", len(result), result)
+	}
+
+	if result[0] != "hello" {
+		t.Errorf("Expected result[0] to equal 'hello', got %s", result[0])
+	}
+
+	if result[1] != "world" {
+		t.Errorf("Expected result[1] to equal 'world', got %s", result[1])
+	}
+}
+
+// Not supported yet. Can parse it, but can't get it out of the pq.decoder
+// func TestSelectMultidimensionStringArray(t *testing.T) {
+// 	db := openTestConn(t)
+// 	defer db.Close()
+
+// 	row := db.QueryRow("SELECT '{{\"hello\"}, {\"world\"}}'::varchar[]")
+
+// 	var result [][]string
+// 	err := row.Scan(&result)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+
+// 	if len(result) != 2 {
+// 		t.Errorf("Expected result to have 2 elements, got %d.\n#v", len(result), result)
+// 	}
+
+// 	if result[0][0] != "hello" {
+// 		t.Errorf("Expected result[0] to equal 'hello', got %s", result[0])
+// 	}
+
+// 	if result[1][0] != "world" {
+// 		t.Errorf("Expected result[1] to equal 'world', got %s", result[1])
+// 	}
+// }

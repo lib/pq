@@ -755,6 +755,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 					dest[i] = nil
 					continue
 				}
+
 				dest[i] = decode(r.next(l), rs.st.rowTyps[i])
 			}
 			return

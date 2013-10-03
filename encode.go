@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/hex"
 	"fmt"
+	"github.com/lib/pq/arrays"
 	"github.com/lib/pq/oid"
 	"math"
 	"strings"
@@ -74,6 +75,18 @@ func decode(s []byte, typ oid.Oid) interface{} {
 			errorf("%s", err)
 		}
 		return f
+	case oid.T__int8, oid.T__int4, oid.T__int2:
+		var v []int
+		if err := arrays.Unmarshal(s, &v); err != nil {
+			errorf("%s", err)
+		}
+		return v
+	case oid.T__varchar:
+		var v []string
+		if err := arrays.Unmarshal(s, &v); err != nil {
+			errorf("%s", err)
+		}
+		return v
 	}
 
 	return s
