@@ -3,9 +3,9 @@ package hstore
 import (
 	"database/sql"
 	_ "github.com/lib/pq"
+	"os"
 	"strings"
 	"testing"
-	"os"
 )
 
 type Fatalistic interface {
@@ -45,7 +45,6 @@ func TestHstore(t *testing.T) {
 	}
 
 	hs := Hstore{}
-	hsn := HstoreWithNulls{}
 
 	// test for null-valued hstores
 	err = db.QueryRow("SELECT NULL::hstore").Scan(&hs)
@@ -89,31 +88,32 @@ func TestHstore(t *testing.T) {
 
 	// a few example maps to test out
 	hsOnePair := Hstore{
-		Map: map[string]string{
-			"key1": "value1",
+		Map: map[string]sql.NullString{
+			"key1": sql.NullString{"value1", true},
 		},
 	}
 
 	hsThreePairs := Hstore{
-		Map: map[string]string{
-			"key1": "value1",
-			"key2": "value2",
-			"key3": "value3",
+		Map: map[string]sql.NullString{
+			"key1": sql.NullString{"value1", true},
+			"key2": sql.NullString{"value2", true},
+			"key3": sql.NullString{"value3", true},
 		},
 	}
 
 	hsSmorgasbord := Hstore{
-		Map: map[string]string{
-			"nullstring":             "NULL",
-			"NULL":                   "NULL string key",
-			"withbracket":            "value>42",
-			"withequal":              "value=42",
-			`"withquotes1"`:          `this "should" be fine`,
-			`"withquotes"2"`:         `this "should\" also be fine`,
-			"embedded1":              "value1=>x1",
-			"embedded2":              `"value2"=>x2`,
-			"withnewlines":           "\n\nvalue\t=>2",
-			"<<all sorts of crazy>>": `this, "should,\" also, => be fine`,
+		Map: map[string]sql.NullString{
+			"nullstring":             sql.NullString{"NULL", true},
+			"actuallynull":           sql.NullString{"", false},
+			"NULL":                   sql.NullString{"NULL string key", true},
+			"withbracket":            sql.NullString{"value>42", true},
+			"withequal":              sql.NullString{"value=42", true},
+			`"withquotes1"`:          sql.NullString{`this "should" be fine`, true},
+			`"withquotes"2"`:         sql.NullString{`this "should\" also be fine`, true},
+			"embedded1":              sql.NullString{"value1=>x1", true},
+			"embedded2":              sql.NullString{`"value2"=>x2`, true},
+			"withnewlines":           sql.NullString{"\n\nvalue\t=>2", true},
+			"<<all sorts of crazy>>": sql.NullString{`this, "should,\" also, => be fine`, true},
 		},
 	}
 
@@ -129,49 +129,8 @@ func TestHstore(t *testing.T) {
 		if len(hs.Map) != len(h.Map) {
 			t.Fatalf("expected %d-pair map, got len(map)=%d", len(h.Map), len(hs.Map))
 		}
+
 		for key, val := range hs.Map {
-			otherval, found := h.Map[key]
-			if !found {
-				t.Fatalf("  key '%v' not found in %d-pair map", key, len(h.Map))
-			}
-			if otherval != val {
-				t.Fatalf("  value '%v' <> '%v' in %d-pair map", otherval, val, len(h.Map))
-			}
-		}
-	}
-
-	// adds a null value to input map, converts to HstoreWithNulls and tests everything
-	testBidirectionalWithNulls := func(hnn Hstore) {
-		h := HstoreWithNulls{Map: make(map[string]sql.NullString)}
-		for key, val := range hnn.Map {
-			h.Map[key] = sql.NullString{String: val, Valid: true}
-		}
-		h.Map["key with a NULL value"] = sql.NullString{String: "", Valid: false}
-
-		err = db.QueryRow("SELECT $1::hstore", h).Scan(&hsn)
-		if err != nil {
-			t.Fatalf("re-query %d-pair map failed: %s", len(h.Map), err.Error())
-		}
-		if hsn.Map == nil {
-			t.Fatalf("expected %d-pair map, got null map", len(h.Map))
-		}
-		if len(hsn.Map) != len(h.Map) {
-			t.Fatalf("expected %d-pair map, got len(map)=%d", len(h.Map), len(hsn.Map))
-		}
-
-		// test NULL => "NULL" support also
-		err = db.QueryRow("SELECT $1::hstore", h).Scan(&hs)
-		if err != nil {
-			t.Fatalf("re-query %d-pair map failed: %s", len(h.Map), err.Error())
-		}
-		if hs.Map == nil {
-			t.Fatalf("expected %d-pair map, got null map", len(h.Map))
-		}
-		if len(hs.Map) != len(h.Map) {
-			t.Fatalf("expected %d-pair map, got len(map)=%d", len(h.Map), len(hs.Map))
-		}
-
-		for key, val := range hsn.Map {
 			otherval, found := h.Map[key]
 			if !found {
 				t.Fatalf("  key '%v' not found in %d-pair map", key, len(h.Map))
@@ -182,23 +141,10 @@ func TestHstore(t *testing.T) {
 			if otherval.String != val.String {
 				t.Fatalf("  value '%v' <> '%v' in %d-pair map", otherval.String, val.String, len(h.Map))
 			}
-			if !val.Valid {
-				othervalstr, found := hs.Map[key]
-				if !found {
-					t.Fatalf("  null key '%v' not found in non-null %d-pair map", key, len(h.Map))
-				}
-				if othervalstr != "NULL" {
-					t.Fatalf("  null value is not null: '%v' in %d-pair map", othervalstr, len(h.Map))
-				}
-			}
 		}
 	}
 
 	testBidirectional(hsOnePair)
 	testBidirectional(hsThreePairs)
 	testBidirectional(hsSmorgasbord)
-
-	testBidirectionalWithNulls(hsOnePair)
-	testBidirectionalWithNulls(hsThreePairs)
-	testBidirectionalWithNulls(hsSmorgasbord)
 }

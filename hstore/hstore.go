@@ -6,39 +6,9 @@ import (
 	"strings"
 )
 
-// A simple wrapper for transferring Hstore values back and forth easily.
-// NULL values are converted to the string "NULL", so if you need to
-// differentiate then you must use the HstoreWithNulls type.
+// A wrapper for transferring Hstore values back and forth easily.
 type Hstore struct {
-	Map map[string]string
-}
-
-// A wrapper for transferring Hstore values back and forth without loss of
-// data. If all of your hstore values are non-null, your code will be cleaner
-// if you use the Hstore type instead.
-type HstoreWithNulls struct {
 	Map map[string]sql.NullString
-}
-
-type hstorable interface {
-	// value is either string or nil
-	put(key string, value interface{})
-}
-
-func (h Hstore) put(key string, value interface{}) {
-	if value == nil {
-		h.Map[key] = "NULL"
-	} else {
-		h.Map[key] = value.(string)
-	}
-}
-
-func (h HstoreWithNulls) put(key string, value interface{}) {
-	if value == nil {
-		h.Map[key] = sql.NullString{String: "", Valid: false}
-	} else {
-		h.Map[key] = sql.NullString{String: value.(string), Valid: true}
-	}
 }
 
 // escapes and quotes hstore keys/values
@@ -61,7 +31,16 @@ func hQuote(s interface{}) string {
 	return `"` + strings.Replace(str, "\"", "\\\"", -1) + `"`
 }
 
-func hstoreScan(h hstorable, value interface{}) error {
+// Scan implements the Scanner interface.
+//
+// Note h.Map is reallocated before the scan to clear existing values. If the
+// hstore column's database value is NULL, then h.Map is set to nil instead.
+func (h *Hstore) Scan(value interface{}) error {
+	if value == nil {
+		h.Map = nil
+		return nil
+	}
+	h.Map = make(map[string]sql.NullString)
 	var b byte
 	pair := [][]byte{{}, {}}
 	pi := 0
@@ -100,9 +79,9 @@ func hstoreScan(h hstorable, value interface{}) error {
 				case ',':
 					s := string(pair[1])
 					if !didQuote && len(s) == 4 && strings.ToLower(s) == "null" {
-						h.put(string(pair[0]), nil)
+						h.Map[string(pair[0])] = sql.NullString{String: "", Valid: false}
 					} else {
-						h.put(string(pair[0]), s)
+						h.Map[string(pair[0])] = sql.NullString{String: string(pair[1]), Valid: true}
 					}
 					pair[0] = []byte{}
 					pair[1] = []byte{}
@@ -116,54 +95,12 @@ func hstoreScan(h hstorable, value interface{}) error {
 	if bindex > 0 {
 		s := string(pair[1])
 		if !didQuote && len(s) == 4 && strings.ToLower(s) == "null" {
-			h.put(string(pair[0]), nil)
+			h.Map[string(pair[0])] = sql.NullString{String: "", Valid: false}
 		} else {
-			h.put(string(pair[0]), s)
+			h.Map[string(pair[0])] = sql.NullString{String: string(pair[1]), Valid: true}
 		}
 	}
 	return nil
-}
-
-// Scan implements the Scanner interface.
-//
-// Note h.Map is reallocated before the scan to clear existing values. If the
-// hstore column's database value is NULL, then h.Map is set to nil instead.
-func (h *HstoreWithNulls) Scan(value interface{}) error {
-	if value == nil {
-		h.Map = nil
-		return nil
-	}
-	h.Map = make(map[string]sql.NullString)
-	return hstoreScan(h, value)
-}
-
-// Value implements the driver Valuer interface.
-// Note if h.Map is nil, the database value with be set to NULL also.
-func (h HstoreWithNulls) Value() (driver.Value, error) {
-	if h.Map == nil {
-		return nil, nil
-	}
-	parts := []string{}
-	for key, val := range h.Map {
-		thispart := hQuote(key) + "=>" + hQuote(val)
-		parts = append(parts, thispart)
-	}
-	return []byte(strings.Join(parts, ",")), nil
-}
-
-// Scan implements the Scanner interface. NULL hstore values will be converted
-// to the string "NULL" automatically, if you want to differentiate use the
-// HstoreWithNulls type which uses sql.NullString.
-//
-// Note h.Map is reallocated before the scan to clear existing values. If the
-// hstore column's database value is NULL, then h.Map is set to nil instead.
-func (h *Hstore) Scan(value interface{}) error {
-	if value == nil {
-		h.Map = nil
-		return nil
-	}
-	h.Map = make(map[string]string)
-	return hstoreScan(h, value)
 }
 
 // Value implements the driver Valuer interface. Note if h.Map is nil, the
