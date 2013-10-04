@@ -67,6 +67,13 @@ func Open(name string) (_ driver.Conn, err error) {
 		o.Set(k, v)
 	}
 
+	if strings.HasPrefix(name, "postgres://") {
+		name, err = ParseURL(name)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if err := parseOpts(name, o); err != nil {
 		return nil, err
 	}
