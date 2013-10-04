@@ -34,6 +34,24 @@ func openTestConn(t Fatalistic) *sql.DB {
 	return conn
 }
 
+func TestOpenURL(t *testing.T) {
+	datname := os.Getenv("PGDATABASE")
+	sslmode := os.Getenv("PGSSLMODE")
+	if datname == "" {
+		os.Setenv("PGDATABASE", "pqgotest")
+	}
+
+	if sslmode == "" {
+		os.Setenv("PGSSLMODE", "disable")
+	}
+
+	conn, err := sql.Open("postgres", "postgres://")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+}
+
 func TestExec(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
