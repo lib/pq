@@ -14,7 +14,7 @@ type Fatalistic interface {
 	Fatal(args ...interface{})
 }
 
-func openTestConn(t Fatalistic) *sql.DB {
+func openTestConnConninfo(conninfo string) (*sql.DB, error) {
 	datname := os.Getenv("PGDATABASE")
 	sslmode := os.Getenv("PGSSLMODE")
 
@@ -26,7 +26,11 @@ func openTestConn(t Fatalistic) *sql.DB {
 		os.Setenv("PGSSLMODE", "disable")
 	}
 
-	conn, err := sql.Open("postgres", "")
+	return sql.Open("postgres", conninfo)
+}
+
+func openTestConn(t Fatalistic) *sql.DB {
+	conn, err := openTestConnConninfo("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,21 +39,18 @@ func openTestConn(t Fatalistic) *sql.DB {
 }
 
 func TestOpenURL(t *testing.T) {
-	datname := os.Getenv("PGDATABASE")
-	sslmode := os.Getenv("PGSSLMODE")
-	if datname == "" {
-		os.Setenv("PGDATABASE", "pqgotest")
-	}
-
-	if sslmode == "" {
-		os.Setenv("PGSSLMODE", "disable")
-	}
-
-	conn, err := sql.Open("postgres", "postgres://")
+	db, err := openTestConnConninfo("postgres://")
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn.Close()
+	defer db.Close()
+	// database/sql might not call our Open at all unless we do something with
+	// the connection
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	txn.Rollback()
 }
 
 func TestExec(t *testing.T) {
@@ -292,7 +293,7 @@ func TestNoData(t *testing.T) {
 func TestPGError(t *testing.T) {
 	// Don't use the normal connection setup, this is intended to
 	// blow up in the startup packet from a non-existent user.
-	db, err := sql.Open("postgres", "user=thisuserreallydoesntexist")
+	db, err := openTestConnConninfo("user=thisuserreallydoesntexist")
 	if err != nil {
 		t.Fatal(err)
 	}
