@@ -49,6 +49,12 @@ func TestOpenURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// database/sql might not call our Open at all unless we do something with
+	// the connection
+	err = conn.Ping()
+	if err != nil {
+		t.Fatal(err)
+	}
 	conn.Close()
 }
 
