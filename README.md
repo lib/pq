@@ -108,6 +108,7 @@ code still exists in here.
 * Keith Rarick (kr)
 * Maciek Sakrejda (deafbybeheading)
 * Marc Brinkmann (mbr)
+* Marko Tiikkaja (johto)
 * Matt Robenolt (mattrobenolt)
 * Martin Olsen (martinolsen)
 * Mike Lewis (mikelikespie)
