@@ -51,6 +51,26 @@ Use single quotes for values that contain whitespace:
 
 See http://golang.org/pkg/database/sql to learn how to use with `pq` through the `database/sql` package.
 
+## Listening for notifications
+
+PostgreSQL supports a simple publish/subscribe model over the database
+connections. See http://www.postgresql.org/docs/9.1/static/sql-notify.html for more information.
+
+pq supports this using an infinite `Rows` object. When issuing a
+`Query("LISTEN <channel>")`, the query is sent to the server, and
+a special `Rows` object is returned. It always has the columns
+
+* `bePid int` - The backend process ID
+* `relname string` - The channel name
+* `payload string` - The payload given to `NOTIFY`, or empty.
+
+When the statement object is closed, an implicit `UNLISTEN` is sent
+to the server.
+
+The `Next()` method of the returned `Rows` will never reach EOF,
+except if the connection is terminated. Note that while `Next()`
+is being called, there is no way of interrupting the call.
+
 ## Tests
 
 `go test` is used for testing.  A running PostgreSQL server is
@@ -75,10 +95,11 @@ Optionally, a benchmark suite can be run as part of the tests:
 * pq.ParseURL for converting urls to connection strings for sql.Open.
 * Many libpq compatible environment variables
 * Unix socket support
+* Notifications: `LISTEN`/`NOTIFY`
 
 ## Future / Things you can help with
 
-* Notifications: `LISTEN`/`NOTIFY`
+* Notifications: Allow listening on multiple channels at once
 * `hstore` sugar (i.e. handling hstore in `rows.Scan`)
 
 ## Thank you (alphabetical)
