@@ -829,7 +829,7 @@ func parseEnviron(env []string) (out map[string]string) {
 		case "PGHOST":
 			accrue("host")
 		case "PGHOSTADDR":
-			accrue("hostaddr")
+			unsupported()
 		case "PGPORT":
 			accrue("port")
 		case "PGDATABASE":
@@ -840,30 +840,18 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("password")
 		case "PGPASSFILE", "PGSERVICE", "PGSERVICEFILE", "PGREALM":
 			unsupported()
-		case "PGOPTIONS":
-			accrue("options")
-		case "PGAPPNAME":
-			accrue("application_name")
+		case "PGOPTIONS", "PGAPPNAME":
+			unsupported()
 		case "PGSSLMODE":
 			accrue("sslmode")
-		case "PGREQUIRESSL":
-			accrue("requiressl")
-		case "PGSSLCERT":
-			accrue("sslcert")
-		case "PGSSLKEY":
-			accrue("sslkey")
-		case "PGSSLROOTCERT":
-			accrue("sslrootcert")
-		case "PGSSLCRL":
-			accrue("sslcrl")
+		case "PGREQUIRESSL", "PGSSLCERT", "PGSSLKEY", "PGSSLROOTCERT", "PGSSLCRL":
+			unsupported()
 		case "PGREQUIREPEER":
-			accrue("requirepeer")
-		case "PGKRBSRVNAME":
-			accrue("krbsrvname")
-		case "PGGSSLIB":
-			accrue("gsslib")
+			unsupported()
+		case "PGKRBSRVNAME", "PGGSSLIB":
+			unsupported()
 		case "PGCONNECT_TIMEOUT":
-			accrue("connect_timeout")
+			unsupported()
 		case "PGCLIENTENCODING":
 			mustBeUtf8(parts[1])
 		case "PGDATESTYLE":
