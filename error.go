@@ -379,8 +379,58 @@ func (err *Error) Fatal() bool {
 	return err.Severity == Efatal
 }
 
+// Get implements the legacy PGError interface. New code should use the fields
+// of the Error struct directly.
+func (err *Error) Get(k byte) (v string) {
+	switch k {
+	case 'S':
+		return err.Severity
+	case 'C':
+		return string(err.Code)
+	case 'M':
+		return err.Message
+	case 'D':
+		return err.Detail
+	case 'H':
+		return err.Hint
+	case 'P':
+		return err.Position
+	case 'p':
+		return err.InternalPosition
+	case 'q':
+		return err.InternalQuery
+	case 'W':
+		return err.Where
+	case 's':
+		return err.Schema
+	case 't':
+		return err.Table
+	case 'c':
+		return err.Column
+	case 'd':
+		return err.DataTypeName
+	case 'n':
+		return err.Constraint
+	case 'F':
+		return err.File
+	case 'L':
+		return err.Line
+	case 'R':
+		return err.Routine
+	}
+	return ""
+}
+
 func (err Error) Error() string {
 	return "pq: " + err.Message
+}
+
+// PGError is an interface used by previous versions of pq. It is provided
+// only to support legacy code. New code should use the Error type.
+type PGError interface {
+	Error() string
+	Fatal() bool
+	Get(k byte) (v string)
 }
 
 func errorf(s string, args ...interface{}) {
