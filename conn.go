@@ -52,7 +52,7 @@ func (c *conn) writeBuf(b byte) *writeBuf {
 func open(name string) (_ driver.Conn, err error) {
 	defer errRecover(&err)
 
-	o := make(Values)
+	o := make(values)
 
 	// A number of defaults are applied here, in this order:
 	//
@@ -101,7 +101,7 @@ func open(name string) (_ driver.Conn, err error) {
 	return cn, nil
 }
 
-func network(o Values) (string, string) {
+func network(o values) (string, string) {
 	host := o.Get("host")
 
 	if strings.HasPrefix(host, "/") {
@@ -112,13 +112,13 @@ func network(o Values) (string, string) {
 	return "tcp", host + ":" + o.Get("port")
 }
 
-type Values map[string]string
+type values map[string]string
 
-func (vs Values) Set(k, v string) {
+func (vs values) Set(k, v string) {
 	vs[k] = v
 }
 
-func (vs Values) Get(k string) (v string) {
+func (vs values) Get(k string) (v string) {
 	return vs[k]
 }
 
@@ -154,10 +154,10 @@ func (s *scanner) SkipSpaces() (rune, bool) {
 	return r, ok
 }
 
-// parseOpts parses the options from name and adds them to the Values.
+// parseOpts parses the options from name and adds them to the values.
 //
 // The parsing code is based on conninfo_parse from libpq's fe-connect.c
-func parseOpts(name string, o Values) error {
+func parseOpts(name string, o values) error {
 	s := NewScanner(name)
 
 top:
@@ -481,7 +481,7 @@ func (cn *conn) recv1() (byte, *readBuf) {
 	return c, (*readBuf)(&y)
 }
 
-func (cn *conn) ssl(o Values) {
+func (cn *conn) ssl(o values) {
 	tlsConf := tls.Config{}
 	switch mode := o.Get("sslmode"); mode {
 	case "require", "":
@@ -511,7 +511,7 @@ func (cn *conn) ssl(o Values) {
 	cn.c = tls.Client(cn.c, &tlsConf)
 }
 
-func (cn *conn) startup(o Values) {
+func (cn *conn) startup(o values) {
 	w := cn.writeBuf(0)
 	w.int32(196608)
 	w.string("user")
@@ -535,7 +535,7 @@ func (cn *conn) startup(o Values) {
 	}
 }
 
-func (cn *conn) auth(r *readBuf, o Values) {
+func (cn *conn) auth(r *readBuf, o values) {
 	switch code := r.int32(); code {
 	case 0:
 		// OK

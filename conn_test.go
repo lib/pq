@@ -668,33 +668,33 @@ func TestRollback(t *testing.T) {
 func TestParseOpts(t *testing.T) {
 	tests := []struct {
 		in       string
-		expected Values
+		expected values
 		valid    bool
 	}{
-		{"dbname=hello user=goodbye", Values{"dbname": "hello", "user": "goodbye"}, true},
-		{"dbname=hello user=goodbye  ", Values{"dbname": "hello", "user": "goodbye"}, true},
-		{"dbname = hello user=goodbye", Values{"dbname": "hello", "user": "goodbye"}, true},
-		{"dbname=hello user =goodbye", Values{"dbname": "hello", "user": "goodbye"}, true},
-		{"dbname=hello user= goodbye", Values{"dbname": "hello", "user": "goodbye"}, true},
-		{"host=localhost password='correct horse battery staple'", Values{"host": "localhost", "password": "correct horse battery staple"}, true},
-		{"dbname=データベース password=パスワード", Values{"dbname": "データベース", "password": "パスワード"}, true},
+		{"dbname=hello user=goodbye", values{"dbname": "hello", "user": "goodbye"}, true},
+		{"dbname=hello user=goodbye  ", values{"dbname": "hello", "user": "goodbye"}, true},
+		{"dbname = hello user=goodbye", values{"dbname": "hello", "user": "goodbye"}, true},
+		{"dbname=hello user =goodbye", values{"dbname": "hello", "user": "goodbye"}, true},
+		{"dbname=hello user= goodbye", values{"dbname": "hello", "user": "goodbye"}, true},
+		{"host=localhost password='correct horse battery staple'", values{"host": "localhost", "password": "correct horse battery staple"}, true},
+		{"dbname=データベース password=パスワード", values{"dbname": "データベース", "password": "パスワード"}, true},
 
 		// The parser ignores spaces after = and interprets the next set of non-whitespace characters as the value.
-		{"user= password=foo", Values{"user": "password=foo"}, true},
+		{"user= password=foo", values{"user": "password=foo"}, true},
 
 		// The parser ignores trailing keys
-		{"user=foo blah", Values{"user": "foo"}, true},
-		{"user=foo blah   ", Values{"user": "foo"}, true},
-		{"user=foo blah=   ", Values{"user": "foo"}, true},
+		{"user=foo blah", values{"user": "foo"}, true},
+		{"user=foo blah   ", values{"user": "foo"}, true},
+		{"user=foo blah=   ", values{"user": "foo"}, true},
 
 		// No '=' after the key
-		{"dbname user=goodbye", Values{}, false},
+		{"dbname user=goodbye", values{}, false},
 		// Unterminated quoted value
-		{"dbname=hello user='unterminated", Values{}, false},
+		{"dbname=hello user='unterminated", values{}, false},
 	}
 
 	for _, test := range tests {
-		o := make(Values)
+		o := make(values)
 		err := parseOpts(test.in, o)
 		if err != nil && test.valid {
 			t.Errorf("%q got unexpected error: %s", test.in, err)
