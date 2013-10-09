@@ -1,4 +1,30 @@
-// Package pq is a pure Go Postgres driver for the database/sql package.
+/*
+	Package pq is a pure Go Postgres driver for the database/sql package.
+
+	In most cases clients will use the database/sql package instead of
+	using this package directly. For example:
+
+		import (
+			_ "github.com/lib/pq"
+			"database/sql"
+		)
+
+		func main() {
+			db, err := sql.Open("postgres", "user=pqgotest dbname=pqgotest sslmode=verify-full")
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			age := 21
+			rows, err := db.Query("SELECT name FROM users WHERE age=$1", age)
+			…
+		}
+
+	You can also connect to a database using a URL. For example:
+
+		db, err := sql.Open("postgres", "postgres://pqgotest:password@localhost/pqgotest?sslmode=verify-full")
+
+*/
 package pq
 
 import (
@@ -21,9 +47,10 @@ import (
 	"unicode"
 )
 
+// Common error types
 var (
 	ErrSSLNotSupported = errors.New("pq: SSL is not enabled on the server")
-	ErrNotSupported    = errors.New("pq: invalid command")
+	ErrNotSupported    = errors.New("pq: Unsupported command")
 )
 
 type drv struct{}
