@@ -3,9 +3,11 @@ package pq
 import (
 	"database/sql"
 	"database/sql/driver"
+	"fmt"
 	"io"
 	"os"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -36,6 +38,45 @@ func openTestConn(t Fatalistic) *sql.DB {
 	}
 
 	return conn
+}
+
+func TestReconnect(t *testing.T) {
+	if runtime.Version() == "go1.0.2" {
+		fmt.Println("Skipping failing test; " +
+			"fixed in database/sql on go1.0.3+")
+		return
+	}
+
+	db1 := openTestConn(t)
+	defer db1.Close()
+	tx, err := db1.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pid1 int
+	err = tx.QueryRow("SELECT pg_backend_pid()").Scan(&pid1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db2 := openTestConn(t)
+	defer db2.Close()
+	_, err = db2.Exec("SELECT pg_terminate_backend($1)", pid1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The rollback will probably "fail" because we just killed
+	// its connection above
+	_ = tx.Rollback()
+
+	const expected int = 42
+	var result int
+	err = db1.QueryRow(fmt.Sprintf("SELECT %d", expected)).Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != expected {
+		t.Errorf("got %v; expected %v", result, expected)
+	}
 }
 
 func TestOpenURL(t *testing.T) {
