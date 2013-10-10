@@ -187,7 +187,6 @@ func (s *scanner) SkipSpaces() (rune, bool) {
 func parseOpts(name string, o values) error {
 	s := newScanner(name)
 
-top:
 	for {
 		var (
 			keyRunes, valRunes []rune
@@ -203,25 +202,25 @@ top:
 		for !unicode.IsSpace(r) && r != '=' {
 			keyRunes = append(keyRunes, r)
 			if r, ok = s.Next(); !ok {
-				break top
+				break
 			}
 		}
 
 		// Skip any whitespace if we're not at the = yet
 		if r != '=' {
-			if r, ok = s.SkipSpaces(); !ok {
-				break
-			}
+			r, ok = s.SkipSpaces()
 		}
 
 		// The current character should be =
-		if r != '=' {
+		if r != '=' || !ok {
 			return fmt.Errorf(`missing "=" after %q in connection info string"`, string(keyRunes))
 		}
 
 		// Skip any whitespace after the =
 		if r, ok = s.SkipSpaces(); !ok {
-			break top
+			// If we reach the end here, the last value is just an empty string as per libpq.
+			o.Set(string(keyRunes), "")
+			break
 		}
 
 		if r != '\'' {
