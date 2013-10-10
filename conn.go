@@ -56,7 +56,7 @@ var (
 type drv struct{}
 
 func (d *drv) Open(name string) (driver.Conn, error) {
-	return open(name)
+	return Open(name)
 }
 
 func init() {
@@ -76,7 +76,7 @@ func (c *conn) writeBuf(b byte) *writeBuf {
 	return &w
 }
 
-func open(name string) (_ driver.Conn, err error) {
+func Open(name string) (_ driver.Conn, err error) {
 	defer errRecover(&err)
 
 	o := make(values)
