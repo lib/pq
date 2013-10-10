@@ -128,8 +128,8 @@ type scanner struct {
 	i int
 }
 
-// NewScanner returns a new scanner initialized with the option string s.
-func NewScanner(s string) *scanner {
+// newScanner returns a new scanner initialized with the option string s.
+func newScanner(s string) *scanner {
 	return &scanner{[]rune(s), 0}
 }
 
@@ -158,7 +158,7 @@ func (s *scanner) SkipSpaces() (rune, bool) {
 //
 // The parsing code is based on conninfo_parse from libpq's fe-connect.c
 func parseOpts(name string, o values) error {
-	s := NewScanner(name)
+	s := newScanner(name)
 
 top:
 	for {
