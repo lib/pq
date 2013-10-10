@@ -678,17 +678,20 @@ func TestParseOpts(t *testing.T) {
 		{"dbname=hello user= goodbye", values{"dbname": "hello", "user": "goodbye"}, true},
 		{"host=localhost password='correct horse battery staple'", values{"host": "localhost", "password": "correct horse battery staple"}, true},
 		{"dbname=データベース password=パスワード", values{"dbname": "データベース", "password": "パスワード"}, true},
+		{"dbname=hello user=''", values{"dbname": "hello", "user": ""}, true},
+		{"user='' dbname=hello", values{"dbname": "hello", "user": ""}, true},
+		// The last option value is an empty string if there's no non-whitespace after its =
+		{"dbname=hello user=   ", values{"dbname": "hello", "user": ""}, true},
 
 		// The parser ignores spaces after = and interprets the next set of non-whitespace characters as the value.
 		{"user= password=foo", values{"user": "password=foo"}, true},
 
-		// The parser ignores trailing keys
-		{"user=foo blah", values{"user": "foo"}, true},
-		{"user=foo blah   ", values{"user": "foo"}, true},
-		{"user=foo blah=   ", values{"user": "foo"}, true},
-
 		// No '=' after the key
+		{"postgre://marko@internet", values{}, false},
 		{"dbname user=goodbye", values{}, false},
+		{"user=foo blah", values{}, false},
+		{"user=foo blah   ", values{}, false},
+
 		// Unterminated quoted value
 		{"dbname=hello user='unterminated", values{}, false},
 	}
@@ -696,10 +699,14 @@ func TestParseOpts(t *testing.T) {
 	for _, test := range tests {
 		o := make(values)
 		err := parseOpts(test.in, o)
-		if err != nil && test.valid {
+
+		switch {
+		case err != nil && test.valid:
 			t.Errorf("%q got unexpected error: %s", test.in, err)
-		} else if err == nil && !reflect.DeepEqual(test.expected, o) {
+		case err == nil && test.valid && !reflect.DeepEqual(test.expected, o):
 			t.Errorf("%q got: %#v want: %#v", test.in, o, test.expected)
+		case err == nil && !test.valid:
+			t.Errorf("%q expected an error", test.in)
 		}
 	}
 }
