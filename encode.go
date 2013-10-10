@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"github.com/lib/pq/oid"
 	"math"
-	"strings"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -101,7 +101,7 @@ func mustParse(f string, typ oid.Oid, s []byte) time.Time {
 }
 
 func expect(str, char string, pos int) {
-	if c := str[pos:pos+1]; c != char {
+	if c := str[pos : pos+1]; c != char {
 		errorf("expected '%v' at position %v; got '%v'", char, pos, c)
 	}
 }
@@ -122,22 +122,22 @@ func parseTs(str string) (result time.Time) {
 	monSep := strings.IndexRune(str, '-')
 	year := mustAtoi(str[:monSep])
 	daySep := monSep + 3
-	month := mustAtoi(str[monSep+1:daySep])
+	month := mustAtoi(str[monSep+1 : daySep])
 	expect(str, "-", daySep)
 	timeSep := daySep + 3
-	day := mustAtoi(str[daySep+1:timeSep])
+	day := mustAtoi(str[daySep+1 : timeSep])
 
 	var hour, minute, second int
-	if len(str) > monSep + len("01-01") + 1 {
+	if len(str) > monSep+len("01-01")+1 {
 		expect(str, " ", timeSep)
 		minSep := timeSep + 3
 		expect(str, ":", minSep)
-		hour = mustAtoi(str[timeSep+1:minSep])
+		hour = mustAtoi(str[timeSep+1 : minSep])
 		secSep := minSep + 3
 		expect(str, ":", secSep)
-		minute = mustAtoi(str[minSep+1:secSep])
+		minute = mustAtoi(str[minSep+1 : secSep])
 		secEnd := secSep + 3
-		second = mustAtoi(str[secSep+1:secEnd])
+		second = mustAtoi(str[secSep+1 : secEnd])
 	}
 	remainderIdx := monSep + len("01-01 00:00:00") + 1
 	// Three optional (but ordered) sections follow: the
@@ -153,9 +153,9 @@ func parseTs(str string) (result time.Time) {
 		fracStart := remainderIdx + 1
 		fracOff := strings.IndexAny(str[fracStart:], "-+ ")
 		if fracOff < 0 {
-			fracOff = len(str)-fracStart
+			fracOff = len(str) - fracStart
 		}
-		fracSec := mustAtoi(str[fracStart:fracStart + fracOff])
+		fracSec := mustAtoi(str[fracStart : fracStart+fracOff])
 		nanoSec = fracSec * (1000000000 / int(math.Pow(10, float64(fracOff))))
 
 		remainderIdx += fracOff + 1
@@ -163,22 +163,22 @@ func parseTs(str string) (result time.Time) {
 	if tzStart := remainderIdx; tzStart < len(str) && (str[tzStart:tzStart+1] == "-" || str[tzStart:tzStart+1] == "+") {
 		// time zone separator is always '-' or '+' (UTC is +00)
 		var tzSign int
-		if c := str[tzStart:tzStart+1]; c == "-" {
+		if c := str[tzStart : tzStart+1]; c == "-" {
 			tzSign = -1
 		} else if c == "+" {
 			tzSign = +1
 		} else {
 			errorf("expected '-' or '+' at position %v; got %v", tzStart, c)
 		}
-		tzHours := mustAtoi(str[tzStart+1:tzStart+3])
+		tzHours := mustAtoi(str[tzStart+1 : tzStart+3])
 		remainderIdx += 3
 		var tzMin, tzSec int
-		if tzStart + 3 < len(str) && str[tzStart+3:tzStart+4] == ":" {
-			tzMin = mustAtoi(str[tzStart+4:tzStart+6])
+		if tzStart+3 < len(str) && str[tzStart+3:tzStart+4] == ":" {
+			tzMin = mustAtoi(str[tzStart+4 : tzStart+6])
 			remainderIdx += 3
 		}
-		if tzStart + 6 < len(str) && str[tzStart+6:tzStart+7] == ":" {
-			tzSec = mustAtoi(str[tzStart+7:tzStart+9])
+		if tzStart+6 < len(str) && str[tzStart+6:tzStart+7] == ":" {
+			tzSec = mustAtoi(str[tzStart+7 : tzStart+9])
 			remainderIdx += 3
 		}
 		tzOff = (tzSign * tzHours * (60 * 60)) + (tzMin * 60) + tzSec
@@ -190,7 +190,7 @@ func parseTs(str string) (result time.Time) {
 	if remainderIdx < len(str) {
 		errorf("expected end of input, got %v", str[remainderIdx:])
 	}
-	return time.Date(bcSign * year, time.Month(month), day,
+	return time.Date(bcSign*year, time.Month(month), day,
 		hour, minute, second, nanoSec,
 		time.FixedZone("", tzOff))
 }
