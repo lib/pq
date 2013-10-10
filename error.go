@@ -8,6 +8,7 @@ import (
 	"runtime"
 )
 
+// Error severities
 const (
 	Efatal   = "FATAL"
 	Epanic   = "PANIC"
@@ -375,6 +376,7 @@ func parseError(r *readBuf) *Error {
 	return err
 }
 
+// Fatal returns true if the Error Severity is fatal.
 func (err *Error) Fatal() bool {
 	return err.Severity == Efatal
 }

@@ -1,4 +1,30 @@
-// Package pq is a pure Go Postgres driver for the database/sql package.
+/*
+	Package pq is a pure Go Postgres driver for the database/sql package.
+
+	In most cases clients will use the database/sql package instead of
+	using this package directly. For example:
+
+		import (
+			_ "github.com/lib/pq"
+			"database/sql"
+		)
+
+		func main() {
+			db, err := sql.Open("postgres", "user=pqgotest dbname=pqgotest sslmode=verify-full")
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			age := 21
+			rows, err := db.Query("SELECT name FROM users WHERE age=$1", age)
+			…
+		}
+
+	You can also connect to a database using a URL. For example:
+
+		db, err := sql.Open("postgres", "postgres://pqgotest:password@localhost/pqgotest?sslmode=verify-full")
+
+*/
 package pq
 
 import (
@@ -21,15 +47,16 @@ import (
 	"unicode"
 )
 
+// Common error types
 var (
 	ErrSSLNotSupported = errors.New("pq: SSL is not enabled on the server")
-	ErrNotSupported    = errors.New("pq: invalid command")
+	ErrNotSupported    = errors.New("pq: Unsupported command")
 )
 
 type drv struct{}
 
 func (d *drv) Open(name string) (driver.Conn, error) {
-	return Open(name)
+	return open(name)
 }
 
 func init() {
@@ -49,10 +76,10 @@ func (c *conn) writeBuf(b byte) *writeBuf {
 	return &w
 }
 
-func Open(name string) (_ driver.Conn, err error) {
+func open(name string) (_ driver.Conn, err error) {
 	defer errRecover(&err)
 
-	o := make(Values)
+	o := make(values)
 
 	// A number of defaults are applied here, in this order:
 	//
@@ -101,7 +128,7 @@ func Open(name string) (_ driver.Conn, err error) {
 	return cn, nil
 }
 
-func network(o Values) (string, string) {
+func network(o values) (string, string) {
 	host := o.Get("host")
 
 	if strings.HasPrefix(host, "/") {
@@ -112,13 +139,13 @@ func network(o Values) (string, string) {
 	return "tcp", host + ":" + o.Get("port")
 }
 
-type Values map[string]string
+type values map[string]string
 
-func (vs Values) Set(k, v string) {
+func (vs values) Set(k, v string) {
 	vs[k] = v
 }
 
-func (vs Values) Get(k string) (v string) {
+func (vs values) Get(k string) (v string) {
 	return vs[k]
 }
 
@@ -128,8 +155,8 @@ type scanner struct {
 	i int
 }
 
-// NewScanner returns a new scanner initialized with the option string s.
-func NewScanner(s string) *scanner {
+// newScanner returns a new scanner initialized with the option string s.
+func newScanner(s string) *scanner {
 	return &scanner{[]rune(s), 0}
 }
 
@@ -154,11 +181,11 @@ func (s *scanner) SkipSpaces() (rune, bool) {
 	return r, ok
 }
 
-// parseOpts parses the options from name and adds them to the Values.
+// parseOpts parses the options from name and adds them to the values.
 //
 // The parsing code is based on conninfo_parse from libpq's fe-connect.c
-func parseOpts(name string, o Values) error {
-	s := NewScanner(name)
+func parseOpts(name string, o values) error {
+	s := newScanner(name)
 
 top:
 	for {
@@ -481,7 +508,7 @@ func (cn *conn) recv1() (byte, *readBuf) {
 	return c, (*readBuf)(&y)
 }
 
-func (cn *conn) ssl(o Values) {
+func (cn *conn) ssl(o values) {
 	tlsConf := tls.Config{}
 	switch mode := o.Get("sslmode"); mode {
 	case "require", "":
@@ -511,7 +538,7 @@ func (cn *conn) ssl(o Values) {
 	cn.c = tls.Client(cn.c, &tlsConf)
 }
 
-func (cn *conn) startup(o Values) {
+func (cn *conn) startup(o values) {
 	w := cn.writeBuf(0)
 	w.int32(196608)
 	w.string("user")
@@ -535,7 +562,7 @@ func (cn *conn) startup(o Values) {
 	}
 }
 
-func (cn *conn) auth(r *readBuf, o Values) {
+func (cn *conn) auth(r *readBuf, o values) {
 	switch code := r.int32(); code {
 	case 0:
 		// OK
