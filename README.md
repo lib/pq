@@ -113,6 +113,7 @@ code still exists in here.
 * Martin Olsen (martinolsen)
 * Mike Lewis (mikelikespie)
 * Nicolas Patry (Narsil)
+* Paul Hammond (paulhammond)
 * Ryan Smith (ryandotsmith)
 * Samuel Stauffer (samuel)
 * notedit (notedit)
