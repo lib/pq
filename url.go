@@ -7,7 +7,14 @@ import (
 	"strings"
 )
 
-// ParseURL converts url to a connection string for driver.Open.
+// ParseURL no longer needs to be used by clients of this library since supplying a URL as a
+// connection string to sql.Open() is now supported:
+//
+//	sql.Open("postgres", "postgres://bob:secret@1.2.3.4:5432/mydb?sslmode=verify-full")
+//
+// It remains exported here for backwards-compatibility.
+//
+// ParseURL converts a url to a connection string for driver.Open.
 // Example:
 //
 //	"postgres://bob:secret@1.2.3.4:5432/mydb?sslmode=verify-full"
