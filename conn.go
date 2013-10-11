@@ -24,6 +24,26 @@
 
 		db, err := sql.Open("postgres", "postgres://pqgotest:password@localhost/pqgotest?sslmode=verify-full")
 
+	Note that database/sql does not dictate any specific format for parameter
+	markers in query strings, and pq uses the Postgres-native ordinal markers,
+	as shown above. The same marker can be reused for the same parameter:
+
+		rows, err := db.Query(`SELECT name FROM users WHERE favorite_fruit = $1
+			OR age BETWEEN $2 AND $2 + 3`, "orange", 64)
+
+	Note also that pq does not support the LastInsertId() method of the
+	Result type in database/sql. To return the identifier of an INSERT
+	(or UPDATE or DELETE), use the Postgres RETURNING clause with a
+	standard Query or QueryRow call:
+
+		rows, err := db.Query(`INSERT INTO users(name, favorite_fruit, age)
+			VALUES('beatrice', 'starfruit', 93) RETURNING id`)
+
+	For more details on RETURNING, see the Postgres documentation:
+
+		http://www.postgresql.org/docs/current/static/sql-insert.html
+		http://www.postgresql.org/docs/current/static/sql-update.html
+		http://www.postgresql.org/docs/current/static/sql-delete.html
 */
 package pq
 
