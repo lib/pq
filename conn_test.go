@@ -512,7 +512,6 @@ func TestReturning(t *testing.T) {
 
 var envParseTests = []struct {
 	Expected    map[string]string
-	ExpectPanic bool
 	Env         []string
 }{
 	{
@@ -521,28 +520,13 @@ var envParseTests = []struct {
 	},
 	{
 		Env:      []string{"PGDATESTYLE=ISO, MDY"},
-		Expected: map[string]string{},
-	},
-	{
-		Env:         []string{"PGDATESTYLE=ISO, YMD"},
-		ExpectPanic: true,
+		Expected: map[string]string{"datestyle": "ISO, MDY"},
 	},
 }
 
 func TestParseEnviron(t *testing.T) {
 	for i, tt := range envParseTests {
-		tryParse := func(env []string) (result map[string]string, panicked bool) {
-			defer func() {
-				if p := recover(); p != nil {
-					panicked = true
-				}
-			}()
-			return parseEnviron(env), false
-		}
-		results, gotPanic := tryParse(tt.Env)
-		if gotPanic != tt.ExpectPanic {
-			t.Errorf("%d: Expected panic: %#v Got: %#v", i, tt.ExpectPanic, gotPanic)
-		}
+		results := parseEnviron(tt.Env)
 		if !reflect.DeepEqual(tt.Expected, results) {
 			t.Errorf("%d: Expected: %#v Got: %#v", i, tt.Expected, results)
 		}
@@ -710,6 +694,72 @@ func TestParseOpts(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeParameters(t *testing.T) {
+	type RuntimeTestResult int
+	const (
+		ResultBadConn RuntimeTestResult = iota
+		ResultPanic
+		ResultSuccess
+	)
+
+	tests := []struct {
+		conninfo string
+		param string
+		expected string
+		expectedOutcome RuntimeTestResult
+	}{
+		// invalid parameter
+		{"DOESNOTEXIST=foo", "", "", ResultBadConn},
+		// we can only work with a specific value for these two
+		{"client_encoding=SQL_ASCII", "", "", ResultPanic},
+		{"datestyle='ISO, YDM'", "", "", ResultPanic},
+		// "options" should work exactly as it does in libpq
+		{"options='-c search_path=pqgotest'", "search_path", "pqgotest", ResultSuccess},
+		// pq should override client_encoding in this case
+		{"options='-c client_encoding=SQL_ASCII'", "client_encoding", "UTF8", ResultSuccess},
+		// allow client_encoding to be set explicitly
+		{"client_encoding=UTF-8", "client_encoding", "UTF8", ResultSuccess},
+		// test a runtime parameter not supported by libpq
+		{"work_mem='139kB'", "work_mem", "139kB", ResultSuccess},
+	};
+
+
+	for _, test := range tests {
+		db, err := openTestConnConninfo(test.conninfo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+
+		tryGetParameterValue := func() (value string, outcome RuntimeTestResult) {
+			defer func() {
+				if p := recover(); p != nil {
+					outcome = ResultPanic
+				}
+			}()
+			row := db.QueryRow("SELECT current_setting($1)", test.param)
+			err = row.Scan(&value)
+			if err == driver.ErrBadConn {
+				return "", ResultBadConn
+			} else if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+			return value, ResultSuccess
+		}
+
+		value, outcome := tryGetParameterValue()
+		if outcome != test.expectedOutcome {
+			t.Fatalf("unexpected outcome %v (was expecting %v) for conninfo \"%s\"",
+					 outcome, test.expectedOutcome, test.conninfo)
+		}
+		if value != test.expected {
+			t.Fatalf("bad value for %s: got %s, want %s with conninfo \"%s\"",
+					 test.param, value, test.expected, test.conninfo)
+		}
+	}
+}
+
 
 var utf8tests = []struct {
 	Value string
