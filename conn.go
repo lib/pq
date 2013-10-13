@@ -915,10 +915,8 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("password")
 		case "PGPASSFILE", "PGSERVICE", "PGSERVICEFILE", "PGREALM":
 			unsupported()
-		case "PGOPTIONS":
-			accrue("options")
-		case "PGAPPNAME":
-			accrue("application_name")
+		case "PGOPTIONS", "PGAPPNAME":
+			unsupported()
 		case "PGSSLMODE":
 			accrue("sslmode")
 		case "PGREQUIRESSL", "PGSSLCERT", "PGSSLKEY", "PGSSLROOTCERT", "PGSSLCRL":
