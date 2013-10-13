@@ -124,6 +124,28 @@ func Open(name string) (_ driver.Conn, err error) {
 		return nil, err
 	}
 
+	// We can't work with any client_encoding other than UTF-8 currently.
+	// However, we have historically allowed the user to set it to UTF-8
+	// explicitly, and there's no reason to break such programs, so allow that.
+	// Note that the "options" setting could also set client_encoding, but
+	// parsing its value is not worth it.  Instead, we always explicitly send
+	// client_encoding as a separate run-time parameter, which should override
+	// anything set in options.
+	if encoding := o.Get("client_encoding"); encoding != "" {
+		mustBeUtf8(encoding)
+	} else {
+		o.Set("client_encoding", "UTF8")
+	}
+	// DateStyle needs a similar treatment.
+	if datestyle := o.Get("datestyle"); datestyle != "" {
+		if datestyle != "ISO, MDY" {
+			panic(fmt.Sprintf("setting datestyle must be absent or %v; got %v",
+				  "ISO, MDY", datestyle))
+		}
+	} else {
+		o.Set("datestyle", "ISO, MDY")
+	}
+
 	// If a user is not provided by any other means, the last
 	// resort is to use the current operating system provided user
 	// name.
@@ -560,10 +582,24 @@ func (cn *conn) ssl(o values) {
 func (cn *conn) startup(o values) {
 	w := cn.writeBuf(0)
 	w.int32(196608)
-	w.string("user")
-	w.string(o.Get("user"))
-	w.string("database")
-	w.string(o.Get("dbname"))
+	// Send the backend the name of the database we want to connect to, and the
+	// user we want to connect as.  Additionally, we send over any run-time
+	// parameters potentially included in the connection string.  If the server
+	// doesn't recognize any of them, it will reply with an error.
+	for k, v := range o {
+		// skip options which can't be run-time parameters
+		if k == "password" || k == "host" ||
+		   k == "port" || k == "sslmode" {
+			continue
+		}
+		// The protocol requires us to supply the database name as "database"
+		// instead of "dbname".
+		if k == "dbname" {
+			k = "database"
+		}
+		w.string(k)
+		w.string(v)
+	}
 	w.string("")
 	cn.send(w)
 
@@ -857,12 +893,6 @@ func parseEnviron(env []string) (out map[string]string) {
 		unsupported := func() {
 			panic(fmt.Sprintf("setting %v not supported", parts[0]))
 		}
-		mustBe := func(expected string) {
-			if parts[1] != expected {
-				panic(fmt.Sprintf("setting %v must be absent or %v; got %v",
-					parts[0], expected, parts[1]))
-			}
-		}
 
 		// The order of these is the same as is seen in the
 		// PostgreSQL 9.1 manual. Unsupported but well-defined
@@ -874,7 +904,7 @@ func parseEnviron(env []string) (out map[string]string) {
 		case "PGHOST":
 			accrue("host")
 		case "PGHOSTADDR":
-			accrue("hostaddr")
+			unsupported()
 		case "PGPORT":
 			accrue("port")
 		case "PGDATABASE":
@@ -891,29 +921,23 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("application_name")
 		case "PGSSLMODE":
 			accrue("sslmode")
-		case "PGREQUIRESSL":
-			accrue("requiressl")
-		case "PGSSLCERT":
-			accrue("sslcert")
-		case "PGSSLKEY":
-			accrue("sslkey")
-		case "PGSSLROOTCERT":
-			accrue("sslrootcert")
-		case "PGSSLCRL":
-			accrue("sslcrl")
+		case "PGREQUIRESSL", "PGSSLCERT", "PGSSLKEY", "PGSSLROOTCERT", "PGSSLCRL":
+			unsupported()
 		case "PGREQUIREPEER":
-			accrue("requirepeer")
-		case "PGKRBSRVNAME":
-			accrue("krbsrvname")
-		case "PGGSSLIB":
-			accrue("gsslib")
+			unsupported()
+		case "PGKRBSRVNAME", "PGGSSLIB":
+			unsupported()
 		case "PGCONNECT_TIMEOUT":
-			accrue("connect_timeout")
+			unsupported()
 		case "PGCLIENTENCODING":
-			mustBeUtf8(parts[1])
+			accrue("client_encoding")
 		case "PGDATESTYLE":
-			mustBe("ISO, MDY")
-		case "PGTZ", "PGGEQO", "PGSYSCONFDIR", "PGLOCALEDIR":
+			accrue("datestyle")
+		case "PGTZ":
+			accrue("timezone")
+		case "PGGEQO":
+			accrue("geqo")
+		case "PGSYSCONFDIR", "PGLOCALEDIR":
 			unsupported()
 		}
 	}
