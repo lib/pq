@@ -719,7 +719,7 @@ func TestRuntimeParameters(t *testing.T) {
 		// pq should override client_encoding in this case
 		{"options='-c client_encoding=SQL_ASCII'", "client_encoding", "UTF8", ResultSuccess},
 		// allow client_encoding to be set explicitly
-		{"client_encoding=UTF-8", "client_encoding", "UTF8", ResultSuccess},
+		{"client_encoding=UTF8", "client_encoding", "UTF8", ResultSuccess},
 		// test a runtime parameter not supported by libpq
 		{"work_mem='139kB'", "work_mem", "139kB", ResultSuccess},
 	};
