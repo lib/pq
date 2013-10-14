@@ -24,22 +24,10 @@ before_install:
 
 env:
   matrix:
-    - PGVERSION=9.3 go=1.0.2
-    - PGVERSION=9.3 go=1.0.3
-    - PGVERSION=9.3 go=1.1
-    - PGVERSION=9.3 go=tip
-    - PGVERSION=9.2 go=1.0.2
-    - PGVERSION=9.2 go=1.0.3
-    - PGVERSION=9.2 go=1.1
-    - PGVERSION=9.2 go=tip
-    - PGVERSION=9.1 go=1.0.2
-    - PGVERSION=9.1 go=1.0.3
-    - PGVERSION=9.1 go=1.1
-    - PGVERSION=9.1 go=tip
-    - PGVERSION=9.0 go=1.0.2
-    - PGVERSION=9.0 go=1.0.3
-    - PGVERSION=9.0 go=1.1
-    - PGVERSION=9.0 go=tip
+    - PGVERSION=9.3
+    - PGVERSION=9.2
+    - PGVERSION=9.1
+    - PGVERSION=9.0
 
 script:
  - env PGUSER=postgres go test -v ./...
