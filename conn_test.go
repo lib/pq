@@ -227,7 +227,7 @@ func TestEncodeDecode(t *testing.T) {
 
 	q := `
 		SELECT
-			'\x000102'::bytea,
+			E'\\x000102'::bytea,
 			'foobar'::text,
 			NULL::integer,
 			'2000-1-1 01:02:03.04-7'::timestamptz,
@@ -235,7 +235,7 @@ func TestEncodeDecode(t *testing.T) {
 			123,
 			3.14::float8
 		WHERE
-			    '\x000102'::bytea = $1
+			    E'\\x000102'::bytea = $1
 			AND 'foobar'::text = $2
 			AND $3::integer is NULL
 	`
