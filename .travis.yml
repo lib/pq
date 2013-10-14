@@ -1,5 +1,11 @@
 language: go
 
+go:
+  - 1.0.2
+  - 1.0.3
+  - 1.1
+  - tip
+
 before_install:
   - psql --version
   - sudo /etc/init.d/postgresql stop
