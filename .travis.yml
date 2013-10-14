@@ -27,7 +27,6 @@ env:
     - PGVERSION=9.3
     - PGVERSION=9.2
     - PGVERSION=9.1
-    - PGVERSION=9.0
 
 script:
  - env PGUSER=postgres go test -v ./...
