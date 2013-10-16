@@ -131,7 +131,9 @@ func Open(name string) (_ driver.Conn, err error) {
 	// client_encoding as a separate run-time parameter, which should override
 	// anything set in options.
 	if encoding := o.Get("client_encoding"); encoding != "" {
-		mustBeUtf8(encoding)
+		if !isUTF8(encoding) {
+			return nil, errors.New("PGCLIENT_ENCODING must be absent or 'UTF8'")
+		}
 	} else {
 		o.Set("client_encoding", "UTF8")
 	}
@@ -944,13 +946,11 @@ func parseEnviron(env []string) (out map[string]string) {
 	return out
 }
 
-// mustBeUtf8 panics if value is not some variation of the name "UTF-8".
-func mustBeUtf8(value string) {
+// isUTF8 returns whether name is a fuzzy variation of the string "UTF-8".
+func isUTF8(name string) bool {
 	// Recognize all sorts of silly things as "UTF-8", like Postgres does
-	s := strings.Map(alnumLowerASCII, value)
-	if s != "utf8" && s != "unicode" {
-		panic("setting PGCLIENT_ENCODING must be absent or 'UTF8'")
-	}
+	s := strings.Map(alnumLowerASCII, name)
+	return s == "utf8" || s == "unicode"
 }
 
 func alnumLowerASCII(ch rune) rune {

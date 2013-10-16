@@ -701,6 +701,7 @@ func TestRuntimeParameters(t *testing.T) {
 		ResultBadConn RuntimeTestResult = iota
 		ResultPanic
 		ResultSuccess
+		ResultError // other error
 	)
 
 	tests := []struct {
@@ -712,7 +713,7 @@ func TestRuntimeParameters(t *testing.T) {
 		// invalid parameter
 		{"DOESNOTEXIST=foo", "", "", ResultBadConn},
 		// we can only work with a specific value for these two
-		{"client_encoding=SQL_ASCII", "", "", ResultPanic},
+		{"client_encoding=SQL_ASCII", "", "", ResultError},
 		{"datestyle='ISO, YDM'", "", "", ResultPanic},
 		// "options" should work exactly as it does in libpq
 		{"options='-c search_path=pqgotest'", "search_path", "pqgotest", ResultSuccess},
@@ -741,13 +742,17 @@ func TestRuntimeParameters(t *testing.T) {
 			err = row.Scan(&value)
 			if err == driver.ErrBadConn {
 				return "", ResultBadConn
-			} else if err != nil {
-				t.Fatalf("unexpected error %v", err)
+			}
+			if err != nil {
+				return "", ResultError
 			}
 			return value, ResultSuccess
 		}
 
 		value, outcome := tryGetParameterValue()
+		if outcome != test.expectedOutcome && outcome == ResultError {
+			t.Fatalf("%v: unexpected error: %v", test.conninfo, err)
+		}
 		if outcome != test.expectedOutcome {
 			t.Fatalf("unexpected outcome %v (was expecting %v) for conninfo \"%s\"",
 				outcome, test.expectedOutcome, test.conninfo)
@@ -759,37 +764,26 @@ func TestRuntimeParameters(t *testing.T) {
 	}
 }
 
-var utf8tests = []struct {
-	Value string
-	Valid bool
-}{
-	{"unicode", true},
-	{"utf-8", true},
-	{"utf_8", true},
-	{"UTF-8", true},
-	{"UTF8", true},
-	{"utf8", true},
-	{"u n ic_ode", true},
-	{"ut_f%8", true},
-	{"ubf8", false},
-	{"punycode", false},
-}
+func TestIsUTF8(t *testing.T) {
+	var cases = []struct {
+		name string
+		want bool
+	}{
+		{"unicode", true},
+		{"utf-8", true},
+		{"utf_8", true},
+		{"UTF-8", true},
+		{"UTF8", true},
+		{"utf8", true},
+		{"u n ic_ode", true},
+		{"ut_f%8", true},
+		{"ubf8", false},
+		{"punycode", false},
+	}
 
-func TestMustBeUTF8(t *testing.T) {
-	for i, tt := range utf8tests {
-		result := func() (valid bool) {
-			valid = true
-			defer func() {
-				if err := recover(); err != nil {
-					valid = false
-				}
-			}()
-			mustBeUtf8(tt.Value)
-			return
-		}()
-		if result != tt.Valid {
-			t.Errorf("%d: got %v is valid utf8 name: %v; want %v",
-				i, tt.Value, result, tt.Valid)
+	for _, test := range cases {
+		if g := isUTF8(test.name); g != test.want {
+			t.Errorf("isUTF8(%q) = %v want %v", test.name, g, test.want)
 		}
 	}
 }
