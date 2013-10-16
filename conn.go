@@ -61,7 +61,6 @@ import (
 	"net"
 	"os"
 	"path"
-	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -945,13 +944,21 @@ func parseEnviron(env []string) (out map[string]string) {
 	return out
 }
 
-var notUTF8re = regexp.MustCompile("[^a-zA-Z0-9]")
-
+// mustBeUtf8 panics if value is not some variation of the name "UTF-8".
 func mustBeUtf8(value string) {
-	// Recognize all sorts of silly things as utf-8, like Postgres does
-	encoding := notUTF8re.ReplaceAllLiteralString(strings.ToLower(value),
-		"")
-	if encoding != "utf8" && encoding != "unicode" {
+	// Recognize all sorts of silly things as "UTF-8", like Postgres does
+	s := strings.Map(alnumLowerASCII, value)
+	if s != "utf8" && s != "unicode" {
 		panic("setting PGCLIENT_ENCODING must be absent or 'UTF8'")
 	}
+}
+
+func alnumLowerASCII(ch rune) rune {
+	if 'A' <= ch && ch <= 'Z' {
+		return ch + ('a' - 'A')
+	}
+	if 'a' <= ch && ch <= 'z' || '0' <= ch && ch <= '9' {
+		return ch
+	}
+	return -1 // discard
 }
