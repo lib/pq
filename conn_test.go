@@ -511,8 +511,8 @@ func TestReturning(t *testing.T) {
 }
 
 var envParseTests = []struct {
-	Expected    map[string]string
-	Env         []string
+	Expected map[string]string
+	Env      []string
 }{
 	{
 		Env:      []string{"PGDATABASE=hello", "PGUSER=goodbye"},
@@ -704,9 +704,9 @@ func TestRuntimeParameters(t *testing.T) {
 	)
 
 	tests := []struct {
-		conninfo string
-		param string
-		expected string
+		conninfo        string
+		param           string
+		expected        string
 		expectedOutcome RuntimeTestResult
 	}{
 		// invalid parameter
@@ -722,8 +722,7 @@ func TestRuntimeParameters(t *testing.T) {
 		{"client_encoding=UTF8", "client_encoding", "UTF8", ResultSuccess},
 		// test a runtime parameter not supported by libpq
 		{"work_mem='139kB'", "work_mem", "139kB", ResultSuccess},
-	};
-
+	}
 
 	for _, test := range tests {
 		db, err := openTestConnConninfo(test.conninfo)
@@ -751,15 +750,14 @@ func TestRuntimeParameters(t *testing.T) {
 		value, outcome := tryGetParameterValue()
 		if outcome != test.expectedOutcome {
 			t.Fatalf("unexpected outcome %v (was expecting %v) for conninfo \"%s\"",
-					 outcome, test.expectedOutcome, test.conninfo)
+				outcome, test.expectedOutcome, test.conninfo)
 		}
 		if value != test.expected {
 			t.Fatalf("bad value for %s: got %s, want %s with conninfo \"%s\"",
-					 test.param, value, test.expected, test.conninfo)
+				test.param, value, test.expected, test.conninfo)
 		}
 	}
 }
-
 
 var utf8tests = []struct {
 	Value string

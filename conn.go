@@ -140,7 +140,7 @@ func Open(name string) (_ driver.Conn, err error) {
 	if datestyle := o.Get("datestyle"); datestyle != "" {
 		if datestyle != "ISO, MDY" {
 			panic(fmt.Sprintf("setting datestyle must be absent or %v; got %v",
-				  "ISO, MDY", datestyle))
+				"ISO, MDY", datestyle))
 		}
 	} else {
 		o.Set("datestyle", "ISO, MDY")
@@ -589,7 +589,7 @@ func (cn *conn) startup(o values) {
 	for k, v := range o {
 		// skip options which can't be run-time parameters
 		if k == "password" || k == "host" ||
-		   k == "port" || k == "sslmode" {
+			k == "port" || k == "sslmode" {
 			continue
 		}
 		// The protocol requires us to supply the database name as "database"
