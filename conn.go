@@ -130,13 +130,10 @@ func Open(name string) (_ driver.Conn, err error) {
 	// parsing its value is not worth it.  Instead, we always explicitly send
 	// client_encoding as a separate run-time parameter, which should override
 	// anything set in options.
-	if encoding := o.Get("client_encoding"); encoding != "" {
-		if !isUTF8(encoding) {
-			return nil, errors.New("PGCLIENT_ENCODING must be absent or 'UTF8'")
-		}
-	} else {
-		o.Set("client_encoding", "UTF8")
+	if enc := o.Get("client_encoding"); enc != "" && !isUTF8(enc) {
+		return nil, errors.New("PGCLIENT_ENCODING must be absent or 'UTF8'")
 	}
+	o.Set("client_encoding", "UTF8")
 	// DateStyle needs a similar treatment.
 	if datestyle := o.Get("datestyle"); datestyle != "" {
 		if datestyle != "ISO, MDY" {
