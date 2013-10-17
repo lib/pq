@@ -144,7 +144,7 @@ func Open(name string) (_ driver.Conn, err error) {
 	// client_encoding as a separate run-time parameter, which should override
 	// anything set in options.
 	if enc := o.Get("client_encoding"); enc != "" && !isUTF8(enc) {
-		return nil, errors.New("PGCLIENT_ENCODING must be absent or 'UTF8'")
+		return nil, errors.New("client_encoding must be absent or 'UTF8'")
 	}
 	o.Set("client_encoding", "UTF8")
 	// DateStyle needs a similar treatment.
