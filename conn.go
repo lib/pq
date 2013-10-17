@@ -44,6 +44,19 @@
 		http://www.postgresql.org/docs/current/static/sql-insert.html
 		http://www.postgresql.org/docs/current/static/sql-update.html
 		http://www.postgresql.org/docs/current/static/sql-delete.html
+
+	Connection string parameters are treated as follows:
+
+		client_encoding
+
+			Sets the client text encoding for the connection. Optional.
+
+			If present, must be "UTF8", matching with the same rules
+			as postgres. It is an error to provide any other value.
+
+		others
+
+			to be documented
 */
 package pq
 
@@ -61,7 +74,6 @@ import (
 	"net"
 	"os"
 	"path"
-	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -131,16 +143,15 @@ func Open(name string) (_ driver.Conn, err error) {
 	// parsing its value is not worth it.  Instead, we always explicitly send
 	// client_encoding as a separate run-time parameter, which should override
 	// anything set in options.
-	if encoding := o.Get("client_encoding"); encoding != "" {
-		mustBeUtf8(encoding)
-	} else {
-		o.Set("client_encoding", "UTF8")
+	if enc := o.Get("client_encoding"); enc != "" && !isUTF8(enc) {
+		return nil, errors.New("PGCLIENT_ENCODING must be absent or 'UTF8'")
 	}
+	o.Set("client_encoding", "UTF8")
 	// DateStyle needs a similar treatment.
 	if datestyle := o.Get("datestyle"); datestyle != "" {
 		if datestyle != "ISO, MDY" {
 			panic(fmt.Sprintf("setting datestyle must be absent or %v; got %v",
-				  "ISO, MDY", datestyle))
+				"ISO, MDY", datestyle))
 		}
 	} else {
 		o.Set("datestyle", "ISO, MDY")
@@ -589,7 +600,7 @@ func (cn *conn) startup(o values) {
 	for k, v := range o {
 		// skip options which can't be run-time parameters
 		if k == "password" || k == "host" ||
-		   k == "port" || k == "sslmode" {
+			k == "port" || k == "sslmode" {
 			continue
 		}
 		// The protocol requires us to supply the database name as "database"
@@ -945,13 +956,19 @@ func parseEnviron(env []string) (out map[string]string) {
 	return out
 }
 
-var notUTF8re = regexp.MustCompile("[^a-zA-Z0-9]")
+// isUTF8 returns whether name is a fuzzy variation of the string "UTF-8".
+func isUTF8(name string) bool {
+	// Recognize all sorts of silly things as "UTF-8", like Postgres does
+	s := strings.Map(alnumLowerASCII, name)
+	return s == "utf8" || s == "unicode"
+}
 
-func mustBeUtf8(value string) {
-	// Recognize all sorts of silly things as utf-8, like Postgres does
-	encoding := notUTF8re.ReplaceAllLiteralString(strings.ToLower(value),
-		"")
-	if encoding != "utf8" && encoding != "unicode" {
-		panic("setting PGCLIENT_ENCODING must be absent or 'UTF8'")
+func alnumLowerASCII(ch rune) rune {
+	if 'A' <= ch && ch <= 'Z' {
+		return ch + ('a' - 'A')
 	}
+	if 'a' <= ch && ch <= 'z' || '0' <= ch && ch <= '9' {
+		return ch
+	}
+	return -1 // discard
 }
