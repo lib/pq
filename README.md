@@ -41,6 +41,11 @@ variables not supported by pq are set, pq will panic during connection
 establishment.  Environment variables have a lower precedence than explicitly
 provided connection parameters.
 
+Note that the connection parameter `client_encoding` (which sets the
+text encoding for the connection) may be set but must be "UTF8",
+matching with the same rules as Postgres. It is an error to provide
+any other value.
+
 See http://www.postgresql.org/docs/current/static/libpq-connect.html.
 
 For compatibility with libpq, the following special connection parameters are

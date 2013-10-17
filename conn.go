@@ -45,18 +45,6 @@
 		http://www.postgresql.org/docs/current/static/sql-update.html
 		http://www.postgresql.org/docs/current/static/sql-delete.html
 
-	Connection string parameters are treated as follows:
-
-		client_encoding
-
-			Sets the client text encoding for the connection. Optional.
-
-			If present, must be "UTF8", matching with the same rules
-			as postgres. It is an error to provide any other value.
-
-		others
-
-			to be documented
 */
 package pq
 
