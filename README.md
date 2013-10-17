@@ -10,69 +10,6 @@
 
 <http://godoc.org/github.com/lib/pq>
 
-## Use
-
-	package main
-
-	import (
-		_ "github.com/lib/pq"
-		"database/sql"
-	)
-
-	func main() {
-		db, err := sql.Open("postgres", "user=pqgotest dbname=pqgotest sslmode=verify-full")
-		// ...
-	}
-
-**Connection String Parameters**
-
-Similarly to libpq, when establishing a connection using pq you are expected to
-supply a [connection string](http://www.postgresql.org/docs/current/static/libpq-connect.html#LIBPQ-CONNSTRING)
-containing zero or more parameters.  A subset of the connection parameters
-supported by libpq are also supported by pq.  Additionally, pq also lets you
-specify run-time parameters (such as `search_path` or `work_mem`) directly in
-the connection string.  This is different from libpq, which does not allow
-run-time parameters in the connection string, instead requiring you to supply
-them in the `options` parameter.
-
-Most [environment variables](http://www.postgresql.org/docs/current/static/libpq-envars.html)
-supported by libpq are also supported by pq.  If any of the environment
-variables not supported by pq are set, pq will panic during connection
-establishment.  Environment variables have a lower precedence than explicitly
-provided connection parameters.
-
-Note that the connection parameter `client_encoding` (which sets the
-text encoding for the connection) may be set but must be "UTF8",
-matching with the same rules as Postgres. It is an error to provide
-any other value.
-
-See http://www.postgresql.org/docs/current/static/libpq-connect.html.
-
-For compatibility with libpq, the following special connection parameters are
-supported:
-
-* `dbname` - The name of the database to connect to
-* `user` - The user to sign in as
-* `password` - The user's password
-* `host` - The host to connect to. Values that start with `/` are for unix domain sockets. (default is `localhost`)
-* `port` - The port to bind to. (default is `5432`)
-* `sslmode` - Whether or not to use SSL (default is `require`, this is not the default for libpq)
-	Valid values are:
-	* `disable` - No SSL
-	* `require` - Always SSL (skip verification)
-	* `verify-full` - Always SSL (require verification)
-
-Use single quotes for values that contain whitespace:
-
-    "user=pqgotest password='with spaces'"
-
-In addition to the parameters listed above, any run-time parameter that can be
-set at backend start time can be set in the connection string.  For more
-information, see
-http://www.postgresql.org/docs/current/static/runtime-config.html.
-
-See http://golang.org/pkg/database/sql to learn how to use with `pq` through the `database/sql` package.
-
 ## Tests
 
 `go test` is used for testing.  A running PostgreSQL server is
