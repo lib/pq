@@ -5,7 +5,7 @@
 	using this package directly. For example:
 
 		import (
-			_ "github.com/lib/pq"
+			_ "github.com/adeven/pq"
 			"database/sql"
 		)
 
@@ -57,7 +57,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/lib/pq/oid"
+	"github.com/adeven/pq/oid"
 	"io"
 	"net"
 	"os"
