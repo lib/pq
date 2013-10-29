@@ -426,9 +426,6 @@ func (cn *conn) prepareToSimpleStmt(q, stmtName string) (_ *stmt, err error) {
 			return st, err
 		case 'E':
 			err = parseError(r)
-		case 'C':
-			// command complete
-			return st, err
 		default:
 			errorf("unexpected describe rows response: %q", t)
 		}
