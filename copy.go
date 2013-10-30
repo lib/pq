@@ -100,9 +100,9 @@ func (ci *copyin) Query(v []driver.Value) (r driver.Rows, err error) {
 // and Exec can return errors from previous Exec calls to the same
 // COPY stmt.
 //
-// You need to call Exec without any arguments to sync the COPY stream
-// and to get any errors from pending data, since Stmt.Close() doesn't
-// return errors to the user.
+// You need to call Exec(nil) to sync the COPY stream and to get any
+// errors from pending data, since Stmt.Close() doesn't return errors
+// to the user.
 func (ci *copyin) Exec(v []driver.Value) (r driver.Result, err error) {
 	defer errRecover(&err)
 
