@@ -28,7 +28,7 @@ func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
 		done:    make(chan bool),
 	}
 
-	b := newWriteBuf('Q')
+	b := cn.writeBuf('Q')
 	b.string(q)
 	cn.send(b)
 
@@ -56,7 +56,7 @@ func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
 }
 
 func (ci *copyin) flush(buf []byte) {
-	b := newWriteBuf('d')
+	b := ci.cn.writeBuf('d')
 	b.bytes(buf)
 	ci.cn.send(b)
 }
@@ -106,7 +106,7 @@ func (ci *copyin) Query(v []driver.Value) (r driver.Rows, err error) {
 func (ci *copyin) Exec(v []driver.Value) (r driver.Result, err error) {
 	defer errRecover(&err)
 
-	r = result(0)
+	r = driver.RowsAffected(0)
 
 	if ci.closed {
 		panic("already closed")
@@ -156,8 +156,7 @@ func (ci *copyin) Close() (err error) {
 	if len(ci.buffer) > 0 {
 		ci.flush(ci.buffer)
 	}
-	b := newWriteBuf('c')
-	ci.cn.send(b)
+	ci.cn.send(ci.cn.writeBuf('c'))
 
 	<-ci.done
 
