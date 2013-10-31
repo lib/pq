@@ -18,12 +18,15 @@ type copyin struct {
 
 const ciBufferSize = 64 * 1024
 
+// flush buffer before the buffer is filled up and needs reallocation
+const ciBufferFlushSize = 63 * 1024
+
 func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
 	defer errRecover(&err)
 
 	ci := &copyin{
 		cn:      cn,
-		buffer:  make([]byte, 0, ciBufferSize+1024),
+		buffer:  make([]byte, 0, ciBufferSize),
 		rowData: make(chan []byte),
 		done:    make(chan bool),
 	}
@@ -133,9 +136,9 @@ func (ci *copyin) Exec(v []driver.Value) (r driver.Result, err error) {
 
 	ci.buffer = append(ci.buffer, '\n')
 
-	if len(ci.buffer) > ciBufferSize {
+	if len(ci.buffer) > ciBufferFlushSize {
 		ci.flush(ci.buffer)
-		ci.buffer = make([]byte, 0, len(ci.buffer))
+		ci.buffer = make([]byte, 0, ciBufferSize)
 	}
 
 	if ci.isErrorSet() {
