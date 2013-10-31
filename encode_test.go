@@ -272,35 +272,68 @@ func TestByteaOutputFormats(t *testing.T) {
 	testByteaOutputFormat("escape")
 }
 
-func TestEncodeText(t *testing.T) {
-	if esc := escapeText("hallo\tescape"); string(esc) != "hallo\\tescape" {
-		t.Fatal(string(esc))
-	}
-	if esc := escapeText("hallo\\tescape\n"); string(esc) != "hallo\\\\tescape\\n" {
-		t.Fatal(string(esc))
-	}
-	if esc := escapeText("\n\r\t\f"); string(esc) != "\\n\\r\\t\f" {
-		t.Fatal(string(esc))
-	}
+func TestAppendEncodedText(t *testing.T) {
+	var buf []byte
 
+	buf = appendEncodedText(buf, int64(10))
+	buf = append(buf, '\t')
+	buf = appendEncodedText(buf, float32(42.0000000001))
+	buf = append(buf, '\t')
+	buf = appendEncodedText(buf, 42.0000000001)
+	buf = append(buf, '\t')
+	buf = appendEncodedText(buf, "hello\tworld")
+	buf = append(buf, '\t')
+	buf = appendEncodedText(buf, []byte{0, 128, 255})
+
+	if string(buf) != "10\t42\t42.0000000001\thello\\tworld\t\\\\x0080ff" {
+		t.Fatal(string(buf))
+	}
 }
 
-func BenchmarkEncodeText(b *testing.B) {
+func TestAppendEscapedText(t *testing.T) {
+	if esc := appendEscapedText(nil, "hallo\tescape"); string(esc) != "hallo\\tescape" {
+		t.Fatal(string(esc))
+	}
+	if esc := appendEscapedText(nil, "hallo\\tescape\n"); string(esc) != "hallo\\\\tescape\\n" {
+		t.Fatal(string(esc))
+	}
+	if esc := appendEscapedText(nil, "\n\r\t\f"); string(esc) != "\\n\\r\\t\f" {
+		t.Fatal(string(esc))
+	}
+}
+
+func TestAppendEscapedTextExistingBuffer(t *testing.T) {
+	var buf []byte
+	buf = []byte("123\t")
+	if esc := appendEscapedText(buf, "hallo\tescape"); string(esc) != "123\thallo\\tescape" {
+		t.Fatal(string(esc))
+	}
+	buf = []byte("123\t")
+	if esc := appendEscapedText(buf, "hallo\\tescape\n"); string(esc) != "123\thallo\\\\tescape\\n" {
+		t.Fatal(string(esc))
+	}
+	buf = []byte("123\t")
+	if esc := appendEscapedText(buf, "\n\r\t\f"); string(esc) != "123\t\\n\\r\\t\f" {
+		t.Fatal(string(esc))
+	}
+}
+
+func BenchmarkAppendEscapedText(b *testing.B) {
 	longString := ""
 	for i := 0; i < 100; i++ {
 		longString += "123456789\n"
 	}
 	for i := 0; i < b.N; i++ {
-		escapeText(longString)
+		appendEscapedText(nil, longString)
 	}
 }
 
-func BenchmarkEncodeTextNoEscape(b *testing.B) {
+func BenchmarkAppendEscapedTextNoEscape(b *testing.B) {
 	longString := ""
-	for i := 0; i < 1000; i++ {
-		longString += "a"
+	for i := 0; i < 100; i++ {
+		longString += "1234567890"
 	}
 	for i := 0; i < b.N; i++ {
-		escapeText(longString)
+		appendEscapedText(nil, longString)
 	}
 }

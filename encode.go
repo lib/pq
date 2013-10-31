@@ -76,23 +76,26 @@ func decode(s []byte, typ oid.Oid) interface{} {
 	return s
 }
 
-// encodeText encodes item in text format as required by COPY
-func encodeText(x interface{}) []byte {
+// appendEncodedText encodes item in text format as required by COPY
+// and appends to buf
+func appendEncodedText(buf []byte, x interface{}) []byte {
 	switch v := x.(type) {
 	case int64:
-		return []byte(fmt.Sprintf("%d", v))
-	case float32, float64:
-		return []byte(fmt.Sprintf("%f", v))
+		return strconv.AppendInt(buf, v, 10)
+	case float32:
+		return strconv.AppendFloat(buf, float64(v), 'f', -1, 32)
+	case float64:
+		return strconv.AppendFloat(buf, v, 'f', -1, 64)
 	case []byte:
-		return []byte(fmt.Sprintf("\\\\x%x", v))
+		return append(buf, fmt.Sprintf("\\\\x%x", v)...)
 	case string:
-		return escapeText(v)
+		return appendEscapedText(buf, v)
 	case bool:
-		return []byte(fmt.Sprintf("%t", v))
+		return strconv.AppendBool(buf, v)
 	case time.Time:
-		return []byte(v.Format(time.RFC3339Nano))
+		return append(buf, v.Format(time.RFC3339Nano)...)
 	case nil:
-		return []byte("\\N")
+		return append(buf, "\\N"...)
 	default:
 		errorf("encode: unknown type for %T", v)
 	}
@@ -100,26 +103,28 @@ func encodeText(x interface{}) []byte {
 	panic("not reached")
 }
 
-func escapeText(text string) []byte {
+func appendEscapedText(buf []byte, text string) []byte {
 	escapeNeeded := false
 	startPos := 0
 	var c byte
 
-	byteText := []byte(text)
-
-	for startPos, c = range byteText {
+	// check if we need to escape
+	for i := 0; i < len(text); i++ {
+		c = text[i]
 		if c == '\\' || c == '\n' || c == '\r' || c == '\t' {
 			escapeNeeded = true
+			startPos = i
 			break
 		}
 	}
 	if !escapeNeeded {
-		return byteText
+		return append(buf, text...)
 	}
 
-	result := make([]byte, startPos, len(text)+8)
-	copy(result[:startPos], byteText[:startPos])
-	for _, c := range byteText[startPos:] {
+	// copy till first char to escape, iterate the rest
+	result := append(buf, text[:startPos]...)
+	for i := startPos; i < len(text); i++ {
+		c = text[i]
 		switch c {
 		case '\\':
 			result = append(result, '\\', '\\')
