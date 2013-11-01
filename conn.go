@@ -618,10 +618,10 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 		}
 
 		switch t {
-			case 'A', 'N', 'S':
-				// ignore
-			default:
-				return
+		case 'A', 'N', 'S':
+			// ignore
+		default:
+			return
 		}
 	}
 

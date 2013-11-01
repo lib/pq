@@ -109,5 +109,37 @@ pq may return errors of type *pq.Error which can be interrogated for error detai
         }
 
 See the pq.Error type for details.
+
+
+Bulk imports
+
+You can make bulk imports by preparing a statement with COPY FROM STDIN
+instead of INSERT. COPY statements are asynchronous and stmt.Exec can
+return errors for previous Exec calls.
+It is also necessary to call stmt.Exec() before stmt.Close() to get
+any errors from pending inserts. For example:
+
+	stmt, err := db.Prepare("COPY users (name, age) FROM STDIN")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, user := range users {
+		_, err = stmt.Exec(user.Name, int64(user.Age))
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	_, err = stmt.Exec()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = stmt.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 */
 package pq
