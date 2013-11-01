@@ -21,8 +21,9 @@ import (
 
 // Common error types
 var (
-	ErrSSLNotSupported = errors.New("pq: SSL is not enabled on the server")
-	ErrNotSupported    = errors.New("pq: Unsupported command")
+	ErrSSLNotSupported      = errors.New("pq: SSL is not enabled on the server")
+	ErrNotSupported         = errors.New("pq: Unsupported command")
+	ErrInFailedTransaction  = errors.New("pq: Could not complete operation in a failed transaction")
 )
 
 type drv struct{}
@@ -35,11 +36,33 @@ func init() {
 	sql.Register("postgres", &drv{})
 }
 
+type transactionStatus byte
+const (
+	txnStatusIdle					transactionStatus = 'I'
+	txnStatusIdleInTransaction		transactionStatus = 'T'
+	txnStatusInFailedTransaction	transactionStatus = 'E'
+)
+
+func (s transactionStatus) String() string {
+	switch s {
+		case txnStatusIdle:
+			return "idle"
+		case txnStatusIdleInTransaction:
+			return "idle in transaction"
+		case txnStatusInFailedTransaction:
+			return "in a failed transaction"
+		default:
+			errorf("unknown transactionStatus %v", s)
+	}
+	panic("not reached")
+}
+
 type conn struct {
-	c       net.Conn
-	buf     *bufio.Reader
-	namei   int
-	scratch [512]byte
+	c           net.Conn
+	buf         *bufio.Reader
+	namei       int
+	scratch     [512]byte
+	txnStatus	transactionStatus
 }
 
 func (c *conn) writeBuf(b byte) *writeBuf {
@@ -249,7 +272,19 @@ func parseOpts(name string, o values) error {
 	return nil
 }
 
+func (cn *conn) isInTransaction() bool {
+	return cn.txnStatus == txnStatusIdleInTransaction ||
+		   cn.txnStatus == txnStatusInFailedTransaction
+}
+
+func (cn *conn) checkIsInTransaction(intxn bool) {
+	if cn.isInTransaction() != intxn {
+		errorf("unexpected transaction status %v", cn.txnStatus)
+	}
+}
+
 func (cn *conn) Begin() (driver.Tx, error) {
+	cn.checkIsInTransaction(false)
 	_, err := cn.Exec("BEGIN", nil)
 	if err != nil {
 		return nil, err
@@ -258,11 +293,22 @@ func (cn *conn) Begin() (driver.Tx, error) {
 }
 
 func (cn *conn) Commit() error {
+	cn.checkIsInTransaction(true)
+	// Can't allow the client to think that everything went fine if it tried
+	// to commit a failed transaction; roll back and return an error.
+	if cn.txnStatus == txnStatusInFailedTransaction {
+		if err := cn.Rollback(); err != nil {
+			return err
+		}
+		return ErrInFailedTransaction
+	}
+
 	_, err := cn.Exec("COMMIT", nil)
 	return err
 }
 
 func (cn *conn) Rollback() error {
+	cn.checkIsInTransaction(true)
 	_, err := cn.Exec("ROLLBACK", nil)
 	return err
 }
@@ -285,6 +331,7 @@ func (cn *conn) simpleExec(q string) (res driver.Result, err error) {
 		case 'C':
 			res = parseComplete(r.string())
 		case 'Z':
+			cn.processReadyForQuery(r)
 			// done
 			return
 		case 'E':
@@ -318,6 +365,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 			// ignoring them, but there's not a great way
 			// to expose them right now)
 		case 'Z':
+			cn.processReadyForQuery(r)
 			// done
 			return
 		case 'E':
@@ -375,6 +423,7 @@ func (cn *conn) prepareToSimpleStmt(q, stmtName string) (_ *stmt, err error) {
 		case 'n':
 			// no data
 		case 'Z':
+			cn.processReadyForQuery(r)
 			return st, err
 		case 'E':
 			err = parseError(r)
@@ -558,6 +607,7 @@ func (cn *conn) startup(o values) {
 		case 'R':
 			cn.auth(r, o)
 		case 'Z':
+			cn.processReadyForQuery(r)
 			return
 		default:
 			errorf("unknown response for startup: %q", t)
@@ -632,10 +682,11 @@ func (st *stmt) Close() (err error) {
 	}
 	st.closed = true
 
-	t, _ = st.cn.recv()
+	t, r := st.cn.recv()
 	if t != 'Z' {
 		errorf("expected ready for query, but got: %q", t)
 	}
+	st.cn.processReadyForQuery(r)
 
 	return nil
 }
@@ -660,6 +711,7 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 		case 'C':
 			res = parseComplete(r.string())
 		case 'Z':
+			st.cn.processReadyForQuery(r)
 			// done
 			return
 		case 'T', 'N', 'S', 'D':
@@ -709,6 +761,7 @@ func (st *stmt) exec(v []driver.Value) {
 			}
 			return
 		case 'Z':
+			st.cn.processReadyForQuery(r)
 			if err != nil {
 				panic(err)
 			}
@@ -775,6 +828,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 		case 'C', 'S', 'N':
 			continue
 		case 'Z':
+			rs.st.cn.processReadyForQuery(r)
 			rs.done = true
 			if err != nil {
 				return err
@@ -806,6 +860,10 @@ func md5s(s string) string {
 	h := md5.New()
 	h.Write([]byte(s))
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func (c *conn) processReadyForQuery(r *readBuf) {
+	c.txnStatus = transactionStatus(r.byte())
 }
 
 func parseMeta(r *readBuf) (cols []string, rowTyps []oid.Oid) {

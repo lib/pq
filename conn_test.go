@@ -79,6 +79,26 @@ func TestReconnect(t *testing.T) {
 	}
 }
 
+func TestCommitInFailedTransaction(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := txn.Query("SELECT error")
+	if err == nil {
+		rows.Close()
+		t.Fatal("expected failure")
+	}
+	err = txn.Commit()
+	if err != ErrInFailedTransaction {
+		t.Fatal("expected ErrInFailedTransaction; got %#v", err)
+	}
+}
+
+
 func TestOpenURL(t *testing.T) {
 	db, err := openTestConnConninfo("postgres://")
 	if err != nil {
@@ -628,6 +648,38 @@ FROM (VALUES (0::integer, NULL::text), (1, 'test string')) AS t;`)
 	defer r.Close()
 
 	for r.Next() {
+	}
+}
+
+func TestCommit(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TEMP TABLE temp (a int)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlInsert := "INSERT INTO temp VALUES (1)"
+	sqlSelect := "SELECT * FROM temp"
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tx.Exec(sqlInsert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = tx.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var i int
+	err = db.QueryRow(sqlSelect).Scan(&i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i != 1 {
+		t.Fatalf("expected 1, got %d", i)
 	}
 }
 
