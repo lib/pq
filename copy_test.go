@@ -104,6 +104,33 @@ func TestCopyInTypes(t *testing.T) {
 	}
 }
 
+func TestCopyInWrongType(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TEMP TABLE temp (num INTEGER)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stmt, err := db.Prepare("COPY temp (num) FROM STDIN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec("Héllö\n ☃!\r\t\\")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = stmt.Exec()
+	if err == nil {
+		t.Fatal("expected 'invalid input syntax for integer' error")
+	}
+
+}
+
 func TestCopyInBinary(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
