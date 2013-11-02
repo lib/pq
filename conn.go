@@ -285,11 +285,14 @@ func (cn *conn) checkIsInTransaction(intxn bool) {
 
 func (cn *conn) Begin() (driver.Tx, error) {
 	cn.checkIsInTransaction(false)
-	_, err := cn.Exec("BEGIN", nil)
+	_, commandTag, err := cn.simpleExec("BEGIN")
 	if err != nil {
 		return nil, err
 	}
-	return cn, err
+	if commandTag != "BEGIN" {
+		return nil, fmt.Errorf("unexpected command tag %s", commandTag)
+	}
+	return cn, nil
 }
 
 func (cn *conn) Commit() error {
@@ -303,14 +306,26 @@ func (cn *conn) Commit() error {
 		return ErrInFailedTransaction
 	}
 
-	_, err := cn.Exec("COMMIT", nil)
-	return err
+	_, commandTag, err := cn.simpleExec("COMMIT")
+	if err != nil {
+		return err
+	}
+	if commandTag != "COMMIT" {
+		return fmt.Errorf("unexpected command tag %s", commandTag)
+	}
+	return nil
 }
 
 func (cn *conn) Rollback() error {
 	cn.checkIsInTransaction(true)
-	_, err := cn.Exec("ROLLBACK", nil)
-	return err
+	_, commandTag, err := cn.simpleExec("ROLLBACK")
+	if err != nil {
+		return err
+	}
+	if commandTag != "ROLLBACK" {
+		return fmt.Errorf("unexpected command tag %s", commandTag)
+	}
+	return nil
 }
 
 func (cn *conn) gname() string {
@@ -318,7 +333,7 @@ func (cn *conn) gname() string {
 	return strconv.FormatInt(int64(cn.namei), 10)
 }
 
-func (cn *conn) simpleExec(q string) (res driver.Result, err error) {
+func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err error) {
 	defer errRecover(&err)
 
 	b := cn.writeBuf('Q')
@@ -329,7 +344,7 @@ func (cn *conn) simpleExec(q string) (res driver.Result, err error) {
 		t, r := cn.recv1()
 		switch t {
 		case 'C':
-			res = parseComplete(r.string())
+			res, commandTag = parseComplete(r.string())
 		case 'Z':
 			cn.processReadyForQuery(r)
 			// done
@@ -472,7 +487,9 @@ func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err er
 	// Check to see if we can use the "simpleExec" interface, which is
 	// *much* faster than going through prepare/exec
 	if len(args) == 0 {
-		return cn.simpleExec(query)
+		// ignore commandTag, our caller doesn't care
+		r, _, err := cn.simpleExec(query)
+		return r, err
 	}
 
 	// Use the unnamed statement to defer planning until bind
@@ -699,7 +716,9 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 	defer errRecover(&err)
 
 	if len(v) == 0 {
-		return st.cn.simpleExec(st.query)
+		// ignore commandTag, our caller doesn't care
+		r, _, err := st.cn.simpleExec(st.query)
+		return r, err
 	}
 	st.exec(v)
 
@@ -709,7 +728,7 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 		case 'E':
 			err = parseError(r)
 		case 'C':
-			res = parseComplete(r.string())
+			res, _ = parseComplete(r.string())
 		case 'Z':
 			st.cn.processReadyForQuery(r)
 			// done
@@ -780,10 +799,43 @@ func (st *stmt) NumInput() int {
 	return len(st.paramTyps)
 }
 
-func parseComplete(s string) driver.Result {
-	parts := strings.Split(s, " ")
-	n, _ := strconv.ParseInt(parts[len(parts)-1], 10, 64)
-	return driver.RowsAffected(n)
+func parseComplete(commandTag string) (driver.Result, string) {
+	commandsWithAffectedRows := []string{
+		"SELECT ",
+		// INSERT is handled below
+		"UPDATE ",
+		"DELETE ",
+		"FETCH ",
+		"MOVE ",
+		"COPY ",
+	}
+
+	var affectedRows *string
+	for _, tag := range commandsWithAffectedRows {
+		if strings.HasPrefix(commandTag, tag) {
+			t := commandTag[len(tag):]
+			affectedRows = &t
+			commandTag = tag[:len(tag)-1]
+			break
+		}
+	}
+	if affectedRows == nil && strings.HasPrefix(commandTag, "INSERT ") {
+		parts := strings.Split(commandTag, " ")
+		if len(parts) != 3 {
+			errorf("unexpected INSERT command tag %s", commandTag)
+		}
+		affectedRows = &parts[len(parts)-1]
+		commandTag = "INSERT"
+	}
+	// There should be no affected rows attached to the tag, just return it
+	if affectedRows == nil {
+		return driver.RowsAffected(0), commandTag
+	}
+	n, err := strconv.ParseInt(*affectedRows, 10, 64)
+	if err != nil {
+		errorf("could not parse commandTag: %s", err)
+	}
+	return driver.RowsAffected(n), commandTag
 }
 
 type rows struct {
