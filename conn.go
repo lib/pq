@@ -88,6 +88,9 @@ type conn struct {
 	buf     *bufio.Reader
 	namei   int
 	scratch [512]byte
+
+	saveMessageType byte
+	saveMessageBuffer *readBuf
 }
 
 func (c *conn) writeBuf(b byte) *writeBuf {
@@ -525,6 +528,14 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 }
 
 func (cn *conn) recv1() (byte, *readBuf) {
+	// workaround for a QueryRow bug, see exec
+	if cn.saveMessageType != 0 {
+		t, r := cn.saveMessageType, cn.saveMessageBuffer
+		cn.saveMessageType = 0
+		cn.saveMessageBuffer = nil
+		return t, r
+	}
+
 	x := cn.scratch[:5]
 	_, err := io.ReadFull(cn.buf, x)
 	if err != nil {
@@ -758,7 +769,7 @@ func (st *stmt) exec(v []driver.Value) {
 			if err != nil {
 				panic(err)
 			}
-			return
+			goto workaround
 		case 'Z':
 			if err != nil {
 				panic(err)
@@ -770,6 +781,38 @@ func (st *stmt) exec(v []driver.Value) {
 			// ignore
 		default:
 			errorf("unexpected bind response: %q", t)
+		}
+	}
+
+	// Work around a bug in sql.DB.QueryRow: in Go 1.2 and earlier it ignores
+	// any errors from rows.Next, which masks errors that happened during the
+	// execution of the query.  To avoid the problem in common cases, we wait
+	// here for one more message from the database.  If it's not an error the
+	// query will likely succeed (or perhaps has already, if it's a
+	// CommandComplete), so we push the message into the conn struct; recv1
+	// will return it as the next message for rows.Next or rows.Close.
+	// However, if it's an error, we wait until ReadyForQuery and then return
+	// the error to our caller.
+workaround:
+	for {
+		t, r := st.cn.recv1()
+		switch t {
+			case 'N', 'S':
+				// ignore
+			case 'E':
+				err = parseError(r)
+			case 'C', 'D':
+				// the query didn't fail, but we can't process this message
+				st.cn.saveMessageType = t
+				st.cn.saveMessageBuffer = r
+				return
+			case 'Z':
+				if err == nil {
+					errorf("unexpected CommandComplete during extended query execution")
+				}
+				panic(err)
+			default:
+				errorf("unexpected message during query execution: %q", t)
 		}
 	}
 }
