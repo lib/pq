@@ -21,9 +21,9 @@ import (
 
 // Common error types
 var (
-	ErrSSLNotSupported      = errors.New("pq: SSL is not enabled on the server")
-	ErrNotSupported         = errors.New("pq: Unsupported command")
-	ErrInFailedTransaction  = errors.New("pq: Could not complete operation in a failed transaction")
+	ErrSSLNotSupported     = errors.New("pq: SSL is not enabled on the server")
+	ErrNotSupported        = errors.New("pq: Unsupported command")
+	ErrInFailedTransaction = errors.New("pq: Could not complete operation in a failed transaction")
 )
 
 type drv struct{}
@@ -37,32 +37,36 @@ func init() {
 }
 
 type transactionStatus byte
+
 const (
-	txnStatusIdle					transactionStatus = 'I'
-	txnStatusIdleInTransaction		transactionStatus = 'T'
-	txnStatusInFailedTransaction	transactionStatus = 'E'
+	txnStatusIdle                transactionStatus = 'I'
+	txnStatusIdleInTransaction   transactionStatus = 'T'
+	txnStatusInFailedTransaction transactionStatus = 'E'
 )
 
 func (s transactionStatus) String() string {
 	switch s {
-		case txnStatusIdle:
-			return "idle"
-		case txnStatusIdleInTransaction:
-			return "idle in transaction"
-		case txnStatusInFailedTransaction:
-			return "in a failed transaction"
-		default:
-			errorf("unknown transactionStatus %v", s)
+	case txnStatusIdle:
+		return "idle"
+	case txnStatusIdleInTransaction:
+		return "idle in transaction"
+	case txnStatusInFailedTransaction:
+		return "in a failed transaction"
+	default:
+		errorf("unknown transactionStatus %v", s)
 	}
 	panic("not reached")
 }
 
 type conn struct {
-	c           net.Conn
-	buf         *bufio.Reader
-	namei       int
-	scratch     [512]byte
-	txnStatus	transactionStatus
+	c         net.Conn
+	buf       *bufio.Reader
+	namei     int
+	scratch   [512]byte
+	txnStatus transactionStatus
+
+	saveMessageType   byte
+	saveMessageBuffer *readBuf
 }
 
 func (c *conn) writeBuf(b byte) *writeBuf {
@@ -274,7 +278,7 @@ func parseOpts(name string, o values) error {
 
 func (cn *conn) isInTransaction() bool {
 	return cn.txnStatus == txnStatusIdleInTransaction ||
-		   cn.txnStatus == txnStatusInFailedTransaction
+		cn.txnStatus == txnStatusInFailedTransaction
 }
 
 func (cn *conn) checkIsInTransaction(intxn bool) {
@@ -544,6 +548,14 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 }
 
 func (cn *conn) recv1() (byte, *readBuf) {
+	// workaround for a QueryRow bug, see exec
+	if cn.saveMessageType != 0 {
+		t, r := cn.saveMessageType, cn.saveMessageBuffer
+		cn.saveMessageType = 0
+		cn.saveMessageBuffer = nil
+		return t, r
+	}
+
 	x := cn.scratch[:5]
 	_, err := io.ReadFull(cn.buf, x)
 	if err != nil {
@@ -782,7 +794,7 @@ func (st *stmt) exec(v []driver.Value) {
 			if err != nil {
 				panic(err)
 			}
-			return
+			goto workaround
 		case 'Z':
 			st.cn.processReadyForQuery(r)
 			if err != nil {
@@ -795,6 +807,38 @@ func (st *stmt) exec(v []driver.Value) {
 			// ignore
 		default:
 			errorf("unexpected bind response: %q", t)
+		}
+	}
+
+	// Work around a bug in sql.DB.QueryRow: in Go 1.2 and earlier it ignores
+	// any errors from rows.Next, which masks errors that happened during the
+	// execution of the query.  To avoid the problem in common cases, we wait
+	// here for one more message from the database.  If it's not an error the
+	// query will likely succeed (or perhaps has already, if it's a
+	// CommandComplete), so we push the message into the conn struct; recv1
+	// will return it as the next message for rows.Next or rows.Close.
+	// However, if it's an error, we wait until ReadyForQuery and then return
+	// the error to our caller.
+workaround:
+	for {
+		t, r := st.cn.recv1()
+		switch t {
+		case 'N', 'S':
+			// ignore
+		case 'E':
+			err = parseError(r)
+		case 'C', 'D':
+			// the query didn't fail, but we can't process this message
+			st.cn.saveMessageType = t
+			st.cn.saveMessageBuffer = r
+			return
+		case 'Z':
+			if err == nil {
+				errorf("unexpected ReadyForQuery during extended query execution")
+			}
+			panic(err)
+		default:
+			errorf("unexpected message during query execution: %q", t)
 		}
 	}
 }

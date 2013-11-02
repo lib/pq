@@ -98,7 +98,6 @@ func TestCommitInFailedTransaction(t *testing.T) {
 	}
 }
 
-
 func TestOpenURL(t *testing.T) {
 	db, err := openTestConnConninfo("postgres://")
 	if err != nil {
@@ -437,7 +436,7 @@ func TestErrorOnQuery(t *testing.T) {
 	}
 }
 
-func TestErrorOnQueryRow(t *testing.T) {
+func TestErrorOnQueryRowSimpleQuery(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
@@ -453,7 +452,31 @@ func TestErrorOnQueryRow(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Error, got %#v", err)
 	} else if e.Code.Name() != "unique_violation" {
-		t.Fatalf("expected unique_violation, got %s (%+v", e.Code.Name(), err)
+		t.Fatalf("expected unique_violation, got %s (%+v)", e.Code.Name(), err)
+	}
+}
+
+// Test the QueryRow bug workaround in exec
+func TestQueryRowBugWorkaround(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TEMP TABLE notnulltemp (a varchar(10) not null)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var a string
+	err = db.QueryRow("INSERT INTO notnulltemp(a) values($1) RETURNING a", nil).Scan(&a)
+	if err == sql.ErrNoRows {
+		t.Errorf("expected constraint violation error; got: %v", err)
+	}
+	pge, ok := err.(*Error)
+	if !ok {
+		t.Errorf("expected *Error; got: %#v", err)
+	}
+	if pge.Code.Name() != "not_null_violation" {
+		t.Errorf("expected not_null_violation; got: %s (%+v)", pge.Code.Name(), err)
 	}
 }
 
@@ -509,7 +532,6 @@ func TestParseErrorInExtendedQuery(t *testing.T) {
 	}
 	rows.Close()
 }
-
 
 // TestReturning tests that an INSERT query using the RETURNING clause returns a row.
 func TestReturning(t *testing.T) {
@@ -580,14 +602,14 @@ func TestParseComplete(t *testing.T) {
 			}
 		}()
 		res, c := parseComplete(commandTag)
-		if (c != command) {
+		if c != command {
 			t.Errorf("Expected %v, got %v", command, c)
 		}
 		n, err := res.RowsAffected()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if (n != affectedRows) {
+		if n != affectedRows {
 			t.Errorf("Expected %d, got %d", affectedRows, n)
 		}
 	}
@@ -603,7 +625,7 @@ func TestParseComplete(t *testing.T) {
 	tpc("UNKNOWNCOMMANDTAG", "UNKNOWNCOMMANDTAG", 0, false)
 
 	// failure cases
-	tpc("INSERT 1", "", 0, true) // missing oid
+	tpc("INSERT 1", "", 0, true)   // missing oid
 	tpc("UPDATE 0 1", "", 0, true) // too many numbers
 	tpc("SELECT foo", "", 0, true) // invalid row count
 }
