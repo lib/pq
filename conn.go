@@ -692,7 +692,9 @@ func (st *stmt) Close() (err error) {
 }
 
 func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) {
-	return st.cn.Query(st.query, v)
+	defer errRecover(&err)
+	st.exec(v)
+	return &rows{st: st}, nil
 }
 
 func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
