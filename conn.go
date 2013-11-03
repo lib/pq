@@ -808,7 +808,7 @@ workaround:
 				return
 			case 'Z':
 				if err == nil {
-					errorf("unexpected CommandComplete during extended query execution")
+					errorf("unexpected ReadyForQuery during extended query execution")
 				}
 				panic(err)
 			default:
