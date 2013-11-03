@@ -799,6 +799,10 @@ func (st *stmt) NumInput() int {
 	return len(st.paramTyps)
 }
 
+// parseComplete parses the "command tag" from a CommandComplete message, and
+// returns the number of rows affected (if applicable) and a string
+// identifying only the command that was executed, e.g. "ALTER TABLE".  If the
+// command tag could not be parsed, parseComplete panics with a pq.Error.
 func parseComplete(commandTag string) (driver.Result, string) {
 	commandsWithAffectedRows := []string{
 		"SELECT ",
