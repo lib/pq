@@ -359,12 +359,9 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 		t, r := cn.recv1()
 		switch t {
 		case 'C':
-			// Ignore--we may need to consume Complete
-			// here if the query finishes with an error,
-			// and NoticeResponse if we get a notice (we
-			// should communicate these rather than
-			// ignoring them, but there's not a great way
-			// to expose them right now)
+			// Consume any CommandComplete.  It would be better to only allow
+			// one if the query resulted in an error, but we have historically
+			// allowed queries that don't return any results.
 		case 'Z':
 			// done
 			return
