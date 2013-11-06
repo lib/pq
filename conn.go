@@ -575,6 +575,8 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 				return
 		}
 	}
+
+	panic("not reached")
 }
 
 func (cn *conn) ssl(o values) {
