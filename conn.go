@@ -359,8 +359,8 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 			return
 		case 'E':
 			err = parseError(r)
-		case 'T', 'N', 'S', 'D':
-			// ignore
+		case 'T', 'D':
+			// ignore any results
 		default:
 			errorf("unknown response for simple query: %q", t)
 		}
@@ -380,13 +380,10 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 	for {
 		t, r := cn.recv1()
 		switch t {
-		case 'C', 'N':
-			// Ignore--we may need to consume Complete
-			// here if the query finishes with an error,
-			// and NoticeResponse if we get a notice (we
-			// should communicate these rather than
-			// ignoring them, but there's not a great way
-			// to expose them right now)
+		case 'C':
+			// Consume any CommandComplete.  It would be better to only allow
+			// one if the query resulted in an error, but we have historically
+			// allowed queries that don't return any results.
 		case 'Z':
 			cn.processReadyForQuery(r)
 			// done
@@ -431,7 +428,7 @@ func (cn *conn) prepareToSimpleStmt(q, stmtName string) (_ *stmt, err error) {
 	for {
 		t, r := cn.recv1()
 		switch t {
-		case '1', 'N':
+		case '1':
 		case 't':
 			nparams := int(r.int16())
 			st.paramTyps = make([]oid.Oid, nparams)
@@ -441,8 +438,6 @@ func (cn *conn) prepareToSimpleStmt(q, stmtName string) (_ *stmt, err error) {
 			}
 		case 'T':
 			st.cols, st.rowTyps = parseMeta(r)
-		case 'S':
-			// ParameterStatus, ignore
 		case 'n':
 			// no data
 		case 'Z':
@@ -531,9 +526,52 @@ func (cn *conn) send(m *writeBuf) {
 	}
 }
 
+// recvMessage receives any message from the backend, or returns an error if
+// a problem occurred while reading the message.
+func (cn *conn) recvMessage() (byte, *readBuf, error) {
+	// workaround for a QueryRow bug, see exec
+	if cn.saveMessageType != 0 {
+		t, r := cn.saveMessageType, cn.saveMessageBuffer
+		cn.saveMessageType = 0
+		cn.saveMessageBuffer = nil
+		return t, r, nil
+	}
+
+	x := cn.scratch[:5]
+	_, err := io.ReadFull(cn.buf, x)
+	if err != nil {
+		return 0, nil, err
+	}
+	t := x[0]
+
+	b := readBuf(x[1:])
+	n := b.int32() - 4
+	var y []byte
+	if n <= len(cn.scratch) {
+		y = cn.scratch[:n]
+	} else {
+		y = make([]byte, n)
+	}
+	_, err = io.ReadFull(cn.buf, y)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	return t, (*readBuf)(&y), nil
+}
+
+// recv receives a message from the backend, but if an error happened while
+// reading the message or the received message was an ErrorResponse, it panics.
+// NoticeResponses are ignored.  This function should generally be used only
+// during the startup sequence.
 func (cn *conn) recv() (t byte, r *readBuf) {
 	for {
-		t, r = cn.recv1()
+		var err error
+		t, r, err = cn.recvMessage()
+		if err != nil {
+			panic(err)
+		}
+
 		switch t {
 		case 'E':
 			panic(parseError(r))
@@ -547,36 +585,26 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 	panic("not reached")
 }
 
-func (cn *conn) recv1() (byte, *readBuf) {
-	// workaround for a QueryRow bug, see exec
-	if cn.saveMessageType != 0 {
-		t, r := cn.saveMessageType, cn.saveMessageBuffer
-		cn.saveMessageType = 0
-		cn.saveMessageBuffer = nil
-		return t, r
+// recv1 receives a message from the backend, panicking if an error occurs
+// while attempting to read it.  All asynchronous messages are ignored, with
+// the exception of ErrorResponse.
+func (cn *conn) recv1() (t byte, r *readBuf) {
+	for {
+		var err error
+		t, r, err = cn.recvMessage()
+		if err != nil {
+			panic(err)
+		}
+
+		switch t {
+			case 'A', 'N', 'S':
+				// ignore
+			default:
+				return
+		}
 	}
 
-	x := cn.scratch[:5]
-	_, err := io.ReadFull(cn.buf, x)
-	if err != nil {
-		panic(err)
-	}
-	c := x[0]
-
-	b := readBuf(x[1:])
-	n := b.int32() - 4
-	var y []byte
-	if n <= len(cn.scratch) {
-		y = cn.scratch[:n]
-	} else {
-		y = make([]byte, n)
-	}
-	_, err = io.ReadFull(cn.buf, y)
-	if err != nil {
-		panic(err)
-	}
-
-	return c, (*readBuf)(&y)
+	panic("not reached")
 }
 
 func (cn *conn) ssl(o values) {
@@ -709,13 +737,13 @@ func (st *stmt) Close() (err error) {
 
 	st.cn.send(st.cn.writeBuf('S'))
 
-	t, _ := st.cn.recv()
+	t, _ := st.cn.recv1()
 	if t != '3' {
 		errorf("unexpected close response: %q", t)
 	}
 	st.closed = true
 
-	t, r := st.cn.recv()
+	t, r := st.cn.recv1()
 	if t != 'Z' {
 		errorf("expected ready for query, but got: %q", t)
 	}
@@ -751,8 +779,8 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 			st.cn.processReadyForQuery(r)
 			// done
 			return
-		case 'T', 'N', 'S', 'D':
-			// Ignore
+		case 'T', 'D':
+			// ignore any results
 		default:
 			errorf("unknown exec response: %q", t)
 		}
@@ -803,10 +831,6 @@ func (st *stmt) exec(v []driver.Value) {
 				panic(err)
 			}
 			return
-		case 'S':
-			// ParameterStatus, ignore
-		case 'N':
-			// ignore
 		default:
 			errorf("unexpected bind response: %q", t)
 		}
@@ -935,7 +959,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 		switch t {
 		case 'E':
 			err = parseError(r)
-		case 'C', 'S', 'N':
+		case 'C':
 			continue
 		case 'Z':
 			rs.st.cn.processReadyForQuery(r)
