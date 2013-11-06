@@ -508,13 +508,13 @@ func (cn *conn) send(m *writeBuf) {
 
 // recvMessage receives any message from the backend, or returns an error if
 // a problem occurred while reading the message.
-func (cn *conn) recvMessage() (t byte, buf *readBuf, err error) {
+func (cn *conn) recvMessage() (byte, *readBuf, error) {
 	x := cn.scratch[:5]
-	_, err = io.ReadFull(cn.buf, x)
+	_, err := io.ReadFull(cn.buf, x)
 	if err != nil {
-		return
+		return 0, nil, err
 	}
-	t = x[0]
+	t := x[0]
 
 	b := readBuf(x[1:])
 	n := b.int32() - 4
@@ -526,7 +526,7 @@ func (cn *conn) recvMessage() (t byte, buf *readBuf, err error) {
 	}
 	_, err = io.ReadFull(cn.buf, y)
 	if err != nil {
-		return
+		return 0, nil, err
 	}
 
 	return t, (*readBuf)(&y), nil
