@@ -2,6 +2,7 @@ package pq
 
 import (
 	"database/sql/driver"
+	"encoding/binary"
 	"sync/atomic"
 )
 
@@ -30,6 +31,8 @@ func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
 		rowData: make(chan []byte),
 		done:    make(chan bool),
 	}
+	// add CopyData identifier + 4 bytes for message length
+	ci.buffer = append(ci.buffer, 'd', 0, 0, 0, 0)
 
 	b := cn.writeBuf('Q')
 	b.string(q)
@@ -59,9 +62,13 @@ func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
 }
 
 func (ci *copyin) flush(buf []byte) {
-	b := ci.cn.writeBuf('d')
-	b.bytes(buf)
-	ci.cn.send(b)
+	// set message length (without message identifier)
+	binary.BigEndian.PutUint32(buf[1:], uint32(len(buf)-1))
+
+	_, err := ci.cn.c.Write(buf)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (ci *copyin) resploop() {
@@ -138,7 +145,8 @@ func (ci *copyin) Exec(v []driver.Value) (r driver.Result, err error) {
 
 	if len(ci.buffer) > ciBufferFlushSize {
 		ci.flush(ci.buffer)
-		ci.buffer = make([]byte, 0, ciBufferSize)
+		// reset buffer, keep bytes for message identifier and length
+		ci.buffer = ci.buffer[:5]
 	}
 
 	return
