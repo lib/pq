@@ -141,11 +141,6 @@ func (ci *copyin) Exec(v []driver.Value) (r driver.Result, err error) {
 		ci.buffer = make([]byte, 0, ciBufferSize)
 	}
 
-	if ci.isErrorSet() {
-		err = ci.err
-		return nil, err
-	}
-
 	return
 }
 
