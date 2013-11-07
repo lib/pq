@@ -3,6 +3,7 @@ package pq
 import (
 	"bytes"
 	"database/sql"
+	"strings"
 	"testing"
 )
 
@@ -10,18 +11,20 @@ func TestCopyInMultipleValues(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	_, err := db.Exec("CREATE TEMP TABLE temp (a int)")
+	_, err := db.Exec("CREATE TEMP TABLE temp (a int, b varchar)")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	stmt, err := db.Prepare("COPY temp (a) FROM STDIN")
+	stmt, err := db.Prepare("COPY temp (a, b) FROM STDIN")
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	longString := strings.Repeat("#", 500)
 
 	for i := 0; i < 500; i++ {
-		_, err = stmt.Exec(int64(i))
+		_, err = stmt.Exec(int64(i), longString)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,6 +146,50 @@ func TestCopyInBinary(t *testing.T) {
 	_, err = db.Prepare("COPY temp (num, text, blob, nothing) FROM STDIN WITH binary")
 	if err == nil {
 		t.Fatal("COPY with binary format did not return error")
+	}
+
+}
+
+func BenchmarkCopyIn(b *testing.B) {
+	db := openTestConn(b)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TEMP TABLE temp (a int, b varchar)")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	stmt, err := db.Prepare("COPY temp (a, b) FROM STDIN")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	for i := 0; i < b.N; i++ {
+		_, err = stmt.Exec(int64(i), "hello world!")
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	_, err = stmt.Exec()
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	err = stmt.Close()
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	var num int
+	row := db.QueryRow("SELECT COUNT(*) FROM temp")
+	err = row.Scan(&num)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	if num != b.N {
+		b.Fatalf("expected %d items, not %d", b.N, num)
 	}
 
 }
