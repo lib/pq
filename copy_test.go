@@ -134,7 +134,7 @@ func TestCopyInWrongType(t *testing.T) {
 
 }
 
-func TestCopyInBinary(t *testing.T) {
+func TestCopyInBinaryError(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
@@ -146,6 +146,22 @@ func TestCopyInBinary(t *testing.T) {
 	_, err = db.Prepare("COPY temp (num, text, blob, nothing) FROM STDIN WITH binary")
 	if err == nil {
 		t.Fatal("COPY with binary format did not return error")
+	}
+
+}
+
+func TestCopyFromError(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TEMP TABLE temp (num INTEGER, text VARCHAR, blob BYTEA, nothing VARCHAR)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Prepare("COPY temp (num, text, blob, nothing) TO STDOUT")
+	if err == nil {
+		t.Fatal("COPY TO did not return error")
 	}
 
 }

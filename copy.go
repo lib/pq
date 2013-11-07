@@ -47,6 +47,8 @@ func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
 			}
 			go ci.resploop()
 			return ci, err
+		case 'H':
+			errorf("COPY TO is not supported")
 		case 'Z':
 			// done
 			return
