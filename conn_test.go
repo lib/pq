@@ -417,7 +417,7 @@ func TestErrorOnQuery(t *testing.T) {
 	}
 }
 
-func TestErrorOnQueryRow(t *testing.T) {
+func TestErrorOnQueryRowSimpleQuery(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
@@ -433,7 +433,31 @@ func TestErrorOnQueryRow(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Error, got %#v", err)
 	} else if e.Code.Name() != "unique_violation" {
-		t.Fatalf("expected unique_violation, got %s (%+v", e.Code.Name(), err)
+		t.Fatalf("expected unique_violation, got %s (%+v)", e.Code.Name(), err)
+	}
+}
+
+// Test the QueryRow bug workaround in exec
+func TestQueryRowBugWorkaround(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TEMP TABLE notnulltemp (a varchar(10) not null)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var a string
+	err = db.QueryRow("INSERT INTO notnulltemp(a) values($1) RETURNING a", nil).Scan(&a)
+	if err == sql.ErrNoRows {
+		t.Errorf("expected constraint violation error; got: %v", err)
+	}
+	pge, ok := err.(*Error)
+	if !ok {
+		t.Errorf("expected *Error; got: %#v", err)
+	}
+	if pge.Code.Name() != "not_null_violation" {
+		t.Errorf("expected not_null_violation; got: %s (%+v)", pge.Code.Name(), err)
 	}
 }
 
