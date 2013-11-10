@@ -570,6 +570,44 @@ func TestParseEnviron(t *testing.T) {
 	}
 }
 
+func TestParseComplete(t *testing.T) {
+	tpc := func(commandTag string, command string, affectedRows int64, shouldFail bool) {
+		defer func() {
+			if p := recover(); p != nil {
+				if !shouldFail {
+					t.Error(p)
+				}
+			}
+		}()
+		res, c := parseComplete(commandTag)
+		if (c != command) {
+			t.Errorf("Expected %v, got %v", command, c)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (n != affectedRows) {
+			t.Errorf("Expected %d, got %d", affectedRows, n)
+		}
+	}
+
+	tpc("ALTER TABLE", "ALTER TABLE", 0, false)
+	tpc("INSERT 0 1", "INSERT", 1, false)
+	tpc("UPDATE 100", "UPDATE", 100, false)
+	tpc("SELECT 100", "SELECT", 100, false)
+	tpc("FETCH 100", "FETCH", 100, false)
+	// allow COPY (and others) without row count
+	tpc("COPY", "COPY", 0, false)
+	// don't fail on command tags we don't recognize
+	tpc("UNKNOWNCOMMANDTAG", "UNKNOWNCOMMANDTAG", 0, false)
+
+	// failure cases
+	tpc("INSERT 1", "", 0, true) // missing oid
+	tpc("UPDATE 0 1", "", 0, true) // too many numbers
+	tpc("SELECT foo", "", 0, true) // invalid row count
+}
+
 func TestExecerInterface(t *testing.T) {
 	// Gin up a straw man private struct just for the type check
 	cn := &conn{c: nil}

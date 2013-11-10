@@ -802,7 +802,7 @@ func (st *stmt) NumInput() int {
 // parseComplete parses the "command tag" from a CommandComplete message, and
 // returns the number of rows affected (if applicable) and a string
 // identifying only the command that was executed, e.g. "ALTER TABLE".  If the
-// command tag could not be parsed, parseComplete panics with a pq.Error.
+// command tag could not be parsed, parseComplete panics.
 func parseComplete(commandTag string) (driver.Result, string) {
 	commandsWithAffectedRows := []string{
 		"SELECT ",
@@ -823,6 +823,10 @@ func parseComplete(commandTag string) (driver.Result, string) {
 			break
 		}
 	}
+	// INSERT also includes the oid of the inserted row in its command tag.
+	// Oids in user tables are deprecated, and the oid is only returned when
+	// exactly one row is inserted, so it's unlikely to be of value to any
+	// real-world application and we can ignore it.
 	if affectedRows == nil && strings.HasPrefix(commandTag, "INSERT ") {
 		parts := strings.Split(commandTag, " ")
 		if len(parts) != 3 {
