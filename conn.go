@@ -297,8 +297,12 @@ func (cn *conn) Begin() (driver.Tx, error) {
 
 func (cn *conn) Commit() error {
 	cn.checkIsInTransaction(true)
-	// Can't allow the client to think that everything went fine if it tried
-	// to commit a failed transaction; roll back and return an error.
+	// We don't want the client to think that everything is okay if it tries
+	// to commit a failed transaction.  However, no matter what we return,
+	// database/sql will release this connection back into the free connection
+	// pool so we have to abort the current transaction here.  Note that you
+	// would get the same behaviour if you issued a COMMIT in a failed
+	// transaction, so it's also the least surprising thing to do here.
 	if cn.txnStatus == txnStatusInFailedTransaction {
 		if err := cn.Rollback(); err != nil {
 			return err
