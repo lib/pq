@@ -79,6 +79,26 @@ func TestReconnect(t *testing.T) {
 	}
 }
 
+func TestCommitInFailedTransaction(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := txn.Query("SELECT error")
+	if err == nil {
+		rows.Close()
+		t.Fatal("expected failure")
+	}
+	err = txn.Commit()
+	if err != ErrInFailedTransaction {
+		t.Fatal("expected ErrInFailedTransaction; got %#v", err)
+	}
+}
+
+
 func TestOpenURL(t *testing.T) {
 	db, err := openTestConnConninfo("postgres://")
 	if err != nil {
@@ -550,6 +570,44 @@ func TestParseEnviron(t *testing.T) {
 	}
 }
 
+func TestParseComplete(t *testing.T) {
+	tpc := func(commandTag string, command string, affectedRows int64, shouldFail bool) {
+		defer func() {
+			if p := recover(); p != nil {
+				if !shouldFail {
+					t.Error(p)
+				}
+			}
+		}()
+		res, c := parseComplete(commandTag)
+		if (c != command) {
+			t.Errorf("Expected %v, got %v", command, c)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (n != affectedRows) {
+			t.Errorf("Expected %d, got %d", affectedRows, n)
+		}
+	}
+
+	tpc("ALTER TABLE", "ALTER TABLE", 0, false)
+	tpc("INSERT 0 1", "INSERT", 1, false)
+	tpc("UPDATE 100", "UPDATE", 100, false)
+	tpc("SELECT 100", "SELECT", 100, false)
+	tpc("FETCH 100", "FETCH", 100, false)
+	// allow COPY (and others) without row count
+	tpc("COPY", "COPY", 0, false)
+	// don't fail on command tags we don't recognize
+	tpc("UNKNOWNCOMMANDTAG", "UNKNOWNCOMMANDTAG", 0, false)
+
+	// failure cases
+	tpc("INSERT 1", "", 0, true) // missing oid
+	tpc("UPDATE 0 1", "", 0, true) // too many numbers
+	tpc("SELECT foo", "", 0, true) // invalid row count
+}
+
 func TestExecerInterface(t *testing.T) {
 	// Gin up a straw man private struct just for the type check
 	cn := &conn{c: nil}
@@ -628,6 +686,38 @@ FROM (VALUES (0::integer, NULL::text), (1, 'test string')) AS t;`)
 	defer r.Close()
 
 	for r.Next() {
+	}
+}
+
+func TestCommit(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TEMP TABLE temp (a int)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlInsert := "INSERT INTO temp VALUES (1)"
+	sqlSelect := "SELECT * FROM temp"
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tx.Exec(sqlInsert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = tx.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var i int
+	err = db.QueryRow(sqlSelect).Scan(&i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i != 1 {
+		t.Fatalf("expected 1, got %d", i)
 	}
 }
 

@@ -21,8 +21,9 @@ import (
 
 // Common error types
 var (
-	ErrSSLNotSupported = errors.New("pq: SSL is not enabled on the server")
-	ErrNotSupported    = errors.New("pq: Unsupported command")
+	ErrSSLNotSupported      = errors.New("pq: SSL is not enabled on the server")
+	ErrNotSupported         = errors.New("pq: Unsupported command")
+	ErrInFailedTransaction  = errors.New("pq: Could not complete operation in a failed transaction")
 )
 
 type drv struct{}
@@ -35,11 +36,33 @@ func init() {
 	sql.Register("postgres", &drv{})
 }
 
+type transactionStatus byte
+const (
+	txnStatusIdle					transactionStatus = 'I'
+	txnStatusIdleInTransaction		transactionStatus = 'T'
+	txnStatusInFailedTransaction	transactionStatus = 'E'
+)
+
+func (s transactionStatus) String() string {
+	switch s {
+		case txnStatusIdle:
+			return "idle"
+		case txnStatusIdleInTransaction:
+			return "idle in transaction"
+		case txnStatusInFailedTransaction:
+			return "in a failed transaction"
+		default:
+			errorf("unknown transactionStatus %v", s)
+	}
+	panic("not reached")
+}
+
 type conn struct {
-	c       net.Conn
-	buf     *bufio.Reader
-	namei   int
-	scratch [512]byte
+	c           net.Conn
+	buf         *bufio.Reader
+	namei       int
+	scratch     [512]byte
+	txnStatus	transactionStatus
 }
 
 func (c *conn) writeBuf(b byte) *writeBuf {
@@ -249,22 +272,64 @@ func parseOpts(name string, o values) error {
 	return nil
 }
 
+func (cn *conn) isInTransaction() bool {
+	return cn.txnStatus == txnStatusIdleInTransaction ||
+		   cn.txnStatus == txnStatusInFailedTransaction
+}
+
+func (cn *conn) checkIsInTransaction(intxn bool) {
+	if cn.isInTransaction() != intxn {
+		errorf("unexpected transaction status %v", cn.txnStatus)
+	}
+}
+
 func (cn *conn) Begin() (driver.Tx, error) {
-	_, err := cn.Exec("BEGIN", nil)
+	cn.checkIsInTransaction(false)
+	_, commandTag, err := cn.simpleExec("BEGIN")
 	if err != nil {
 		return nil, err
 	}
-	return cn, err
+	if commandTag != "BEGIN" {
+		return nil, fmt.Errorf("unexpected command tag %s", commandTag)
+	}
+	return cn, nil
 }
 
 func (cn *conn) Commit() error {
-	_, err := cn.Exec("COMMIT", nil)
-	return err
+	cn.checkIsInTransaction(true)
+	// We don't want the client to think that everything is okay if it tries
+	// to commit a failed transaction.  However, no matter what we return,
+	// database/sql will release this connection back into the free connection
+	// pool so we have to abort the current transaction here.  Note that you
+	// would get the same behaviour if you issued a COMMIT in a failed
+	// transaction, so it's also the least surprising thing to do here.
+	if cn.txnStatus == txnStatusInFailedTransaction {
+		if err := cn.Rollback(); err != nil {
+			return err
+		}
+		return ErrInFailedTransaction
+	}
+
+	_, commandTag, err := cn.simpleExec("COMMIT")
+	if err != nil {
+		return err
+	}
+	if commandTag != "COMMIT" {
+		return fmt.Errorf("unexpected command tag %s", commandTag)
+	}
+	return nil
 }
 
 func (cn *conn) Rollback() error {
-	_, err := cn.Exec("ROLLBACK", nil)
-	return err
+	cn.checkIsInTransaction(true)
+	_, commandTag, err := cn.simpleExec("ROLLBACK")
+	if err != nil {
+		return err
+	}
+	if commandTag != "ROLLBACK" {
+		return fmt.Errorf("unexpected command tag %s", commandTag)
+	}
+	return nil
 }
 
 func (cn *conn) gname() string {
@@ -272,7 +337,7 @@ func (cn *conn) gname() string {
 	return strconv.FormatInt(int64(cn.namei), 10)
 }
 
-func (cn *conn) simpleExec(q string) (res driver.Result, err error) {
+func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err error) {
 	defer errRecover(&err)
 
 	b := cn.writeBuf('Q')
@@ -283,8 +348,9 @@ func (cn *conn) simpleExec(q string) (res driver.Result, err error) {
 		t, r := cn.recv1()
 		switch t {
 		case 'C':
-			res = parseComplete(r.string())
+			res, commandTag = parseComplete(r.string())
 		case 'Z':
+			cn.processReadyForQuery(r)
 			// done
 			return
 		case 'E':
@@ -318,6 +384,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 			// ignoring them, but there's not a great way
 			// to expose them right now)
 		case 'Z':
+			cn.processReadyForQuery(r)
 			// done
 			return
 		case 'E':
@@ -375,6 +442,7 @@ func (cn *conn) prepareToSimpleStmt(q, stmtName string) (_ *stmt, err error) {
 		case 'n':
 			// no data
 		case 'Z':
+			cn.processReadyForQuery(r)
 			return st, err
 		case 'E':
 			err = parseError(r)
@@ -423,7 +491,9 @@ func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err er
 	// Check to see if we can use the "simpleExec" interface, which is
 	// *much* faster than going through prepare/exec
 	if len(args) == 0 {
-		return cn.simpleExec(query)
+		// ignore commandTag, our caller doesn't care
+		r, _, err := cn.simpleExec(query)
+		return r, err
 	}
 
 	// Use the unnamed statement to defer planning until bind
@@ -558,6 +628,7 @@ func (cn *conn) startup(o values) {
 		case 'R':
 			cn.auth(r, o)
 		case 'Z':
+			cn.processReadyForQuery(r)
 			return
 		default:
 			errorf("unknown response for startup: %q", t)
@@ -632,10 +703,11 @@ func (st *stmt) Close() (err error) {
 	}
 	st.closed = true
 
-	t, _ = st.cn.recv()
+	t, r := st.cn.recv()
 	if t != 'Z' {
 		errorf("expected ready for query, but got: %q", t)
 	}
+	st.cn.processReadyForQuery(r)
 
 	return nil
 }
@@ -648,7 +720,9 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 	defer errRecover(&err)
 
 	if len(v) == 0 {
-		return st.cn.simpleExec(st.query)
+		// ignore commandTag, our caller doesn't care
+		r, _, err := st.cn.simpleExec(st.query)
+		return r, err
 	}
 	st.exec(v)
 
@@ -658,8 +732,9 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 		case 'E':
 			err = parseError(r)
 		case 'C':
-			res = parseComplete(r.string())
+			res, _ = parseComplete(r.string())
 		case 'Z':
+			st.cn.processReadyForQuery(r)
 			// done
 			return
 		case 'T', 'N', 'S', 'D':
@@ -709,6 +784,7 @@ func (st *stmt) exec(v []driver.Value) {
 			}
 			return
 		case 'Z':
+			st.cn.processReadyForQuery(r)
 			if err != nil {
 				panic(err)
 			}
@@ -727,10 +803,51 @@ func (st *stmt) NumInput() int {
 	return len(st.paramTyps)
 }
 
-func parseComplete(s string) driver.Result {
-	parts := strings.Split(s, " ")
-	n, _ := strconv.ParseInt(parts[len(parts)-1], 10, 64)
-	return driver.RowsAffected(n)
+// parseComplete parses the "command tag" from a CommandComplete message, and
+// returns the number of rows affected (if applicable) and a string
+// identifying only the command that was executed, e.g. "ALTER TABLE".  If the
+// command tag could not be parsed, parseComplete panics.
+func parseComplete(commandTag string) (driver.Result, string) {
+	commandsWithAffectedRows := []string{
+		"SELECT ",
+		// INSERT is handled below
+		"UPDATE ",
+		"DELETE ",
+		"FETCH ",
+		"MOVE ",
+		"COPY ",
+	}
+
+	var affectedRows *string
+	for _, tag := range commandsWithAffectedRows {
+		if strings.HasPrefix(commandTag, tag) {
+			t := commandTag[len(tag):]
+			affectedRows = &t
+			commandTag = tag[:len(tag)-1]
+			break
+		}
+	}
+	// INSERT also includes the oid of the inserted row in its command tag.
+	// Oids in user tables are deprecated, and the oid is only returned when
+	// exactly one row is inserted, so it's unlikely to be of value to any
+	// real-world application and we can ignore it.
+	if affectedRows == nil && strings.HasPrefix(commandTag, "INSERT ") {
+		parts := strings.Split(commandTag, " ")
+		if len(parts) != 3 {
+			errorf("unexpected INSERT command tag %s", commandTag)
+		}
+		affectedRows = &parts[len(parts)-1]
+		commandTag = "INSERT"
+	}
+	// There should be no affected rows attached to the tag, just return it
+	if affectedRows == nil {
+		return driver.RowsAffected(0), commandTag
+	}
+	n, err := strconv.ParseInt(*affectedRows, 10, 64)
+	if err != nil {
+		errorf("could not parse commandTag: %s", err)
+	}
+	return driver.RowsAffected(n), commandTag
 }
 
 type rows struct {
@@ -775,6 +892,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 		case 'C', 'S', 'N':
 			continue
 		case 'Z':
+			rs.st.cn.processReadyForQuery(r)
 			rs.done = true
 			if err != nil {
 				return err
@@ -806,6 +924,10 @@ func md5s(s string) string {
 	h := md5.New()
 	h.Write([]byte(s))
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func (c *conn) processReadyForQuery(r *readBuf) {
+	c.txnStatus = transactionStatus(r.byte())
 }
 
 func parseMeta(r *readBuf) (cols []string, rowTyps []oid.Oid) {
