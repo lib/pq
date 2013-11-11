@@ -849,8 +849,6 @@ workaround:
 	for {
 		t, r := st.cn.recv1()
 		switch t {
-		case 'N', 'S':
-			// ignore
 		case 'E':
 			err = parseError(r)
 		case 'C', 'D':
