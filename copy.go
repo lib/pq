@@ -6,6 +6,34 @@ import (
 	"sync/atomic"
 )
 
+// CopyIn creates COPY FROM statement that can be prepared
+// with DB.Prepare().
+func CopyIn(table string, columns ...string) string {
+	stmt := `COPY "` + table + `" (`
+	for i, col := range columns {
+		if i != 0 {
+			stmt += ", "
+		}
+		stmt += `"` + col + `"`
+	}
+	stmt += `) FROM STDIN`
+	return stmt
+}
+
+// CopyInSchema creates COPY FROM statement that can be prepared
+// with DB.Prepare().
+func CopyInSchema(schema, table string, columns ...string) string {
+	stmt := `COPY "` + schema + `"."` + table + `" (`
+	for i, col := range columns {
+		if i != 0 {
+			stmt += ", "
+		}
+		stmt += `"` + col + `"`
+	}
+	stmt += `) FROM STDIN`
+	return stmt
+}
+
 type copyin struct {
 	cn      *conn
 	buffer  []byte

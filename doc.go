@@ -113,13 +113,14 @@ See the pq.Error type for details.
 
 Bulk imports
 
-You can make bulk imports by preparing a statement with COPY FROM STDIN
-instead of INSERT. COPY statements are asynchronous and stmt.Exec can
-return errors for previous Exec calls.
+You can make bulk imports by preparing a pq.CopyIn statement. pq.CopyIn
+uses Postgres COPY FROM feature. The encoding is handled by pq and you
+can insert rows by calling stmt.Exec. Note that bulk inserts are
+asynchronous and Exec can return errors for previous Exec calls.
 It is also necessary to call stmt.Exec() before stmt.Close() to get
 any errors from pending inserts. For example:
 
-	stmt, err := db.Prepare("COPY users (name, age) FROM STDIN")
+	stmt, err := db.Prepare(pq.CopyIn("users", "name", "age"))
 	if err != nil {
 		log.Fatal(err)
 	}

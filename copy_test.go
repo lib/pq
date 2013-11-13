@@ -7,6 +7,32 @@ import (
 	"testing"
 )
 
+func TestCopyInStmt(t *testing.T) {
+	var stmt string
+	stmt = CopyIn("table name")
+	if stmt != `COPY "table name" () FROM STDIN` {
+		t.Fatal(stmt)
+	}
+
+	stmt = CopyIn("table name", "column 1", "column 2")
+	if stmt != `COPY "table name" ("column 1", "column 2") FROM STDIN` {
+		t.Fatal(stmt)
+	}
+}
+
+func TestCopyInSchemaStmt(t *testing.T) {
+	var stmt string
+	stmt = CopyInSchema("schema name", "table name")
+	if stmt != `COPY "schema name"."table name" () FROM STDIN` {
+		t.Fatal(stmt)
+	}
+
+	stmt = CopyInSchema("schema name", "table name", "column 1", "column 2")
+	if stmt != `COPY "schema name"."table name" ("column 1", "column 2") FROM STDIN` {
+		t.Fatal(stmt)
+	}
+}
+
 func TestCopyInMultipleValues(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
@@ -16,7 +42,7 @@ func TestCopyInMultipleValues(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stmt, err := db.Prepare("COPY temp (a, b) FROM STDIN")
+	stmt, err := db.Prepare(CopyIn("temp", "a", "b"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +88,7 @@ func TestCopyInTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stmt, err := db.Prepare("COPY temp (num, text, blob, nothing) FROM STDIN")
+	stmt, err := db.Prepare(CopyIn("temp", "num", "text", "blob", "nothing"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +142,7 @@ func TestCopyInWrongType(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stmt, err := db.Prepare("COPY temp (num) FROM STDIN")
+	stmt, err := db.Prepare(CopyIn("temp", "num"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +201,7 @@ func BenchmarkCopyIn(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	stmt, err := db.Prepare("COPY temp (a, b) FROM STDIN")
+	stmt, err := db.Prepare(CopyIn("temp", "a", "b"))
 	if err != nil {
 		b.Fatal(err)
 	}
