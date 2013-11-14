@@ -801,6 +801,10 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 }
 
 func (st *stmt) exec(v []driver.Value) {
+	if len(v) != len(st.paramTyps) {
+		errorf("got %d parameters but the statement requires %d", len(v), len(st.paramTyps))
+	}
+
 	w := st.cn.writeBuf('B')
 	w.string("")
 	w.string(st.name)
