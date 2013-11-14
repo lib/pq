@@ -240,6 +240,32 @@ func TestRowsCloseBeforeDone(t *testing.T) {
 	}
 }
 
+func TestParameterCountMismatch(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	var notused int
+	err := db.QueryRow("SELECT false", 1).Scan(&notused)
+	if err == nil {
+		t.Fatal("expected err")
+	}
+	// make sure we clean up correctly
+	err = db.QueryRow("SELECT 1").Scan(&notused)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = db.QueryRow("SELECT $1").Scan(&notused)
+	if err == nil {
+		t.Fatal("expected err")
+	}
+	// make sure we clean up correctly
+	err = db.QueryRow("SELECT 1").Scan(&notused)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEncodeDecode(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
