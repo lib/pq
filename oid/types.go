@@ -9,8 +9,6 @@ package oid
 // This should probably be done one per release.  Postgres does not
 // re-appropriate the system OID space below 10000 as a general rule.
 
-type Oid uint32
-
 const (
 	T_bool             Oid = 16
 	T_bytea            Oid = 17
