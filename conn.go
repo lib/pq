@@ -287,7 +287,9 @@ func (cn *conn) checkIsInTransaction(intxn bool) {
 	}
 }
 
-func (cn *conn) Begin() (driver.Tx, error) {
+func (cn *conn) Begin() (_ driver.Tx, err error) {
+	defer errRecover(&err)
+
 	cn.checkIsInTransaction(false)
 	_, commandTag, err := cn.simpleExec("BEGIN")
 	if err != nil {
@@ -296,10 +298,15 @@ func (cn *conn) Begin() (driver.Tx, error) {
 	if commandTag != "BEGIN" {
 		return nil, fmt.Errorf("unexpected command tag %s", commandTag)
 	}
+	if cn.txnStatus != txnStatusIdleInTransaction {
+		return nil, fmt.Errorf("unexpected transaction status %v", cn.txnStatus)
+	}
 	return cn, nil
 }
 
-func (cn *conn) Commit() error {
+func (cn *conn) Commit() (err error) {
+	defer errRecover(&err)
+
 	cn.checkIsInTransaction(true)
 	// We don't want the client to think that everything is okay if it tries
 	// to commit a failed transaction.  However, no matter what we return,
@@ -321,10 +328,13 @@ func (cn *conn) Commit() error {
 	if commandTag != "COMMIT" {
 		return fmt.Errorf("unexpected command tag %s", commandTag)
 	}
+	cn.checkIsInTransaction(false)
 	return nil
 }
 
-func (cn *conn) Rollback() error {
+func (cn *conn) Rollback() (err error) {
+	defer errRecover(&err)
+
 	cn.checkIsInTransaction(true)
 	_, commandTag, err := cn.simpleExec("ROLLBACK")
 	if err != nil {
@@ -333,6 +343,7 @@ func (cn *conn) Rollback() error {
 	if commandTag != "ROLLBACK" {
 		return fmt.Errorf("unexpected command tag %s", commandTag)
 	}
+	cn.checkIsInTransaction(false)
 	return nil
 }
 
