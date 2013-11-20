@@ -569,6 +569,50 @@ func TestReturning(t *testing.T) {
 	}
 }
 
+func TestIssue186(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	// Exec() a query which returns results
+	_, err := db.Exec("VALUES (1), (2), (3)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec("VALUES ($1), ($2), ($3)", 1, 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Query() a query which doesn't return any results
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer txn.Rollback()
+
+	rows, err := txn.Query("CREATE TEMP TABLE foo(f1 int)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// small trick to get NoData from a parameterized query
+	_, err = txn.Exec("CREATE RULE nodata AS ON INSERT TO foo DO INSTEAD NOTHING")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err = txn.Query("INSERT INTO foo VALUES ($1)", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 var envParseTests = []struct {
 	Expected map[string]string
 	Env      []string

@@ -392,9 +392,14 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 		t, r := cn.recv1()
 		switch t {
 		case 'C':
-			// Consume any CommandComplete.  It would be better to only allow
-			// one if the query resulted in an error, but we have historically
-			// allowed queries that don't return any results.
+			// We allow queries which don't return any results through Query as
+			// well as Exec.  We still have to give database/sql a rows object
+			// the user can close, though, to avoid connections from being
+			// leaked.  A "rows" with done=true works fine for that purpose.
+			if err != nil {
+				errorf("unexpected CommandComplete in simple query execution")
+			}
+			res = &rows{st: st, done: true}
 		case 'Z':
 			cn.processReadyForQuery(r)
 			// done
