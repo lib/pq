@@ -40,7 +40,8 @@ func TestHstore(t *testing.T) {
 	_, err := db.Exec("CREATE EXTENSION hstore")
 	if err != nil {
 		if !strings.Contains(err.Error(), "extension \\\"hstore\\\" already exists") {
-			t.Skip("Skipping hstore tests - hstore extension create failed")
+			t.Log("Skipping hstore tests - hstore extension create failed")
+			return
 		}
 	}
 
