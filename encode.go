@@ -17,9 +17,9 @@ func encode(x interface{}, pgtypOid oid.Oid) []byte {
 	case int64:
 		return []byte(fmt.Sprintf("%d", v))
 	case float32:
-		return []byte(fmt.Sprintf("%.8f", v))
+		return []byte(fmt.Sprintf("%.9f", v))
 	case float64:
-		return []byte(fmt.Sprintf("%.16f", v))
+		return []byte(fmt.Sprintf("%.17f", v))
 	case []byte:
 		if pgtypOid == oid.T_bytea {
 			return []byte(fmt.Sprintf("\\x%x", v))
