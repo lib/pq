@@ -69,6 +69,7 @@ code still exists in here.
 * Maciek Sakrejda (deafbybeheading)
 * Marc Brinkmann (mbr)
 * Marko Tiikkaja (johto)
+* Matt Newberry (MattNewberry)
 * Matt Robenolt (mattrobenolt)
 * Martin Olsen (martinolsen)
 * Mike Lewis (mikelikespie)
