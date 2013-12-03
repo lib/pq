@@ -1,6 +1,7 @@
 package pq
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 	"time"
@@ -220,4 +221,45 @@ func TestByteToText(t *testing.T) {
 	if string(result) != string(b) {
 		t.Fatalf("expected %v but got %v", b, result)
 	}
+}
+
+func TestByteaOutputFormats(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	testByteaOutputFormat := func(f string) {
+		expectedData := []byte("\x5c\x78\x00\xff\x61\x62\x63\x01\x08")
+		sqlQuery := "SELECT decode('5c7800ff6162630108', 'hex')"
+
+		var data []byte
+		_, err := db.Exec("SET bytea_output TO " + f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// use Query; QueryRow would hide the actual error
+		rows, err := db.Query(sqlQuery)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !rows.Next() {
+			if rows.Err() != nil {
+				t.Fatal(rows.Err())
+			}
+			t.Fatal("shouldn't happen")
+		}
+		err = rows.Scan(&data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = rows.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(data, expectedData) {
+			t.Errorf("unexpected bytea value %v for format %s; expected %v", data, f, expectedData)
+		}
+	}
+
+	testByteaOutputFormat("hex")
+	testByteaOutputFormat("escape")
 }
