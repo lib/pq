@@ -659,6 +659,25 @@ func TestIssue196(t *testing.T) {
 	}
 }
 
+func TestReadFloatPrecision(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	row := db.QueryRow("SELECT float4 '0.10000122', float8 '35.03554004971999'")
+	var float4val float32
+	var float8val float64
+	err := row.Scan(&float4val, &float8val)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if float4val != float32(0.10000122) {
+		t.Errorf("Expected float4 fidelity to be maintained; got no match")
+	}
+	if float8val != float64(35.03554004971999) {
+		t.Errorf("Expected float8 fidelity to be maintained; got no match")
+	}
+}
+
 var envParseTests = []struct {
 	Expected map[string]string
 	Env      []string
