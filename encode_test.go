@@ -232,12 +232,20 @@ func TestByteaOutputFormats(t *testing.T) {
 		sqlQuery := "SELECT decode('5c7800ff6162630108', 'hex')"
 
 		var data []byte
-		_, err := db.Exec("SET bytea_output TO " + f)
+
+		// use a txn to avoid relying on getting the same connection
+		txn, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer txn.Rollback()
+
+		_, err = txn.Exec("SET LOCAL bytea_output TO " + f)
 		if err != nil {
 			t.Fatal(err)
 		}
 		// use Query; QueryRow would hide the actual error
-		rows, err := db.Query(sqlQuery)
+		rows, err := txn.Query(sqlQuery)
 		if err != nil {
 			t.Fatal(err)
 		}
