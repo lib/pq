@@ -644,7 +644,7 @@ func TestIssue196(t *testing.T) {
 	defer db.Close()
 
 	row := db.QueryRow("SELECT float4 '0.10000122' = $1, float8 '35.03554004971999' = $2",
-		0.10000122, 35.03554004971999)
+		float32(0.10000122), float64(35.03554004971999))
 
 	var float4match, float8match bool
 	err := row.Scan(&float4match, &float8match)
