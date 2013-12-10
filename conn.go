@@ -1,7 +1,7 @@
 package pq
 
 import (
-	"./pq/oid"
+	"./oid"
 	"bufio"
 	"crypto/md5"
 	"crypto/tls"
