@@ -613,10 +613,10 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 		}
 
 		switch t {
-			case 'A', 'N', 'S':
-				// ignore
-			default:
-				return
+		case 'A', 'N', 'S':
+			// ignore
+		default:
+			return
 		}
 	}
 
@@ -625,6 +625,17 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 
 func (cn *conn) ssl(o values) {
 	tlsConf := tls.Config{}
+
+	if sslkey := o.Get("sslkey"); sslkey != "" {
+		if sslcert := o.Get("sslcert"); sslcert != "" {
+			cert, err := tls.LoadX509KeyPair(sslcert, sslkey)
+			if err != nil {
+				panic(err)
+			}
+			tlsConf.Certificates = []tls.Certificate{cert}
+		}
+	}
+
 	switch mode := o.Get("sslmode"); mode {
 	case "require", "":
 		tlsConf.InsecureSkipVerify = true
@@ -1079,7 +1090,11 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("application_name")
 		case "PGSSLMODE":
 			accrue("sslmode")
-		case "PGREQUIRESSL", "PGSSLCERT", "PGSSLKEY", "PGSSLROOTCERT", "PGSSLCRL":
+		case "PGSSLCERT":
+			accrue("sslcert")
+		case "PGSSLKEY":
+			accrue("sslkey")
+		case "PGREQUIRESSL", "PGSSLROOTCERT", "PGSSLCRL":
 			unsupported()
 		case "PGREQUIREPEER":
 			unsupported()
