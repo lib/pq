@@ -1,7 +1,6 @@
 package pq
 
 import (
-	"./oid"
 	"bufio"
 	"crypto/md5"
 	"crypto/tls"
@@ -10,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/jpoz/pq/oid"
 	"io"
 	"net"
 	"os"
