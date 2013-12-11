@@ -434,16 +434,27 @@ func TestErrorOnExec(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
-	_, err := db.Exec(sql)
-	_, ok := err.(*Error)
-	if !ok {
-		t.Fatalf("expected Error, was: %#v", err)
-	}
-
-	_, err = db.Exec("SELECT 1 WHERE true = false") // returns no rows
+	txn, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
+	}
+	defer txn.Rollback()
+
+	_, err = txn.Exec("CREATE TEMPORARY TABLE foo(f1 int PRIMARY KEY)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = txn.Exec("INSERT INTO foo VALUES (0), (0)")
+	if err == nil {
+		t.Fatal("Should have raised error")
+	}
+
+	e, ok := err.(*Error)
+	if !ok {
+		t.Fatalf("expected Error, got %#v", err)
+	} else if e.Code.Name() != "unique_violation" {
+		t.Fatalf("expected unique_violation, got %s (%+v)", e.Code.Name(), err)
 	}
 }
 
@@ -451,26 +462,27 @@ func TestErrorOnQuery(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
-	r, err := db.Query(sql)
-	if r != nil {
-		t.Fatal("Should not return rows")
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err == nil {
-		t.Fatal("Should have raised error")
-	}
-	_, ok := err.(*Error)
-	if !ok {
-		t.Fatalf("expected Error, was: %#v", err)
-	}
+	defer txn.Rollback()
 
-	r, err = db.Query("SELECT 1 WHERE true = false") // returns no rows
+	_, err = txn.Exec("CREATE TEMPORARY TABLE foo(f1 int PRIMARY KEY)")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if r.Next() {
-		t.Fatal("unexpected row")
+	_, err = txn.Query("INSERT INTO foo VALUES (0), (0)")
+	if err == nil {
+		t.Fatal("Should have raised error")
+	}
+
+	e, ok := err.(*Error)
+	if !ok {
+		t.Fatalf("expected Error, got %#v", err)
+	} else if e.Code.Name() != "unique_violation" {
+		t.Fatalf("expected unique_violation, got %s (%+v)", e.Code.Name(), err)
 	}
 }
 
@@ -478,10 +490,19 @@ func TestErrorOnQueryRowSimpleQuery(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
-	r := db.QueryRow(sql)
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer txn.Rollback()
+
+	_, err = txn.Exec("CREATE TEMPORARY TABLE foo(f1 int PRIMARY KEY)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	var v int
-	err := r.Scan(&v)
+	err = txn.QueryRow("INSERT INTO foo VALUES (0), (0)").Scan(&v)
 	if err == nil {
 		t.Fatal("Should have raised error")
 	}
