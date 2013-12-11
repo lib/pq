@@ -3,11 +3,11 @@
 package pq
 
 import (
+	"./oid"
 	"bufio"
 	"bytes"
 	"database/sql"
 	"database/sql/driver"
-	"github.com/lib/pq/oid"
 	"io"
 	"net"
 	"strconv"

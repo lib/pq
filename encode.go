@@ -1,11 +1,11 @@
 package pq
 
 import (
+	"./oid"
 	"bytes"
 	"database/sql/driver"
 	"encoding/hex"
 	"fmt"
-	"github.com/lib/pq/oid"
 	"math"
 	"strconv"
 	"strings"
