@@ -674,7 +674,8 @@ func (cn *conn) startup(o values) {
 	for k, v := range o {
 		// skip options which can't be run-time parameters
 		if k == "password" || k == "host" ||
-			k == "port" || k == "sslmode" {
+			k == "port" || k == "sslmode" ||
+			k == "sslcert" || k == "sslkey" {
 			continue
 		}
 		// The protocol requires us to supply the database name as "database"
