@@ -1,9 +1,9 @@
 package pq
 
 import (
+	"./oid"
 	"bytes"
 	"encoding/binary"
-	"github.com/lib/pq/oid"
 )
 
 type readBuf []byte
