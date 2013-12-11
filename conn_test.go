@@ -40,6 +40,15 @@ func openTestConn(t Fatalistic) *sql.DB {
 	return conn
 }
 
+func getServerVersion(t *testing.T, db *sql.DB) int {
+	var version int
+	err := db.QueryRow("SHOW server_version_num").Scan(&version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return version
+}
+
 func TestReconnect(t *testing.T) {
 	if runtime.Version() == "go1.0.2" {
 		fmt.Println("Skipping failing test; " +
@@ -140,22 +149,25 @@ func TestExec(t *testing.T) {
 		t.Fatalf("expected 3 rows affected, not %d", n)
 	}
 
-	r, err = db.Exec("SELECT g FROM generate_series(1, 2) g")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n, _ := r.RowsAffected(); n != 2 {
-		t.Fatalf("expected 2 rows affected, not %d", n)
-	}
+	// SELECT doesn't send the number of returned rows in the command tag
+	// before 9.0
+	if getServerVersion(t, db) >= 90000 {
+		r, err = db.Exec("SELECT g FROM generate_series(1, 2) g")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, _ := r.RowsAffected(); n != 2 {
+			t.Fatalf("expected 2 rows affected, not %d", n)
+		}
 
-	r, err = db.Exec("SELECT g FROM generate_series(1, $1) g", 3)
-	if err != nil {
-		t.Fatal(err)
+		r, err = db.Exec("SELECT g FROM generate_series(1, $1) g", 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, _ := r.RowsAffected(); n != 3 {
+			t.Fatalf("expected 3 rows affected, not %d", n)
+		}
 	}
-	if n, _ := r.RowsAffected(); n != 3 {
-		t.Fatalf("expected 3 rows affected, not %d", n)
-	}
-
 }
 
 func TestStatment(t *testing.T) {
