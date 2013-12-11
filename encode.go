@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func encode(x interface{}, pgtypOid oid.Oid) []byte {
+func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) []byte {
 	switch v := x.(type) {
 	case int64:
 		return []byte(fmt.Sprintf("%d", v))
@@ -22,7 +22,7 @@ func encode(x interface{}, pgtypOid oid.Oid) []byte {
 		return []byte(fmt.Sprintf("%.17f", v))
 	case []byte:
 		if pgtypOid == oid.T_bytea {
-			return []byte(fmt.Sprintf("\\x%x", v))
+			return encodeBytea(parameterStatus, v)
 		}
 
 		return v
@@ -235,6 +235,27 @@ func parseBytea(s []byte) (result []byte) {
 				s = s[i:]
 			}
 		}
+	}
+
+	return result
+}
+
+func encodeBytea(parameterStatus *parameterStatus, v []byte) (result []byte) {
+	if parameterStatus.serverVersion >= 90000 {
+		// Use the hex format if we know that the server supports it
+		result = []byte(fmt.Sprintf("\\x%x", v))
+	} else {
+		// .. or resort to "escape"
+		for _, b := range v {
+			if b == '\\' {
+				result = append(result, '\\', '\\')
+			} else if b < 0x20 || b > 0x7e {
+				result = append(result, []byte(fmt.Sprintf("\\%03o", b))...)
+			} else {
+				result = append(result, b)
+			}
+		}
+		return result
 	}
 
 	return result

@@ -227,6 +227,11 @@ func TestByteaOutputFormats(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
+	if getServerVersion(t, db) < 90000 {
+		// skip
+		return
+	}
+
 	testByteaOutputFormat := func(f string) {
 		expectedData := []byte("\x5c\x78\x00\xff\x61\x62\x63\x01\x08")
 		sqlQuery := "SELECT decode('5c7800ff6162630108', 'hex')"
