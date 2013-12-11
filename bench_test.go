@@ -282,13 +282,13 @@ func benchPreparedMockQuery(b *testing.B, c *conn, stmt driver.Stmt) {
 
 func BenchmarkEncodeInt64(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		encode(int64(1234), oid.T_int8)
+		encode(nil, int64(1234), oid.T_int8)
 	}
 }
 
 func BenchmarkEncodeFloat64(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		encode(3.14159, oid.T_float8)
+		encode(nil, 3.14159, oid.T_float8)
 	}
 }
 
@@ -296,13 +296,13 @@ var testByteString = []byte("abcdefghijklmnopqrstuvwxyz")
 
 func BenchmarkEncodeBytea(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		encode(testByteString, oid.T_bytea)
+		encode(nil, testByteString, oid.T_bytea)
 	}
 }
 
 func BenchmarkEncodeBool(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		encode(true, oid.T_bool)
+		encode(nil, true, oid.T_bool)
 	}
 }
 
@@ -310,7 +310,7 @@ var testTimestamptz = time.Date(2001, time.January, 1, 0, 0, 0, 0, time.Local)
 
 func BenchmarkEncodeTimestamptz(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		encode(testTimestamptz, oid.T_timestamptz)
+		encode(nil, testTimestamptz, oid.T_timestamptz)
 	}
 }
 

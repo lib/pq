@@ -36,6 +36,12 @@ func init() {
 	sql.Register("postgres", &drv{})
 }
 
+type parameterStatus struct {
+	// server version in the same format as server_version_num, or 0 if
+	// unavailable
+	serverVersion int
+}
+
 type transactionStatus byte
 
 const (
@@ -64,6 +70,8 @@ type conn struct {
 	namei     int
 	scratch   [512]byte
 	txnStatus transactionStatus
+
+	parameterStatus parameterStatus
 
 	saveMessageType   byte
 	saveMessageBuffer *readBuf
@@ -615,8 +623,10 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 		}
 
 		switch t {
-			case 'A', 'N', 'S':
+			case 'A', 'N':
 				// ignore
+			case 'S':
+				cn.processParameterStatus(r)
 			default:
 				return
 		}
@@ -682,7 +692,9 @@ func (cn *conn) startup(o values) {
 	for {
 		t, r := cn.recv()
 		switch t {
-		case 'K', 'S':
+		case 'K':
+		case 'S':
+			cn.processParameterStatus(r)
 		case 'R':
 			cn.auth(r, o)
 		case 'Z':
@@ -821,7 +833,7 @@ func (st *stmt) exec(v []driver.Value) {
 		if x == nil {
 			w.int32(-1)
 		} else {
-			b := encode(x, st.paramTyps[i])
+			b := encode(&st.cn.parameterStatus, x, st.paramTyps[i])
 			w.int32(len(b))
 			w.bytes(b)
 		}
@@ -1015,6 +1027,26 @@ func md5s(s string) string {
 	h.Write([]byte(s))
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
+
+func (c *conn) processParameterStatus(r *readBuf) {
+	var err error
+
+	param := r.string()
+	switch param {
+		case "server_version":
+			var major1 int
+			var major2 int
+			var minor int
+			_, err = fmt.Sscanf(r.string(), "%d.%d.%d", &major1, &major2, &minor)
+			if err == nil {
+				c.parameterStatus.serverVersion = major1 * 10000 + major2 * 100 + minor
+			}
+
+		default:
+			// ignore
+	}
+}
+
 
 func (c *conn) processReadyForQuery(r *readBuf) {
 	c.txnStatus = transactionStatus(r.byte())
