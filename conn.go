@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/user"
 	"path"
 	"strconv"
 	"strings"
@@ -21,9 +22,10 @@ import (
 
 // Common error types
 var (
-	ErrSSLNotSupported     = errors.New("pq: SSL is not enabled on the server")
-	ErrNotSupported        = errors.New("pq: Unsupported command")
-	ErrInFailedTransaction = errors.New("pq: Could not complete operation in a failed transaction")
+	ErrSSLNotSupported        = errors.New("pq: SSL is not enabled on the server")
+	ErrNotSupported           = errors.New("pq: Unsupported command")
+	ErrInFailedTransaction    = errors.New("pq: Could not complete operation in a failed transaction")
+	ErrKeyHasWorldPermissions = errors.New("private key file has group or world access. Permissions should be u=rw (0600) or less.")
 )
 
 type drv struct{}
@@ -626,16 +628,6 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 func (cn *conn) ssl(o values) {
 	tlsConf := tls.Config{}
 
-	if sslkey := o.Get("sslkey"); sslkey != "" {
-		if sslcert := o.Get("sslcert"); sslcert != "" {
-			cert, err := tls.LoadX509KeyPair(sslcert, sslkey)
-			if err != nil {
-				panic(err)
-			}
-			tlsConf.Certificates = []tls.Certificate{cert}
-		}
-	}
-
 	switch mode := o.Get("sslmode"); mode {
 	case "require", "":
 		tlsConf.InsecureSkipVerify = true
@@ -645,6 +637,40 @@ func (cn *conn) ssl(o values) {
 		return
 	default:
 		errorf(`unsupported sslmode %q; only "require" (default), "verify-full", and "disable" supported`, mode)
+	}
+
+	sslkey := o.Get("sslkey")
+	sslcert := o.Get("sslcert")
+
+	// If the user has set a sslkey and cert make sure they exist
+	if sslkey != "" && sslcert != "" {
+		files := []string{sslkey, sslcert}
+		for _, f := range files {
+			_, err := os.Stat(f)
+			if err != nil {
+				panic(err)
+			}
+		}
+	} else {
+		// Automatically loads certificates from ~/.postgresql
+		user, _ := user.Current()
+		sslkey = user.HomeDir + "/.postgresql/postgresql.cert"
+		sslcert = user.HomeDir + "/.postgresql/postgresql.key"
+	}
+
+	_, cerr := os.Stat(sslkey)
+	kstat, kerr := os.Stat(sslcert)
+
+	if cerr == nil && kerr == nil {
+		if kstat.Mode() == kstat.Mode()&0600 {
+			cert, err := tls.LoadX509KeyPair(sslcert, sslkey)
+			if err != nil {
+				panic(err)
+			}
+			tlsConf.Certificates = []tls.Certificate{cert}
+		} else {
+			panic(ErrKeyHasWorldPermissions)
+		}
 	}
 
 	w := cn.writeBuf(0)
