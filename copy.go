@@ -82,8 +82,6 @@ func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
 			return
 		case 'E':
 			err = parseError(r)
-		case 'N', 'S':
-			// ignore
 		default:
 			errorf("unknown response for copy query: %q", t)
 		}
