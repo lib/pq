@@ -627,7 +627,6 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 
 func (cn *conn) ssl(o values) {
 	tlsConf := tls.Config{}
-
 	switch mode := o.Get("sslmode"); mode {
 	case "require", "":
 		tlsConf.InsecureSkipVerify = true
@@ -642,8 +641,8 @@ func (cn *conn) ssl(o values) {
 	sslkey := o.Get("sslkey")
 	sslcert := o.Get("sslcert")
 
-	// If the user has set a sslkey and cert make sure they exist
 	if sslkey != "" && sslcert != "" {
+		// If the user has set a sslkey and sslcert make sure they exist
 		files := []string{sslkey, sslcert}
 		for _, f := range files {
 			_, err := os.Stat(f)
@@ -652,7 +651,7 @@ func (cn *conn) ssl(o values) {
 			}
 		}
 	} else {
-		// Automatically loads certificates from ~/.postgresql
+		// Automatically load certificates from ~/.postgresql
 		user, _ := user.Current()
 		sslkey = user.HomeDir + "/.postgresql/postgresql.cert"
 		sslcert = user.HomeDir + "/.postgresql/postgresql.key"
