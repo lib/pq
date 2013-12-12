@@ -76,6 +76,71 @@ func decode(s []byte, typ oid.Oid) interface{} {
 	return s
 }
 
+// appendEncodedText encodes item in text format as required by COPY
+// and appends to buf
+func appendEncodedText(buf []byte, x interface{}) []byte {
+	switch v := x.(type) {
+	case int64:
+		return strconv.AppendInt(buf, v, 10)
+	case float32:
+		return strconv.AppendFloat(buf, float64(v), 'f', -1, 32)
+	case float64:
+		return strconv.AppendFloat(buf, v, 'f', -1, 64)
+	case []byte:
+		return append(buf, fmt.Sprintf("\\\\x%x", v)...)
+	case string:
+		return appendEscapedText(buf, v)
+	case bool:
+		return strconv.AppendBool(buf, v)
+	case time.Time:
+		return append(buf, v.Format(time.RFC3339Nano)...)
+	case nil:
+		return append(buf, "\\N"...)
+	default:
+		errorf("encode: unknown type for %T", v)
+	}
+
+	panic("not reached")
+}
+
+func appendEscapedText(buf []byte, text string) []byte {
+	escapeNeeded := false
+	startPos := 0
+	var c byte
+
+	// check if we need to escape
+	for i := 0; i < len(text); i++ {
+		c = text[i]
+		if c == '\\' || c == '\n' || c == '\r' || c == '\t' {
+			escapeNeeded = true
+			startPos = i
+			break
+		}
+	}
+	if !escapeNeeded {
+		return append(buf, text...)
+	}
+
+	// copy till first char to escape, iterate the rest
+	result := append(buf, text[:startPos]...)
+	for i := startPos; i < len(text); i++ {
+		c = text[i]
+		switch c {
+		case '\\':
+			result = append(result, '\\', '\\')
+		case '\n':
+			result = append(result, '\\', 'n')
+		case '\r':
+			result = append(result, '\\', 'r')
+		case '\t':
+			result = append(result, '\\', 't')
+		default:
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
 func mustParse(f string, typ oid.Oid, s []byte) time.Time {
 	str := string(s)
 
