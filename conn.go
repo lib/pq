@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/user"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"unicode"
@@ -653,8 +654,8 @@ func (cn *conn) ssl(o values) {
 	} else {
 		// Automatically load certificates from ~/.postgresql
 		user, _ := user.Current()
-		sslkey = user.HomeDir + "/.postgresql/postgresql.cert"
-		sslcert = user.HomeDir + "/.postgresql/postgresql.key"
+		sslkey = filepath.Join(user.HomeDir, ".postgresql", "postgresql.key")
+		sslcert = filepath.Join(user.HomeDir, ".postgresql", "postgresql.crt")
 	}
 
 	_, cerr := os.Stat(sslkey)
