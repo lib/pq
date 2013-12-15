@@ -33,6 +33,7 @@ Optionally, a benchmark suite can be run as part of the tests:
 * Scan `time.Time` correctly (i.e. `timestamp[tz]`, `time[tz]`, `date`)
 * Scan binary blobs correctly (i.e. `bytea`)
 * Package for `hstore` support
+* COPY FROM support
 * pq.ParseURL for converting urls to connection strings for sql.Open.
 * Many libpq compatible environment variables
 * Unix socket support
@@ -40,6 +41,7 @@ Optionally, a benchmark suite can be run as part of the tests:
 ## Future / Things you can help with
 
 * Notifications: `LISTEN`/`NOTIFY` (see #156)
+* Better COPY FROM / COPY TO (see discussion in #181)
 
 ## Thank you (alphabetical)
 
@@ -75,6 +77,7 @@ code still exists in here.
 * Martin Olsen (martinolsen)
 * Mike Lewis (mikelikespie)
 * Nicolas Patry (Narsil)
+* Oliver Tonnhofer (olt)
 * Paul Hammond (paulhammond)
 * Ryan Smith (ryandotsmith)
 * Samuel Stauffer (samuel)
