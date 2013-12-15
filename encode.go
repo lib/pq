@@ -22,7 +22,7 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 		return []byte(fmt.Sprintf("%.17f", v))
 	case []byte:
 		if pgtypOid == oid.T_bytea {
-			return encodeBytea(parameterStatus, v)
+			return encodeBytea(parameterStatus.serverVersion, v)
 		}
 
 		return v
@@ -43,12 +43,14 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 	panic("not reached")
 }
 
-func decode(s []byte, typ oid.Oid) interface{} {
+func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{} {
 	switch typ {
 	case oid.T_bytea:
 		return parseBytea(s)
-	case oid.T_timestamptz, oid.T_timestamp, oid.T_date:
-		return parseTs(string(s))
+	case oid.T_timestamptz:
+		return parseTs(parameterStatus.currentLocation, string(s))
+	case oid.T_timestamp, oid.T_date:
+		return parseTs(nil, string(s))
 	case oid.T_time:
 		return mustParse("15:04:05", typ, s)
 	case oid.T_timetz:
@@ -115,7 +117,7 @@ func mustAtoi(str string) int {
 // setting ("ISO, MDY"), the only one we currently support. This
 // accounts for the discrepancies between the parsing available with
 // time.Parse and the Postgres date formatting quirks.
-func parseTs(str string) (result time.Time) {
+func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 	monSep := strings.IndexRune(str, '-')
 	year := mustAtoi(str[:monSep])
 	daySep := monSep + 3
@@ -187,9 +189,22 @@ func parseTs(str string) (result time.Time) {
 	if remainderIdx < len(str) {
 		errorf("expected end of input, got %v", str[remainderIdx:])
 	}
-	return time.Date(bcSign*year, time.Month(month), day,
+	t := time.Date(bcSign*year, time.Month(month), day,
 		hour, minute, second, nanoSec,
 		time.FixedZone("", tzOff))
+
+	if currentLocation != nil {
+		// Set the location of the returned Time based on the session's
+		// TimeZone value, but only if the local time zone database agrees with
+		// the remote database on the offset.
+		lt := t.In(currentLocation)
+		_, newOff := lt.Zone()
+		if newOff == tzOff {
+			t = lt
+		}
+	}
+
+	return t
 }
 
 // Parse a bytea value received from the server.  Both "hex" and the legacy
@@ -240,8 +255,8 @@ func parseBytea(s []byte) (result []byte) {
 	return result
 }
 
-func encodeBytea(parameterStatus *parameterStatus, v []byte) (result []byte) {
-	if parameterStatus.serverVersion >= 90000 {
+func encodeBytea(serverVersion int, v []byte) (result []byte) {
+	if serverVersion >= 90000 {
 		// Use the hex format if we know that the server supports it
 		result = []byte(fmt.Sprintf("\\x%x", v))
 	} else {
