@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"time"
 )
 
 // Common error types
@@ -40,6 +41,10 @@ type parameterStatus struct {
 	// server version in the same format as server_version_num, or 0 if
 	// unavailable
 	serverVersion int
+
+	// the current location based on the TimeZone value of the session, if
+	// available
+	currentLocation *time.Location
 }
 
 type transactionStatus byte
@@ -986,15 +991,16 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 
 	defer errRecover(&err)
 
+	conn := rs.st.cn
 	for {
-		t, r := rs.st.cn.recv1()
+		t, r := conn.recv1()
 		switch t {
 		case 'E':
 			err = parseError(r)
 		case 'C':
 			continue
 		case 'Z':
-			rs.st.cn.processReadyForQuery(r)
+			conn.processReadyForQuery(r)
 			rs.done = true
 			if err != nil {
 				return err
@@ -1011,7 +1017,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 					dest[i] = nil
 					continue
 				}
-				dest[i] = decode(r.next(l), rs.st.rowTyps[i])
+				dest[i] = decode(&conn.parameterStatus, r.next(l), rs.st.rowTyps[i])
 			}
 			return
 		default:
@@ -1040,6 +1046,12 @@ func (c *conn) processParameterStatus(r *readBuf) {
 			_, err = fmt.Sscanf(r.string(), "%d.%d.%d", &major1, &major2, &minor)
 			if err == nil {
 				c.parameterStatus.serverVersion = major1 * 10000 + major2 * 100 + minor
+			}
+
+		case "TimeZone":
+			c.parameterStatus.currentLocation, err = time.LoadLocation(r.string())
+			if err != nil {
+				c.parameterStatus.currentLocation = nil
 			}
 
 		default:
