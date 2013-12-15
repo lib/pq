@@ -69,7 +69,7 @@ func tryParse(str string) (t time.Time, err error) {
 			return
 		}
 	}()
-	t = parseTs(str)
+	t = parseTs(nil, str)
 	return
 }
 
@@ -96,11 +96,6 @@ func TestTimestampWithTimeZone(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	_, err = tx.Exec("create temp table test (t timestamp with time zone)")
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// try several different locations, all included in Go's zoneinfo.zip
 	for _, locName := range []string{
 		"UTC",
@@ -118,10 +113,6 @@ func TestTimestampWithTimeZone(t *testing.T) {
 		// Postgres timestamps have a resolution of 1 microsecond, so don't
 		// use the full range of the Nanosecond argument
 		refTime := time.Date(2012, 11, 6, 10, 23, 42, 123456000, loc)
-		_, err = tx.Exec("insert into test(t) values($1)", refTime)
-		if err != nil {
-			t.Fatal(err)
-		}
 
 		for _, pgTimeZone := range []string{"US/Eastern", "Australia/Darwin"} {
 			// Switch Postgres's timezone to test different output timestamp formats
@@ -131,7 +122,7 @@ func TestTimestampWithTimeZone(t *testing.T) {
 			}
 
 			var gotTime time.Time
-			row := tx.QueryRow("select t from test")
+			row := tx.QueryRow("select $1::timestamp with time zone", refTime)
 			err = row.Scan(&gotTime)
 			if err != nil {
 				t.Fatal(err)
@@ -140,11 +131,17 @@ func TestTimestampWithTimeZone(t *testing.T) {
 			if !refTime.Equal(gotTime) {
 				t.Errorf("timestamps not equal: %s != %s", refTime, gotTime)
 			}
-		}
 
-		_, err = tx.Exec("delete from test")
-		if err != nil {
-			t.Fatal(err)
+			// check that the time zone is set correctly based on TimeZone
+			pgLoc, err := time.LoadLocation(pgTimeZone)
+			if err != nil {
+				t.Logf("Could not load time zone %s - skipping", pgLoc)
+				continue
+			}
+			translated := refTime.In(pgLoc)
+			if translated.String() != gotTime.String() {
+				t.Errorf("timestamps not equal: %s != %s", translated, gotTime)
+			}
 		}
 	}
 }
