@@ -32,14 +32,14 @@ Optionally, a benchmark suite can be run as part of the tests:
 * Handles bad connections for `database/sql`
 * Scan `time.Time` correctly (i.e. `timestamp[tz]`, `time[tz]`, `date`)
 * Scan binary blobs correctly (i.e. `bytea`)
+* Package for `hstore` support
 * pq.ParseURL for converting urls to connection strings for sql.Open.
 * Many libpq compatible environment variables
 * Unix socket support
 
 ## Future / Things you can help with
 
-* Notifications: `LISTEN`/`NOTIFY`
-* `hstore` sugar (i.e. handling hstore in `rows.Scan`)
+* Notifications: `LISTEN`/`NOTIFY` (see #156)
 
 ## Thank you (alphabetical)
 
