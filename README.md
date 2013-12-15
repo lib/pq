@@ -61,6 +61,7 @@ code still exists in here.
 * Gary Burd (garyburd)
 * Heroku (heroku)
 * Jason McVetta (jmcvetta)
+* Jeremy Jay (pbnjay)
 * Joakim Sernbrant (serbaut)
 * John Gallagher (jgallagher)
 * Kamil Kisiel (kisielk)
