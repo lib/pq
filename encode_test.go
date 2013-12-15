@@ -1,6 +1,8 @@
 package pq
 
 import (
+	"github.com/lib/pq/oid"
+
 	"bytes"
 	"fmt"
 	"testing"
@@ -217,6 +219,21 @@ func TestByteToText(t *testing.T) {
 
 	if string(result) != string(b) {
 		t.Fatalf("expected %v but got %v", b, result)
+	}
+}
+
+func TestByteaOutputFormatEncoding(t *testing.T) {
+	input := []byte("\\x\x00\x01\x02\xFF\xFEabcdefg0123")
+	want := []byte("\\x5c78000102fffe6162636465666730313233")
+	got := encode(&parameterStatus{serverVersion: 90000}, input, oid.T_bytea)
+	if !bytes.Equal(want, got) {
+		fmt.Println("invalid hex bytea output, got %v but expected %v", got, want)
+	}
+
+	want = []byte("\\\\x\\000\\001\\002\\377\\376abcdefg0123")
+	got = encode(&parameterStatus{serverVersion: 84000}, input, oid.T_bytea)
+	if !bytes.Equal(want, got) {
+		fmt.Println("invalid escape bytea output, got %v but expected %v", got, want)
 	}
 }
 

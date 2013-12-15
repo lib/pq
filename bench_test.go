@@ -294,9 +294,14 @@ func BenchmarkEncodeFloat64(b *testing.B) {
 
 var testByteString = []byte("abcdefghijklmnopqrstuvwxyz")
 
-func BenchmarkEncodeBytea(b *testing.B) {
+func BenchmarkEncodeByteaHex(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		encode(&parameterStatus{}, testByteString, oid.T_bytea)
+		encode(&parameterStatus{serverVersion: 90000}, testByteString, oid.T_bytea)
+	}
+}
+func BenchmarkEncodeByteaEscape(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		encode(&parameterStatus{serverVersion: 84000}, testByteString, oid.T_bytea)
 	}
 }
 
