@@ -773,13 +773,17 @@ func TestParseComplete(t *testing.T) {
 }
 
 func TestExecerInterface(t *testing.T) {
-	// Gin up a straw man private struct just for the type check
-	cn := &conn{c: nil}
-	var cni interface{} = cn
+	db := openTestConn(t)
+	defer db.Close()
 
-	_, ok := cni.(driver.Execer)
-	if !ok {
-		t.Fatal("Driver doesn't implement Execer")
+	res, err := db.Exec("SELECT 1")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if res == nil {
+		t.Fatal("result is nil")
 	}
 }
 

@@ -16,8 +16,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"unicode"
 	"time"
+	"unicode"
 )
 
 // Common error types
@@ -498,53 +498,6 @@ func (cn *conn) Close() (err error) {
 	return cn.c.Close()
 }
 
-// Implement the "Queryer" interface
-func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err error) {
-	defer errRecover(&err)
-
-	// Check to see if we can use the "simpleQuery" interface, which is
-	// *much* faster than going through prepare/exec
-	if len(args) == 0 {
-		return cn.simpleQuery(query)
-	}
-
-	st, err := cn.prepareToSimpleStmt(query, "")
-	if err != nil {
-		panic(err)
-	}
-
-	st.exec(args)
-	return &rows{st: st}, nil
-}
-
-// Implement the optional "Execer" interface for one-shot queries
-func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err error) {
-	defer errRecover(&err)
-
-	// Check to see if we can use the "simpleExec" interface, which is
-	// *much* faster than going through prepare/exec
-	if len(args) == 0 {
-		// ignore commandTag, our caller doesn't care
-		r, _, err := cn.simpleExec(query)
-		return r, err
-	}
-
-	// Use the unnamed statement to defer planning until bind
-	// time, or else value-based selectivity estimates cannot be
-	// used.
-	st, err := cn.prepareTo(query, "")
-	if err != nil {
-		panic(err)
-	}
-
-	r, err := st.Exec(args)
-	if err != nil {
-		panic(err)
-	}
-
-	return r, err
-}
-
 // Assumes len(*m) is > 5
 func (cn *conn) send(m *writeBuf) {
 	b := (*m)[1:]
@@ -631,12 +584,12 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 		}
 
 		switch t {
-			case 'A', 'N':
-				// ignore
-			case 'S':
-				cn.processParameterStatus(r)
-			default:
-				return
+		case 'A', 'N':
+			// ignore
+		case 'S':
+			cn.processParameterStatus(r)
+		default:
+			return
 		}
 	}
 
@@ -1042,26 +995,25 @@ func (c *conn) processParameterStatus(r *readBuf) {
 
 	param := r.string()
 	switch param {
-		case "server_version":
-			var major1 int
-			var major2 int
-			var minor int
-			_, err = fmt.Sscanf(r.string(), "%d.%d.%d", &major1, &major2, &minor)
-			if err == nil {
-				c.parameterStatus.serverVersion = major1 * 10000 + major2 * 100 + minor
-			}
+	case "server_version":
+		var major1 int
+		var major2 int
+		var minor int
+		_, err = fmt.Sscanf(r.string(), "%d.%d.%d", &major1, &major2, &minor)
+		if err == nil {
+			c.parameterStatus.serverVersion = major1*10000 + major2*100 + minor
+		}
 
-		case "TimeZone":
-			c.parameterStatus.currentLocation, err = time.LoadLocation(r.string())
-			if err != nil {
-				c.parameterStatus.currentLocation = nil
-			}
+	case "TimeZone":
+		c.parameterStatus.currentLocation, err = time.LoadLocation(r.string())
+		if err != nil {
+			c.parameterStatus.currentLocation = nil
+		}
 
-		default:
-			// ignore
+	default:
+		// ignore
 	}
 }
-
 
 func (c *conn) processReadyForQuery(r *readBuf) {
 	c.txnStatus = transactionStatus(r.byte())
