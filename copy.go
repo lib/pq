@@ -163,7 +163,7 @@ func (ci *copyin) Exec(v []driver.Value) (r driver.Result, err error) {
 
 	numValues := len(v)
 	for i, value := range v {
-		ci.buffer = appendEncodedText(ci.buffer, value)
+		ci.buffer = appendEncodedText(&ci.cn.parameterStatus, ci.buffer, value)
 		if i < numValues-1 {
 			ci.buffer = append(ci.buffer, '\t')
 		}

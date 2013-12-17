@@ -80,7 +80,7 @@ func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{}
 
 // appendEncodedText encodes item in text format as required by COPY
 // and appends to buf
-func appendEncodedText(buf []byte, x interface{}) []byte {
+func appendEncodedText(parameterStatus *parameterStatus, buf []byte, x interface{}) []byte {
 	switch v := x.(type) {
 	case int64:
 		return strconv.AppendInt(buf, v, 10)
@@ -89,7 +89,8 @@ func appendEncodedText(buf []byte, x interface{}) []byte {
 	case float64:
 		return strconv.AppendFloat(buf, v, 'f', -1, 64)
 	case []byte:
-		return append(buf, fmt.Sprintf("\\\\x%x", v)...)
+		buf = append(buf, '\\')
+		return append(buf, encodeBytea(parameterStatus.serverVersion, v)...)
 	case string:
 		return appendEscapedText(buf, v)
 	case bool:
