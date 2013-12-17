@@ -89,8 +89,8 @@ func appendEncodedText(parameterStatus *parameterStatus, buf []byte, x interface
 	case float64:
 		return strconv.AppendFloat(buf, v, 'f', -1, 64)
 	case []byte:
-		buf = append(buf, '\\')
-		return append(buf, encodeBytea(parameterStatus.serverVersion, v)...)
+		encodedBytea := encodeBytea(parameterStatus.serverVersion, v)
+		return appendEscapedText(buf, string(encodedBytea))
 	case string:
 		return appendEscapedText(buf, v)
 	case bool:
