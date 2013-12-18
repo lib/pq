@@ -772,14 +772,18 @@ func TestParseComplete(t *testing.T) {
 	tpc("SELECT foo", "", 0, true) // invalid row count
 }
 
-func TestExecerInterface(t *testing.T) {
+func TestExecerAndQueryerInterfaces(t *testing.T) {
 	// Gin up a straw man private struct just for the type check
 	cn := &conn{c: nil}
 	var cni interface{} = cn
 
 	_, ok := cni.(driver.Execer)
 	if !ok {
-		t.Fatal("Driver doesn't implement Execer")
+		t.Error("Driver doesn't implement Execer")
+	}
+	_, ok = cni.(driver.Queryer)
+	if !ok {
+		t.Error("Driver doesn't implement Queryer")
 	}
 }
 
