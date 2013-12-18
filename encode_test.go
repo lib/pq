@@ -204,7 +204,7 @@ func TestStringWithNul(t *testing.T) {
 	}
 }
 
-func TestByteToText(t *testing.T) {
+func TestByteaToText(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
@@ -221,6 +221,25 @@ func TestByteToText(t *testing.T) {
 		t.Fatalf("expected %v but got %v", b, result)
 	}
 }
+
+func TestTextToBytea(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	b := "hello world"
+	row := db.QueryRow("SELECT $1::bytea", b)
+
+	var result []byte
+	err := row.Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(result, []byte(b)){
+		t.Fatalf("expected %v but got %v", b, result)
+	}
+}
+
 
 func TestByteaOutputFormatEncoding(t *testing.T) {
 	input := []byte("\\x\x00\x01\x02\xFF\xFEabcdefg0123")
