@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	_ "github.com/lib/pq"
 	"os"
-	"strings"
 	"testing"
 )
 
@@ -37,12 +36,10 @@ func TestHstore(t *testing.T) {
 	defer db.Close()
 
 	// quitely create hstore if it doesn't exist
-	_, err := db.Exec("CREATE EXTENSION hstore")
+	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS hstore")
 	if err != nil {
-		if !strings.Contains(err.Error(), "extension \\\"hstore\\\" already exists") {
-			t.Log("Skipping hstore tests - hstore extension create failed")
-			return
-		}
+		t.Log("Skipping hstore tests - hstore extension create failed. " + err.Error())
+		return
 	}
 
 	hs := Hstore{}
