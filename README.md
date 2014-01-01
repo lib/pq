@@ -78,6 +78,7 @@ code still exists in here.
 * Mike Lewis (mikelikespie)
 * Nicolas Patry (Narsil)
 * Oliver Tonnhofer (olt)
+* Patrick Hayes (phayes)
 * Paul Hammond (paulhammond)
 * Ryan Smith (ryandotsmith)
 * Samuel Stauffer (samuel)
