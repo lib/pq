@@ -7,9 +7,7 @@ import (
 )
 
 // A wrapper for transferring Hstore values back and forth easily.
-type Hstore struct {
-	Map map[string]sql.NullString
-}
+type Hstore map[string]sql.NullString
 
 // escapes and quotes hstore keys/values
 // s should be a sql.NullString or string
@@ -34,14 +32,14 @@ func hQuote(s interface{}) string {
 
 // Scan implements the Scanner interface.
 //
-// Note h.Map is reallocated before the scan to clear existing values. If the
-// hstore column's database value is NULL, then h.Map is set to nil instead.
+// Note h is reallocated before the scan to clear existing values. If the
+// hstore column's database value is NULL, then h is set to nil instead.
 func (h *Hstore) Scan(value interface{}) error {
 	if value == nil {
-		h.Map = nil
+		*h = nil
 		return nil
 	}
-	h.Map = make(map[string]sql.NullString)
+	*h = Hstore{} //reallocate
 	var b byte
 	pair := [][]byte{{}, {}}
 	pi := 0
@@ -80,9 +78,9 @@ func (h *Hstore) Scan(value interface{}) error {
 				case ',':
 					s := string(pair[1])
 					if !didQuote && len(s) == 4 && strings.ToLower(s) == "null" {
-						h.Map[string(pair[0])] = sql.NullString{String: "", Valid: false}
+						(*h)[string(pair[0])] = sql.NullString{String: "", Valid: false}
 					} else {
-						h.Map[string(pair[0])] = sql.NullString{String: string(pair[1]), Valid: true}
+						(*h)[string(pair[0])] = sql.NullString{String: string(pair[1]), Valid: true}
 					}
 					pair[0] = []byte{}
 					pair[1] = []byte{}
@@ -96,22 +94,22 @@ func (h *Hstore) Scan(value interface{}) error {
 	if bindex > 0 {
 		s := string(pair[1])
 		if !didQuote && len(s) == 4 && strings.ToLower(s) == "null" {
-			h.Map[string(pair[0])] = sql.NullString{String: "", Valid: false}
+			(*h)[string(pair[0])] = sql.NullString{String: "", Valid: false}
 		} else {
-			h.Map[string(pair[0])] = sql.NullString{String: string(pair[1]), Valid: true}
+			(*h)[string(pair[0])] = sql.NullString{String: string(pair[1]), Valid: true}
 		}
 	}
 	return nil
 }
 
-// Value implements the driver Valuer interface. Note if h.Map is nil, the
+// Value implements the driver Valuer interface. Note if h is nil, the
 // database column value will be set to NULL.
 func (h Hstore) Value() (driver.Value, error) {
-	if h.Map == nil {
+	if h == nil {
 		return nil, nil
 	}
 	parts := []string{}
-	for key, val := range h.Map {
+	for key, val := range h {
 		thispart := hQuote(key) + "=>" + hQuote(val)
 		parts = append(parts, thispart)
 	}
