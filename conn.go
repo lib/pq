@@ -69,6 +69,12 @@ func (s transactionStatus) String() string {
 	panic("not reached")
 }
 
+// Any failure in communication should be raised as a communicationError to
+// allow errRecover to know what happened.
+type communicationError struct {
+	error
+}
+
 type conn struct {
 	c         net.Conn
 	buf       *bufio.Reader
@@ -153,7 +159,7 @@ func Open(name string) (_ driver.Conn, err error) {
 
 	c, err := net.Dial(network(o))
 	if err != nil {
-		return nil, err
+		return nil, communicationError{err}
 	}
 
 	cn := &conn{c: c}
@@ -556,7 +562,7 @@ func (cn *conn) send(m *writeBuf) {
 
 	_, err := cn.c.Write(*m)
 	if err != nil {
-		panic(err)
+		panic(communicationError{err})
 	}
 }
 
@@ -574,7 +580,7 @@ func (cn *conn) recvMessage() (byte, *readBuf, error) {
 	x := cn.scratch[:5]
 	_, err := io.ReadFull(cn.buf, x)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, communicationError{err}
 	}
 	t := x[0]
 
@@ -588,7 +594,7 @@ func (cn *conn) recvMessage() (byte, *readBuf, error) {
 	}
 	_, err = io.ReadFull(cn.buf, y)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, communicationError{err}
 	}
 
 	return t, (*readBuf)(&y), nil

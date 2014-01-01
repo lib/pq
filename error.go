@@ -3,8 +3,6 @@ package pq
 import (
 	"database/sql/driver"
 	"fmt"
-	"io"
-	"net"
 	"runtime"
 )
 
@@ -452,14 +450,10 @@ func errRecover(err *error) {
 		} else {
 			*err = v
 		}
-	case *net.OpError:
+	case communicationError:
 		*err = driver.ErrBadConn
 	case error:
-		if v == io.EOF || v.(error).Error() == "remote error: handshake failure" {
-			*err = driver.ErrBadConn
-		} else {
-			*err = v
-		}
+		*err = v
 
 	default:
 		panic(fmt.Sprintf("unknown error: %#v", e))

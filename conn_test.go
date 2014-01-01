@@ -412,7 +412,7 @@ func TestBadConn(t *testing.T) {
 
 	func() {
 		defer errRecover(&err)
-		panic(io.EOF)
+		panic(communicationError{io.EOF})
 	}()
 
 	if err != driver.ErrBadConn {
