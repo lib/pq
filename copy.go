@@ -8,9 +8,9 @@ import (
 )
 
 var (
-	errCopyInClosed = errors.New("copyin statement has already been closed")
-	errBinaryCopyNotSupported = errors.New("only text format supported for COPY")
-	errCopyToNotSupported = errors.New("COPY TO is not supported")
+	errCopyInClosed               = errors.New("copyin statement has already been closed")
+	errBinaryCopyNotSupported     = errors.New("only text format supported for COPY")
+	errCopyToNotSupported         = errors.New("COPY TO is not supported")
 	errCopyNotSupportedOutsideTxn = errors.New("COPY is only allowed inside a transaction")
 )
 
@@ -78,7 +78,7 @@ func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
 	b.string(q)
 	cn.send(b)
 
-	awaitCopyInResponse:
+awaitCopyInResponse:
 	for {
 		t, r := cn.recv1()
 		switch t {
