@@ -3,34 +3,42 @@ package pq
 import (
 	"database/sql/driver"
 	"encoding/binary"
+	"errors"
 	"sync/atomic"
 )
 
-// CopyIn creates COPY FROM statement that can be prepared
-// with DB.Prepare().
+var (
+	errCopyInClosed = errors.New("copyin statement has already been closed")
+	errBinaryCopyNotSupported = errors.New("only text format supported for COPY")
+	errCopyToNotSupported = errors.New("COPY TO is not supported")
+	errCopyNotSupportedOutsideTxn = errors.New("COPY is only allowed inside a transaction")
+)
+
+// CopyIn creates a COPY FROM statement which can be prepared with
+// Tx.Prepare().  The target table should be visible in search_path.
 func CopyIn(table string, columns ...string) string {
-	stmt := `COPY "` + table + `" (`
+	stmt := "COPY " + quoteIdentifier(table) + " ("
 	for i, col := range columns {
 		if i != 0 {
 			stmt += ", "
 		}
-		stmt += `"` + col + `"`
+		stmt += quoteIdentifier(col)
 	}
-	stmt += `) FROM STDIN`
+	stmt += ") FROM STDIN"
 	return stmt
 }
 
-// CopyInSchema creates COPY FROM statement that can be prepared
-// with DB.Prepare().
+// CopyInSchema creates a COPY FROM statement which can be prepared with
+// Tx.Prepare().
 func CopyInSchema(schema, table string, columns ...string) string {
-	stmt := `COPY "` + schema + `"."` + table + `" (`
+	stmt := "COPY " + quoteIdentifier(schema) + "." + quoteIdentifier(table) + " ("
 	for i, col := range columns {
 		if i != 0 {
 			stmt += ", "
 		}
-		stmt += `"` + col + `"`
+		stmt += quoteIdentifier(col)
 	}
-	stmt += `) FROM STDIN`
+	stmt += ") FROM STDIN"
 	return stmt
 }
 
@@ -53,6 +61,10 @@ const ciBufferFlushSize = 63 * 1024
 func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
 	defer errRecover(&err)
 
+	if !cn.isInTransaction() {
+		return nil, errCopyNotSupportedOutsideTxn
+	}
+
 	ci := &copyin{
 		cn:      cn,
 		buffer:  make([]byte, 0, ciBufferSize),
@@ -71,22 +83,46 @@ func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
 		switch t {
 		case 'G':
 			if r.byte() != 0 {
-				errorf("only text format supported for COPY")
+				err = errBinaryCopyNotSupported
+				goto abortCopy
 			}
 			go ci.resploop()
-			return ci, err
+			return ci, nil
 		case 'H':
-			errorf("COPY TO is not supported")
-		case 'Z':
-			// done
-			return
+			err = errCopyToNotSupported
+			goto abortCopy
 		case 'E':
 			err = parseError(r)
+		case 'Z':
+			if err == nil {
+				errorf("unexpected ReadyForQuery in response to COPY")
+			}
+			cn.processReadyForQuery(r)
+			return nil, err
 		default:
 			errorf("unknown response for copy query: %q", t)
 		}
 	}
-	panic("not reached")
+
+abortCopy:
+	b = cn.writeBuf('f')
+	b.string(err.Error())
+	cn.send(b)
+
+	for {
+		t, r := cn.recv1()
+		switch t {
+		case 'c', 'C', 'E':
+		case 'Z':
+			cn.processReadyForQuery(r)
+			goto abortDone
+		default:
+			errorf("unknown response for CopyFail: %q", t)
+		}
+	}
+
+abortDone:
+	return nil, err
 }
 
 func (ci *copyin) flush(buf []byte) {
@@ -106,11 +142,12 @@ func (ci *copyin) resploop() {
 		case 'C':
 			// complete
 		case 'Z':
+			ci.cn.processReadyForQuery(r)
 			ci.done <- true
 			return
 		case 'E':
 			err := parseError(r)
-			ci.seterror(err)
+			ci.setError(err)
 		default:
 			errorf("unknown response: %q", t)
 		}
@@ -121,7 +158,7 @@ func (ci *copyin) isErrorSet() bool {
 	return atomic.LoadInt32(&ci.errorset) != 0
 }
 
-func (ci *copyin) seterror(err error) {
+func (ci *copyin) setError(err error) {
 	ci.err = err
 	atomic.StoreInt32(&ci.errorset, 1)
 }
@@ -144,21 +181,18 @@ func (ci *copyin) Query(v []driver.Value) (r driver.Rows, err error) {
 func (ci *copyin) Exec(v []driver.Value) (r driver.Result, err error) {
 	defer errRecover(&err)
 
-	r = driver.RowsAffected(0)
-
 	if ci.closed {
-		panic("already closed")
+		return nil, errCopyInClosed
 	}
 
 	if ci.isErrorSet() {
-		err = ci.err
-		return nil, err
+		return nil, ci.err
 	}
 
 	if len(v) == 0 {
 		err = ci.Close()
 		ci.closed = true
-		return
+		return nil, err
 	}
 
 	numValues := len(v)
@@ -177,14 +211,14 @@ func (ci *copyin) Exec(v []driver.Value) (r driver.Result, err error) {
 		ci.buffer = ci.buffer[:5]
 	}
 
-	return
+	return driver.RowsAffected(0), nil
 }
 
 func (ci *copyin) Close() (err error) {
 	defer errRecover(&err)
 
 	if ci.closed {
-		return nil
+		return errCopyInClosed
 	}
 
 	if len(ci.buffer) > 0 {
@@ -198,5 +232,5 @@ func (ci *copyin) Close() (err error) {
 		err = ci.err
 		return err
 	}
-	return
+	return nil
 }

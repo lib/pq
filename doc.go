@@ -113,14 +113,26 @@ See the pq.Error type for details.
 
 Bulk imports
 
-You can make bulk imports by preparing a pq.CopyIn statement. pq.CopyIn
-uses Postgres COPY FROM feature. The encoding is handled by pq and you
-can insert rows by calling stmt.Exec. Note that bulk inserts are
-asynchronous and Exec can return errors for previous Exec calls.
-It is also necessary to call stmt.Exec() before stmt.Close() to get
-any errors from pending inserts. For example:
+You can perform bulk imports by preparing a statement returned by pq.CopyIn (or
+pq.CopyInSchema) in an explicit transaction (sql.Tx). The returned statement
+handle can then be repeatedly "executed" to copy data into the target table.
+After all data has been processed you should call Exec() once with no arguments
+to flush all buffered data. Any call to Exec() might return an error which
+should be handled appropriately, but because of the internal buffering an error
+returned by Exec() might not be related to the data passed in the call that
+failed.
 
-	stmt, err := db.Prepare(pq.CopyIn("users", "name", "age"))
+CopyIn uses COPY FROM internally. It is not possible to COPY outside of an
+explicit transaction in pq.
+
+Usage example:
+
+	txn, err := db.Begin()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	stmt, err := txn.Prepare(pq.CopyIn("users", "name", "age"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -138,6 +150,11 @@ any errors from pending inserts. For example:
 	}
 
 	err = stmt.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = txn.Commit()
 	if err != nil {
 		log.Fatal(err)
 	}
