@@ -18,6 +18,11 @@ func TestCopyInStmt(t *testing.T) {
 	if stmt != `COPY "table name" ("column 1", "column 2") FROM STDIN` {
 		t.Fatal(stmt)
 	}
+
+	stmt = CopyIn(`table " name """`, `co"lumn""`)
+	if stmt != `COPY "table "" name """"""" ("co""lumn""""") FROM STDIN` {
+		t.Fatal(stmt)
+	}
 }
 
 func TestCopyInSchemaStmt(t *testing.T) {
@@ -31,18 +36,30 @@ func TestCopyInSchemaStmt(t *testing.T) {
 	if stmt != `COPY "schema name"."table name" ("column 1", "column 2") FROM STDIN` {
 		t.Fatal(stmt)
 	}
+
+	stmt = CopyInSchema(`schema " name """`, `table " name """`, `co"lumn""`)
+	if stmt != `COPY "schema "" name """"""".` +
+		`"table "" name """"""" ("co""lumn""""") FROM STDIN` {
+		t.Fatal(stmt)
+	}
 }
 
 func TestCopyInMultipleValues(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	_, err := db.Exec("CREATE TEMP TABLE temp (a int, b varchar)")
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer txn.Rollback()
+
+	_, err = txn.Exec("CREATE TEMP TABLE temp (a int, b varchar)")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	stmt, err := db.Prepare(CopyIn("temp", "a", "b"))
+	stmt, err := txn.Prepare(CopyIn("temp", "a", "b"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,8 +84,7 @@ func TestCopyInMultipleValues(t *testing.T) {
 	}
 
 	var num int
-	row := db.QueryRow("SELECT COUNT(*) FROM temp")
-	err = row.Scan(&num)
+	err = txn.QueryRow("SELECT COUNT(*) FROM temp").Scan(&num)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,19 +92,24 @@ func TestCopyInMultipleValues(t *testing.T) {
 	if num != 500 {
 		t.Fatalf("expected 500 items, not %d", num)
 	}
-
 }
 
 func TestCopyInTypes(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	_, err := db.Exec("CREATE TEMP TABLE temp (num INTEGER, text VARCHAR, blob BYTEA, nothing VARCHAR)")
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer txn.Rollback()
+
+	_, err = txn.Exec("CREATE TEMP TABLE temp (num INTEGER, text VARCHAR, blob BYTEA, nothing VARCHAR)")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	stmt, err := db.Prepare(CopyIn("temp", "num", "text", "blob", "nothing"))
+	stmt, err := txn.Prepare(CopyIn("temp", "num", "text", "blob", "nothing"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,8 +134,7 @@ func TestCopyInTypes(t *testing.T) {
 	var blob []byte
 	var nothing sql.NullString
 
-	row := db.QueryRow("SELECT * FROM temp")
-	err = row.Scan(&num, &text, &blob, &nothing)
+	err = txn.QueryRow("SELECT * FROM temp").Scan(&num, &text, &blob, &nothing)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,12 +157,18 @@ func TestCopyInWrongType(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	_, err := db.Exec("CREATE TEMP TABLE temp (num INTEGER)")
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer txn.Rollback()
+
+	_, err = txn.Exec("CREATE TEMP TABLE temp (num INTEGER)")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	stmt, err := db.Prepare(CopyIn("temp", "num"))
+	stmt, err := txn.Prepare(CopyIn("temp", "num"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,53 +181,116 @@ func TestCopyInWrongType(t *testing.T) {
 
 	_, err = stmt.Exec()
 	if err == nil {
-		t.Fatal("expected 'invalid input syntax for integer' error")
+		t.Fatal("expected error")
 	}
+	if pge := err.(*Error); pge.Code.Name() != "invalid_text_representation" {
+		t.Fatalf("expected 'invalid input syntax for integer' error, got %s (%+v)", pge.Code.Name(), pge)
+	}
+}
 
+func TestCopyOutsideOfTxnError(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Prepare(CopyIn("temp", "num"))
+	if err == nil {
+		t.Fatal("COPY outside of transaction did not return an error")
+	}
+	if err != errCopyNotSupportedOutsideTxn  {
+		t.Fatal("expected %s, got %s", err, err.Error())
+	}
 }
 
 func TestCopyInBinaryError(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	_, err := db.Exec("CREATE TEMP TABLE temp (num INTEGER, text VARCHAR, blob BYTEA, nothing VARCHAR)")
+	txn, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer txn.Rollback()
 
-	_, err = db.Prepare("COPY temp (num, text, blob, nothing) FROM STDIN WITH binary")
-	if err == nil {
-		t.Fatal("COPY with binary format did not return error")
+	_, err = txn.Exec("CREATE TEMP TABLE temp (num INTEGER)")
+	if err != nil {
+		t.Fatal(err)
 	}
-
+	_, err = txn.Prepare("COPY temp (num) FROM STDIN WITH binary")
+	if err != errBinaryCopyNotSupported {
+		t.Fatalf("expected %s, got %+v", errBinaryCopyNotSupported, err)
+	}
+	// check that the protocol is in a valid state
+	err = txn.Rollback()
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestCopyFromError(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	_, err := db.Exec("CREATE TEMP TABLE temp (num INTEGER, text VARCHAR, blob BYTEA, nothing VARCHAR)")
+	txn, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer txn.Rollback()
 
-	_, err = db.Prepare("COPY temp (num, text, blob, nothing) TO STDOUT")
-	if err == nil {
-		t.Fatal("COPY TO did not return error")
+	_, err = txn.Exec("CREATE TEMP TABLE temp (num INTEGER)")
+	if err != nil {
+		t.Fatal(err)
 	}
+	_, err = txn.Prepare("COPY temp (num) TO STDOUT")
+	if err != errCopyToNotSupported {
+		t.Fatalf("expected %s, got %+v", errCopyToNotSupported, err)
+	}
+	// check that the protocol is in a valid state
+	err = txn.Rollback()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 
+func TestCopySyntaxError(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer txn.Rollback()
+
+	_, err = txn.Prepare("COPY ")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if pge := err.(*Error); pge.Code.Name() != "syntax_error" {
+		t.Fatalf("expected syntax error, got %s (%+v)", pge.Code.Name(), pge)
+	}
+	// check that the protocol is in a valid state
+	err = txn.Rollback()
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func BenchmarkCopyIn(b *testing.B) {
 	db := openTestConn(b)
 	defer db.Close()
 
-	_, err := db.Exec("CREATE TEMP TABLE temp (a int, b varchar)")
+	txn, err := db.Begin()
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer txn.Rollback()
+
+	_, err = txn.Exec("CREATE TEMP TABLE temp (a int, b varchar)")
 	if err != nil {
 		b.Fatal(err)
 	}
 
-	stmt, err := db.Prepare(CopyIn("temp", "a", "b"))
+	stmt, err := txn.Prepare(CopyIn("temp", "a", "b"))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -224,8 +313,7 @@ func BenchmarkCopyIn(b *testing.B) {
 	}
 
 	var num int
-	row := db.QueryRow("SELECT COUNT(*) FROM temp")
-	err = row.Scan(&num)
+	err = txn.QueryRow("SELECT COUNT(*) FROM temp").Scan(&num)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -233,5 +321,4 @@ func BenchmarkCopyIn(b *testing.B) {
 	if num != b.N {
 		b.Fatalf("expected %d items, not %d", b.N, num)
 	}
-
 }

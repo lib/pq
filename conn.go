@@ -1031,6 +1031,10 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 	panic("not reached")
 }
 
+func quoteIdentifier(name string) string {
+	return `"` + strings.Replace(name, `"`, `""`, -1) + `"`;
+}
+
 func md5s(s string) string {
 	h := md5.New()
 	h.Write([]byte(s))
