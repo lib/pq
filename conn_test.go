@@ -103,7 +103,7 @@ func TestCommitInFailedTransaction(t *testing.T) {
 	}
 	err = txn.Commit()
 	if err != ErrInFailedTransaction {
-		t.Fatal("expected ErrInFailedTransaction; got %#v", err)
+		t.Fatalf("expected ErrInFailedTransaction; got %#v", err)
 	}
 }
 

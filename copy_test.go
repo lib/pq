@@ -197,7 +197,7 @@ func TestCopyOutsideOfTxnError(t *testing.T) {
 		t.Fatal("COPY outside of transaction did not return an error")
 	}
 	if err != errCopyNotSupportedOutsideTxn  {
-		t.Fatal("expected %s, got %s", err, err.Error())
+		t.Fatalf("expected %s, got %s", err, err.Error())
 	}
 }
 
