@@ -64,7 +64,7 @@ func (s transactionStatus) String() string {
 	case txnStatusInFailedTransaction:
 		return "in a failed transaction"
 	default:
-		errorf("unknown transactionStatus %v", s)
+		errorf("unknown transactionStatus %d", s)
 	}
 	panic("not reached")
 }
