@@ -894,6 +894,26 @@ func TestCommit(t *testing.T) {
 	}
 }
 
+func TestErrorClass(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Query("SELECT int 'notint'")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	pge, ok := err.(*Error)
+	if !ok {
+		t.Fatalf("expected *pq.Error, got %#+v", err)
+	}
+	if pge.Code.Class() != "22" {
+		t.Fatalf("expected class 28, got %v", pge.Code.Class())
+	}
+	if pge.Code.Class().Name() != "data_exception" {
+		t.Fatalf("expected data_exception, got %v", pge.Code.Class().Name())
+	}
+}
+
 func TestParseOpts(t *testing.T) {
 	tests := []struct {
 		in       string
