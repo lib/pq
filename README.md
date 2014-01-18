@@ -69,6 +69,7 @@ code still exists in here.
 * Kamil Kisiel (kisielk)
 * Kelly Dunn (kellydunn)
 * Keith Rarick (kr)
+* Kir Shatrov (kirs)
 * Maciek Sakrejda (deafbybeheading)
 * Marc Brinkmann (mbr)
 * Marko Tiikkaja (johto)
