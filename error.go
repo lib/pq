@@ -42,17 +42,19 @@ type Error struct {
 	Routine          string
 }
 
-// ErrorCode is a five digit pq error code
+// ErrorCode is a five-character error code.
 type ErrorCode string
 
-// Name returns a more human friendly rendering of the error code
+// Name returns a more human friendly rendering of the error code, namely the
+// "condition name".
 //
-// See http://www.postgresql.org/docs/9.3/static/errcodes-appendix.html for details
+// See http://www.postgresql.org/docs/9.3/static/errcodes-appendix.html for
+// details.
 func (ec ErrorCode) Name() string {
 	return errorCodeNames[ec]
 }
 
-// ErrorClass is only the class part of an error code
+// ErrorClass is only the class part of an error code.
 type ErrorClass string
 
 // Name returns the condition name of an error class.  It is equivalent to the
@@ -62,15 +64,16 @@ func (ec ErrorClass) Name() string {
 	return errorCodeNames[ErrorCode(ec + "000")]
 }
 
-// Class returns the error class, e.g. "28"
+// Class returns the error class, e.g. "28".
 //
-// See http://www.postgresql.org/docs/9.3/static/errcodes-appendix.html for details
+// See http://www.postgresql.org/docs/9.3/static/errcodes-appendix.html for
+// details.
 func (ec ErrorCode) Class() ErrorClass {
 	return ErrorClass(ec[0:2])
 }
 
-// errorCodeNames is a mapping between five digit Error Codes and the human
-// readable "Condition Name" for that error. It is derived from the list at
+// errorCodeNames is a mapping between the five-character error codes and the
+// human readable "condition names". It is derived from the list at
 // http://www.postgresql.org/docs/9.3/static/errcodes-appendix.html
 var errorCodeNames = map[ErrorCode]string{
 	// Class 00 - Successful Completion
