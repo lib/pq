@@ -89,8 +89,9 @@ pq does not support the LastInsertId() method of the Result type in database/sql
 To return the identifier of an INSERT (or UPDATE or DELETE), use the Postgres
 RETURNING clause with a standard Query or QueryRow call:
 
-	rows, err := db.Query(`INSERT INTO users(name, favorite_fruit, age)
-		VALUES('beatrice', 'starfruit', 93) RETURNING id`)
+	var userid int
+	err := db.QueryRow(`INSERT INTO users(name, favorite_fruit, age)
+		VALUES('beatrice', 'starfruit', 93) RETURNING id`).Scan(&userid)
 
 For more details on RETURNING, see the Postgres documentation:
 
