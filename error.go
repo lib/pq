@@ -52,6 +52,23 @@ func (ec ErrorCode) Name() string {
 	return errorCodeNames[ec]
 }
 
+// ErrorClass is only the class part of an error code
+type ErrorClass string
+
+// Name returns the condition name of an error class.  It is equivalent to the
+// condition name of the "standard" error code (i.e. the one having the last
+// three characters "000").
+func (ec ErrorClass) Name() string {
+	return errorCodeNames[ErrorCode(ec + "000")]
+}
+
+// Class returns the error class, e.g. "28"
+//
+// See http://www.postgresql.org/docs/9.3/static/errcodes-appendix.html for details
+func (ec ErrorCode) Class() ErrorClass {
+	return ErrorClass(ec[0:2])
+}
+
 // errorCodeNames is a mapping between five digit Error Codes and the human
 // readable "Condition Name" for that error. It is derived from the list at
 // http://www.postgresql.org/docs/9.3/static/errcodes-appendix.html
