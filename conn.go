@@ -493,7 +493,13 @@ func (cn *conn) Prepare(q string) (driver.Stmt, error) {
 
 func (cn *conn) Close() (err error) {
 	defer errRecover(&err)
-	cn.send(cn.writeBuf('X'))
+
+	// Don't go through send(); ListenerConn relies on us not scribbling on the
+	// scratch buffer of this connection.
+	_, err = cn.c.Write([]byte("X\x00\x00\x00\x04"))
+	if err != nil {
+		return err
+	}
 
 	return cn.c.Close()
 }
