@@ -972,6 +972,11 @@ func TestRuntimeParameters(t *testing.T) {
 		}
 		defer db.Close()
 
+		// application_name didn't exist before 9.0
+		if test.param == "application_name" && getServerVersion(t, db) < 90000 {
+			continue
+		}
+
 		tryGetParameterValue := func() (value string, outcome RuntimeTestResult) {
 			defer func() {
 				if p := recover(); p != nil {
