@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/md5"
 	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/binary"
@@ -11,6 +12,7 @@ import (
 	"fmt"
 	"github.com/lib/pq/oid"
 	"io"
+	"io/ioutil"
 	"net"
 	"os"
 	"os/user"
@@ -802,6 +804,7 @@ func (cn *conn) ssl(o values) {
 	}
 
 	cn.setupSSLClientCertificates(&tlsConf, o)
+	cn.setupSSLCA(&tlsConf, o)
 
 	w := cn.writeBuf(0)
 	w.int32(80877103)
@@ -880,6 +883,23 @@ func (cn *conn) setupSSLClientCertificates(tlsConf *tls.Config, o values) {
 	tlsConf.Certificates = []tls.Certificate{cert}
 }
 
+// Sets up RootCAs in the TLS configuration if sslrootcert is set.
+func (cn *conn) setupSSLCA(tlsConf *tls.Config, o values) {
+	if sslrootcert := o.Get("sslrootcert"); sslrootcert != "" {
+		tlsConf.RootCAs = x509.NewCertPool()
+
+		cert, err := ioutil.ReadFile(sslrootcert)
+		if err != nil {
+			panic(err)
+		}
+
+		ok := tlsConf.RootCAs.AppendCertsFromPEM(cert)
+		if !ok {
+			errorf("couldn't parse pem in sslrootcert")
+		}
+	}
+}
+
 // isDriverSetting returns true iff a setting is purely for the configuring the
 // driver's options and should not be sent to the server in the connection
 // startup packet.
@@ -889,7 +909,7 @@ func isDriverSetting(key string) bool {
 		return true
 	case "password":
 		return true
-	case "sslmode", "sslcert", "sslkey":
+	case "sslmode", "sslcert", "sslkey", "sslrootcert":
 		return true
 	case "fallback_application_name":
 		return true
@@ -1396,7 +1416,9 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("sslcert")
 		case "PGSSLKEY":
 			accrue("sslkey")
-		case "PGREQUIRESSL", "PGSSLROOTCERT", "PGSSLCRL":
+		case "PGSSLROOTCERT":
+			accrue("sslrootcert")
+		case "PGREQUIRESSL", "PGSSLCRL":
 			unsupported()
 		case "PGREQUIREPEER":
 			unsupported()

@@ -49,6 +49,7 @@ supported:
 	* connect_timeout - Maximum wait for connection, in seconds. Zero or not specified means wait indefinitely.
 	* sslcert - Cert file location. The file must contain PEM encoded data. (optional)
 	* sslkey -  Key file location. The file must contain PEM encoded data. (optional)
+	* sslrootcert - The location of the root certificate file. The file must contain PEM encoded data.
 
 Valid values for sslmode are:
 

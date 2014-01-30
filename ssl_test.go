@@ -3,6 +3,7 @@ package pq
 // This file contains SSL tests
 
 import (
+	"crypto/x509"
 	"database/sql"
 	"fmt"
 	"os"
@@ -68,6 +69,43 @@ func TestSSLConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows.Close()
+}
+
+// Test sslmode=verify-full
+func TestSSLVerifyFull(t *testing.T) {
+	if shouldSkipSSLTests(t) {
+		t.Log("skipping SSL test")
+		return
+	}
+	// Environment sanity check: should fail without SSL
+	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
+
+	// Not OK according to the system CA
+	_, err := openSSLConn(t, "host=postgres sslmode=verify-full user=pqgossltest")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	_, ok := err.(x509.UnknownAuthorityError)
+	if !ok {
+		t.Fatalf("expected x509.HostnameError, got %#+v", err)
+	}
+
+	rootCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "root.crt")
+	rootCert := "sslrootcert=" + rootCertPath + " "
+	// No match on Common Name
+	_, err = openSSLConn(t, rootCert + "host=127.0.0.1 sslmode=verify-full user=pqgossltest")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	_, ok = err.(x509.HostnameError)
+	if !ok {
+		t.Fatalf("expected x509.HostnameError, got %#+v", err)
+	}
+	// OK
+	_, err = openSSLConn(t, rootCert + "host=postgres sslmode=verify-full user=pqgossltest")
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func getCertConninfo(t *testing.T, source string) string {
