@@ -18,6 +18,8 @@ import (
 	"strings"
 	"unicode"
 	"time"
+	"crypto/x509"
+	"io/ioutil"
 )
 
 // Common error types
@@ -656,6 +658,22 @@ func (cn *conn) ssl(o values) {
 		errorf(`unsupported sslmode %q; only "require" (default), "verify-full", and "disable" supported`, mode)
 	}
 
+	if o.Get("sslrootcert") != "" {
+		tlsConf.RootCAs = x509.NewCertPool()
+
+		cert, err := ioutil.ReadFile(o.Get("sslrootcert"))
+
+		if err != nil {
+			panic(err)
+		}
+
+		ok := tlsConf.RootCAs.AppendCertsFromPEM(cert)
+
+		if !ok {
+			errorf("couldn't parse pem in sslrootcert")
+		}
+	}
+
 	w := cn.writeBuf(0)
 	w.int32(80877103)
 	cn.send(w)
@@ -683,7 +701,8 @@ func (cn *conn) startup(o values) {
 	for k, v := range o {
 		// skip options which can't be run-time parameters
 		if k == "password" || k == "host" ||
-			k == "port" || k == "sslmode" {
+			k == "port" || k == "sslmode" ||
+			k == "sslrootcert" {
 			continue
 		}
 		// The protocol requires us to supply the database name as "database"
@@ -1132,7 +1151,9 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("application_name")
 		case "PGSSLMODE":
 			accrue("sslmode")
-		case "PGREQUIRESSL", "PGSSLCERT", "PGSSLKEY", "PGSSLROOTCERT", "PGSSLCRL":
+		case "PGSSLROOTCERT":
+			accrue("sslrootcert")
+		case "PGREQUIRESSL", "PGSSLCERT", "PGSSLKEY", "PGSSLCRL":
 			unsupported()
 		case "PGREQUIREPEER":
 			unsupported()
