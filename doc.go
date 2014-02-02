@@ -45,6 +45,7 @@ supported:
 	* host - The host to connect to. Values that start with / are for unix domain sockets. (default is localhost)
 	* port - The port to bind to. (default is 5432)
 	* sslmode - Whether or not to use SSL (default is require, this is not the default for libpq)
+	* fallback_application_name - An application_name to fall back to if one isn't provided.
 
 Valid values for sslmode are:
 

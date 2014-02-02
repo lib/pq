@@ -118,6 +118,14 @@ func Open(name string) (_ driver.Conn, err error) {
 		return nil, err
 	}
 
+	// Use the "fallback" application name if necessary
+	if fallback := o.Get("fallback_application_name"); fallback != "" {
+		if !o.Isset("application_name") {
+			o.Set("application_name", fallback)
+		}
+	}
+	o.Unset("fallback_application_name")
+
 	// We can't work with any client_encoding other than UTF-8 currently.
 	// However, we have historically allowed the user to set it to UTF-8
 	// explicitly, and there's no reason to break such programs, so allow that.
@@ -182,6 +190,15 @@ func (vs values) Set(k, v string) {
 
 func (vs values) Get(k string) (v string) {
 	return vs[k]
+}
+
+func (vs values) Isset(k string) bool {
+	_, ok := vs[k]
+	return ok
+}
+
+func (vs values) Unset(k string) {
+	delete(vs, k)
 }
 
 // scanner implements a tokenizer for libpq-style option strings.

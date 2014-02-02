@@ -959,6 +959,10 @@ func TestRuntimeParameters(t *testing.T) {
 		{"client_encoding=UTF8", "client_encoding", "UTF8", ResultSuccess},
 		// test a runtime parameter not supported by libpq
 		{"work_mem='139kB'", "work_mem", "139kB", ResultSuccess},
+		// test fallback_application_name
+		{"application_name=foo fallback_application_name=bar", "application_name", "foo", ResultSuccess},
+		{"application_name='' fallback_application_name=bar", "application_name", "", ResultSuccess},
+		{"fallback_application_name=bar", "application_name", "bar", ResultSuccess},
 	}
 
 	for _, test := range tests {
@@ -967,6 +971,11 @@ func TestRuntimeParameters(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer db.Close()
+
+		// application_name didn't exist before 9.0
+		if test.param == "application_name" && getServerVersion(t, db) < 90000 {
+			continue
+		}
 
 		tryGetParameterValue := func() (value string, outcome RuntimeTestResult) {
 			defer func() {
