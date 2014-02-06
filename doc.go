@@ -106,7 +106,7 @@ Errors
 
 pq may return errors of type *pq.Error which can be interrogated for error details:
 
-        if err, ok := err.(*pq.Error), ok {
+        if err, ok := err.(*pq.Error); ok {
             fmt.Println("pq error:", err.Code.Name())
         }
 
