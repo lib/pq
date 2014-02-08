@@ -38,7 +38,7 @@ func TestCopyInSchemaStmt(t *testing.T) {
 	}
 
 	stmt = CopyInSchema(`schema " name """`, `table " name """`, `co"lumn""`)
-	if stmt != `COPY "schema "" name """"""".` +
+	if stmt != `COPY "schema "" name """"""".`+
 		`"table "" name """"""" ("co""lumn""""") FROM STDIN` {
 		t.Fatal(stmt)
 	}
@@ -196,7 +196,7 @@ func TestCopyOutsideOfTxnError(t *testing.T) {
 	if err == nil {
 		t.Fatal("COPY outside of transaction did not return an error")
 	}
-	if err != errCopyNotSupportedOutsideTxn  {
+	if err != errCopyNotSupportedOutsideTxn {
 		t.Fatalf("expected %s, got %s", err, err.Error())
 	}
 }

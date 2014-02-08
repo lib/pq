@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/md5"
 	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/binary"
@@ -11,13 +12,14 @@ import (
 	"fmt"
 	"github.com/lib/pq/oid"
 	"io"
+	"io/ioutil"
 	"net"
 	"os"
 	"path"
 	"strconv"
 	"strings"
-	"unicode"
 	"time"
+	"unicode"
 )
 
 // Common error types
@@ -654,12 +656,12 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 		}
 
 		switch t {
-			case 'A', 'N':
-				// ignore
-			case 'S':
-				cn.processParameterStatus(r)
-			default:
-				return
+		case 'A', 'N':
+			// ignore
+		case 'S':
+			cn.processParameterStatus(r)
+		default:
+			return
 		}
 	}
 
@@ -677,6 +679,22 @@ func (cn *conn) ssl(o values) {
 		return
 	default:
 		errorf(`unsupported sslmode %q; only "require" (default), "verify-full", and "disable" supported`, mode)
+	}
+
+	if o.Get("sslrootcert") != "" {
+		tlsConf.RootCAs = x509.NewCertPool()
+
+		cert, err := ioutil.ReadFile(o.Get("sslrootcert"))
+
+		if err != nil {
+			panic(err)
+		}
+
+		ok := tlsConf.RootCAs.AppendCertsFromPEM(cert)
+
+		if !ok {
+			errorf("couldn't parse pem in sslrootcert")
+		}
 	}
 
 	w := cn.writeBuf(0)
@@ -706,7 +724,8 @@ func (cn *conn) startup(o values) {
 	for k, v := range o {
 		// skip options which can't be run-time parameters
 		if k == "password" || k == "host" ||
-			k == "port" || k == "sslmode" {
+			k == "port" || k == "sslmode" ||
+			k == "sslrootcert" {
 			continue
 		}
 		// The protocol requires us to supply the database name as "database"
@@ -1055,7 +1074,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 }
 
 func quoteIdentifier(name string) string {
-	return `"` + strings.Replace(name, `"`, `""`, -1) + `"`;
+	return `"` + strings.Replace(name, `"`, `""`, -1) + `"`
 }
 
 func md5s(s string) string {
@@ -1069,26 +1088,25 @@ func (c *conn) processParameterStatus(r *readBuf) {
 
 	param := r.string()
 	switch param {
-		case "server_version":
-			var major1 int
-			var major2 int
-			var minor int
-			_, err = fmt.Sscanf(r.string(), "%d.%d.%d", &major1, &major2, &minor)
-			if err == nil {
-				c.parameterStatus.serverVersion = major1 * 10000 + major2 * 100 + minor
-			}
+	case "server_version":
+		var major1 int
+		var major2 int
+		var minor int
+		_, err = fmt.Sscanf(r.string(), "%d.%d.%d", &major1, &major2, &minor)
+		if err == nil {
+			c.parameterStatus.serverVersion = major1*10000 + major2*100 + minor
+		}
 
-		case "TimeZone":
-			c.parameterStatus.currentLocation, err = time.LoadLocation(r.string())
-			if err != nil {
-				c.parameterStatus.currentLocation = nil
-			}
+	case "TimeZone":
+		c.parameterStatus.currentLocation, err = time.LoadLocation(r.string())
+		if err != nil {
+			c.parameterStatus.currentLocation = nil
+		}
 
-		default:
-			// ignore
+	default:
+		// ignore
 	}
 }
-
 
 func (c *conn) processReadyForQuery(r *readBuf) {
 	c.txnStatus = transactionStatus(r.byte())
@@ -1155,7 +1173,9 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("application_name")
 		case "PGSSLMODE":
 			accrue("sslmode")
-		case "PGREQUIRESSL", "PGSSLCERT", "PGSSLKEY", "PGSSLROOTCERT", "PGSSLCRL":
+		case "PGSSLROOTCERT":
+			accrue("sslrootcert")
+		case "PGREQUIRESSL", "PGSSLCERT", "PGSSLKEY", "PGSSLCRL":
 			unsupported()
 		case "PGREQUIREPEER":
 			unsupported()
