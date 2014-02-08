@@ -41,7 +41,6 @@ Optionally, a benchmark suite can be run as part of the tests:
 
 ## Future / Things you can help with
 
-* Notifications: `LISTEN`/`NOTIFY` (see #156)
 * Better COPY FROM / COPY TO (see discussion in #181)
 
 ## Thank you (alphabetical)
