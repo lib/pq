@@ -13,26 +13,26 @@ var errNilNotification = errors.New("nil notification")
 
 func expectNotification(t *testing.T, ch <-chan *Notification, relname string, extra string) error {
 	select {
-		case n := <-ch:
-			if n == nil {
-				return errNilNotification
-			}
-			if n.Channel != relname || n.Extra != extra {
-				return fmt.Errorf("unexpected notification %v", n)
-			}
-			return nil
-		case <-time.After(1500 * time.Millisecond):
-			return fmt.Errorf("timeout")
+	case n := <-ch:
+		if n == nil {
+			return errNilNotification
+		}
+		if n.Channel != relname || n.Extra != extra {
+			return fmt.Errorf("unexpected notification %v", n)
+		}
+		return nil
+	case <-time.After(1500 * time.Millisecond):
+		return fmt.Errorf("timeout")
 	}
 	panic("not reached")
 }
 
 func expectNoNotification(t *testing.T, ch <-chan *Notification) error {
 	select {
-		case n := <-ch:
-			return fmt.Errorf("unexpected notification %v", n)
-		case <-time.After(100 * time.Millisecond):
-			return nil
+	case n := <-ch:
+		return fmt.Errorf("unexpected notification %v", n)
+	case <-time.After(100 * time.Millisecond):
+		return nil
 	}
 	panic("not reached")
 }
@@ -219,7 +219,7 @@ func TestNotifyExtra(t *testing.T) {
 	defer db.Close()
 
 	//if getServerVersion(t, db) < 90000 {
-		return
+	return
 	//}
 
 	l, channel := newTestListenerConn(t)
@@ -255,7 +255,7 @@ func newTestListenerTimeout(t *testing.T, min time.Duration, max time.Duration) 
 	}
 
 	eventch := make(chan ListenerEventType, 16)
-	l := NewListener("", min, max, func (t ListenerEventType, err error) { eventch <- t })
+	l := NewListener("", min, max, func(t ListenerEventType, err error) { eventch <- t })
 	err := expectEvent(t, eventch, ListenerEventConnected)
 	if err != nil {
 		t.Fatal(err)
@@ -263,11 +263,9 @@ func newTestListenerTimeout(t *testing.T, min time.Duration, max time.Duration) 
 	return l, eventch
 }
 
-
 func newTestListener(t *testing.T) (*Listener, <-chan ListenerEventType) {
 	return newTestListenerTimeout(t, time.Hour, time.Hour)
 }
-
 
 func TestListenerListen(t *testing.T) {
 	l, _ := newTestListener(t)
@@ -319,10 +317,10 @@ func TestListenerUnlisten(t *testing.T) {
 		t.Fatal(err)
 	}
 
-    _, err = db.Exec("NOTIFY notify_listen_test")
-    if err != nil {
-        t.Fatal(err)
-    }
+	_, err = db.Exec("NOTIFY notify_listen_test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	err = expectNoNotification(t, l.Notify)
 	if err != nil {
@@ -357,10 +355,10 @@ func TestListenerUnlistenAll(t *testing.T) {
 		t.Fatal(err)
 	}
 
-    _, err = db.Exec("NOTIFY notify_listen_test")
-    if err != nil {
-        t.Fatal(err)
-    }
+	_, err = db.Exec("NOTIFY notify_listen_test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	err = expectNoNotification(t, l.Notify)
 	if err != nil {
@@ -405,10 +403,10 @@ func TestListenerFailedQuery(t *testing.T) {
 	}
 
 	// should still work
-    _, err = db.Exec("NOTIFY notify_listen_test")
-    if err != nil {
-        t.Fatal(err)
-    }
+	_, err = db.Exec("NOTIFY notify_listen_test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	err = expectNotification(t, l.Notify, "notify_listen_test", "")
 	if err != nil {
@@ -417,7 +415,7 @@ func TestListenerFailedQuery(t *testing.T) {
 }
 
 func TestListenerReconnect(t *testing.T) {
-	l, eventch := newTestListenerTimeout(t, 20 * time.Millisecond, time.Hour)
+	l, eventch := newTestListenerTimeout(t, 20*time.Millisecond, time.Hour)
 	defer l.Close()
 
 	db := openTestConn(t)
@@ -456,10 +454,10 @@ func TestListenerReconnect(t *testing.T) {
 	}
 
 	// should still work
-    _, err = db.Exec("NOTIFY notify_listen_test")
-    if err != nil {
-        t.Fatal(err)
-    }
+	_, err = db.Exec("NOTIFY notify_listen_test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// should get nil after Reconnected
 	err = expectNotification(t, l.Notify, "", "")
@@ -474,7 +472,7 @@ func TestListenerReconnect(t *testing.T) {
 }
 
 func TestListenerClose(t *testing.T) {
-	l, _ := newTestListenerTimeout(t, 20 * time.Millisecond, time.Hour)
+	l, _ := newTestListenerTimeout(t, 20*time.Millisecond, time.Hour)
 	defer l.Close()
 
 	err := l.Close()
@@ -488,7 +486,7 @@ func TestListenerClose(t *testing.T) {
 }
 
 func TestListenerPing(t *testing.T) {
-	l, _ := newTestListenerTimeout(t, 20 * time.Millisecond, time.Hour)
+	l, _ := newTestListenerTimeout(t, 20*time.Millisecond, time.Hour)
 	defer l.Close()
 
 	err := l.Ping()
