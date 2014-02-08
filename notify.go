@@ -96,7 +96,6 @@ func (l *ListenerConn) acquireSenderLock() error {
 	return nil
 }
 
-// Release senderLock
 func (l *ListenerConn) releaseSenderLock() {
 	l.senderLock.Unlock()
 }
@@ -237,7 +236,8 @@ func (l *ListenerConn) Ping() error {
 
 // Attempt to send a query on the connection.  Returns an error if sending the
 // query failed, and the caller should initiate closure of this connection.
-// The caller must be holding senderToken (see acquireToken and releaseToken).
+// The caller must be holding senderLock (see acquireSenderLock and
+// releaseSenderLock).
 func (l *ListenerConn) sendSimpleQuery(q string) (err error) {
 	defer errRecover(&err)
 
@@ -280,8 +280,7 @@ func (l *ListenerConn) ExecSimpleQuery(q string) (executed bool, err error) {
 		l.connectionLock.Lock()
 		defer l.connectionLock.Unlock()
 		// Set the error pointer if it hasn't been set already; see
-		// listenerConnMain.  We also don't have to close the senderToken
-		// channel here; that's always handled in the main loop.
+		// listenerConnMain.
 		if l.err == nil {
 			l.err = err
 		}
