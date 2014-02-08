@@ -166,7 +166,7 @@ func (l *ListenerConn) listenerConnLoop() (err error) {
 		case 'N', 'S':
 			// ignore
 		default:
-			return fmt.Errorf("unexpected messge %q from server", t)
+			return fmt.Errorf("unexpected message %q from server in listenerConnLoop", t)
 		}
 	}
 
