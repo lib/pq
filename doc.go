@@ -161,5 +161,40 @@ Usage example:
 		log.Fatal(err)
 	}
 
+
+Notifications
+
+
+PostgreSQL supports a simple publish/subscribe model over database
+connections.  See http://www.postgresql.org/docs/current/static/sql-notify.html
+for more information about the general mechanism.
+
+To start listening for notifications, you first have to open a new connection
+to the database by calling NewListener.  This connection can not be used for
+anything other than LISTEN / NOTIFY.  Calling Listen will open a "notification
+channel"; once a notification channel is open, a notification generated on that
+channel will effect a send on the Listener.Notify channel.  A notification
+channel will remain open until Unlisten is called, though connection loss might
+result in some notifications being lost.  To solve this problem, Listener sends
+a nil pointer over the Notify channel any time the connection is re-established
+following a connection loss.  The application can get information about the
+state of the underlying connection by setting an event callback in the call to
+NewListener.
+
+A single Listener can safely be used from concurrent goroutines, which means
+that there is often no need to create more than one Listener in your
+application.  However, a Listener is always connected to a single database, so
+you will need to create a new Listener instance for every database you want to
+receive notifications in.
+
+The channel name in both Listen and Unlisten is case sensitive, and can contain
+any characters legal in an identifier (see
+http://www.postgresql.org/docs/current/static/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS
+for more information).  Note that the channel name will be truncated to 63
+bytes by the PostgreSQL server.
+
+You can find a complete, working example of Listener usage at
+http://godoc.org/github.com/lib/pq/listen_example.
+
 */
 package pq
