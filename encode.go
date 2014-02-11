@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func encode(x interface{}, pgtypOid oid.Oid) []byte {
+func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) []byte {
 	switch v := x.(type) {
 	case int64:
 		return []byte(fmt.Sprintf("%d", v))
@@ -22,13 +22,13 @@ func encode(x interface{}, pgtypOid oid.Oid) []byte {
 		return []byte(fmt.Sprintf("%.17f", v))
 	case []byte:
 		if pgtypOid == oid.T_bytea {
-			return []byte(fmt.Sprintf("\\x%x", v))
+			return encodeBytea(parameterStatus.serverVersion, v)
 		}
 
 		return v
 	case string:
 		if pgtypOid == oid.T_bytea {
-			return []byte(fmt.Sprintf("\\x%x", v))
+			return encodeBytea(parameterStatus.serverVersion, []byte(v))
 		}
 
 		return []byte(v)
@@ -43,12 +43,14 @@ func encode(x interface{}, pgtypOid oid.Oid) []byte {
 	panic("not reached")
 }
 
-func decode(s []byte, typ oid.Oid) interface{} {
+func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{} {
 	switch typ {
 	case oid.T_bytea:
 		return parseBytea(s)
-	case oid.T_timestamptz, oid.T_timestamp, oid.T_date:
-		return parseTs(string(s))
+	case oid.T_timestamptz:
+		return parseTs(parameterStatus.currentLocation, string(s))
+	case oid.T_timestamp, oid.T_date:
+		return parseTs(nil, string(s))
 	case oid.T_time:
 		return mustParse("15:04:05", typ, s)
 	case oid.T_timetz:
@@ -74,6 +76,72 @@ func decode(s []byte, typ oid.Oid) interface{} {
 	}
 
 	return s
+}
+
+// appendEncodedText encodes item in text format as required by COPY
+// and appends to buf
+func appendEncodedText(parameterStatus *parameterStatus, buf []byte, x interface{}) []byte {
+	switch v := x.(type) {
+	case int64:
+		return strconv.AppendInt(buf, v, 10)
+	case float32:
+		return strconv.AppendFloat(buf, float64(v), 'f', -1, 32)
+	case float64:
+		return strconv.AppendFloat(buf, v, 'f', -1, 64)
+	case []byte:
+		encodedBytea := encodeBytea(parameterStatus.serverVersion, v)
+		return appendEscapedText(buf, string(encodedBytea))
+	case string:
+		return appendEscapedText(buf, v)
+	case bool:
+		return strconv.AppendBool(buf, v)
+	case time.Time:
+		return append(buf, v.Format(time.RFC3339Nano)...)
+	case nil:
+		return append(buf, "\\N"...)
+	default:
+		errorf("encode: unknown type for %T", v)
+	}
+
+	panic("not reached")
+}
+
+func appendEscapedText(buf []byte, text string) []byte {
+	escapeNeeded := false
+	startPos := 0
+	var c byte
+
+	// check if we need to escape
+	for i := 0; i < len(text); i++ {
+		c = text[i]
+		if c == '\\' || c == '\n' || c == '\r' || c == '\t' {
+			escapeNeeded = true
+			startPos = i
+			break
+		}
+	}
+	if !escapeNeeded {
+		return append(buf, text...)
+	}
+
+	// copy till first char to escape, iterate the rest
+	result := append(buf, text[:startPos]...)
+	for i := startPos; i < len(text); i++ {
+		c = text[i]
+		switch c {
+		case '\\':
+			result = append(result, '\\', '\\')
+		case '\n':
+			result = append(result, '\\', 'n')
+		case '\r':
+			result = append(result, '\\', 'r')
+		case '\t':
+			result = append(result, '\\', 't')
+		default:
+			result = append(result, c)
+		}
+	}
+	return result
 }
 
 func mustParse(f string, typ oid.Oid, s []byte) time.Time {
@@ -115,7 +183,7 @@ func mustAtoi(str string) int {
 // setting ("ISO, MDY"), the only one we currently support. This
 // accounts for the discrepancies between the parsing available with
 // time.Parse and the Postgres date formatting quirks.
-func parseTs(str string) (result time.Time) {
+func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 	monSep := strings.IndexRune(str, '-')
 	year := mustAtoi(str[:monSep])
 	daySep := monSep + 3
@@ -187,9 +255,22 @@ func parseTs(str string) (result time.Time) {
 	if remainderIdx < len(str) {
 		errorf("expected end of input, got %v", str[remainderIdx:])
 	}
-	return time.Date(bcSign*year, time.Month(month), day,
+	t := time.Date(bcSign*year, time.Month(month), day,
 		hour, minute, second, nanoSec,
 		time.FixedZone("", tzOff))
+
+	if currentLocation != nil {
+		// Set the location of the returned Time based on the session's
+		// TimeZone value, but only if the local time zone database agrees with
+		// the remote database on the offset.
+		lt := t.In(currentLocation)
+		_, newOff := lt.Zone()
+		if newOff == tzOff {
+			t = lt
+		}
+	}
+
+	return t
 }
 
 // Parse a bytea value received from the server.  Both "hex" and the legacy
@@ -207,7 +288,7 @@ func parseBytea(s []byte) (result []byte) {
 		// bytea_output = escape
 		for len(s) > 0 {
 			if s[0] == '\\' {
-				// escaped \\
+				// escaped '\\'
 				if len(s) >= 2 && s[1] == '\\' {
 					result = append(result, '\\')
 					s = s[2:]
@@ -225,7 +306,8 @@ func parseBytea(s []byte) (result []byte) {
 				result = append(result, byte(r))
 				s = s[4:]
 			} else {
-				// unescaped, raw byte
+				// We hit an unescaped, raw byte.  Try to read in as many as
+				// possible in one go.
 				i := bytes.IndexByte(s, '\\')
 				if i == -1 {
 					result = append(result, s...)
@@ -233,6 +315,26 @@ func parseBytea(s []byte) (result []byte) {
 				}
 				result = append(result, s[:i]...)
 				s = s[i:]
+			}
+		}
+	}
+
+	return result
+}
+
+func encodeBytea(serverVersion int, v []byte) (result []byte) {
+	if serverVersion >= 90000 {
+		// Use the hex format if we know that the server supports it
+		result = []byte(fmt.Sprintf("\\x%x", v))
+	} else {
+		// .. or resort to "escape"
+		for _, b := range v {
+			if b == '\\' {
+				result = append(result, '\\', '\\')
+			} else if b < 0x20 || b > 0x7e {
+				result = append(result, []byte(fmt.Sprintf("\\%03o", b))...)
+			} else {
+				result = append(result, b)
 			}
 		}
 	}

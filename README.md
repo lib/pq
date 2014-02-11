@@ -32,14 +32,16 @@ Optionally, a benchmark suite can be run as part of the tests:
 * Handles bad connections for `database/sql`
 * Scan `time.Time` correctly (i.e. `timestamp[tz]`, `time[tz]`, `date`)
 * Scan binary blobs correctly (i.e. `bytea`)
+* Package for `hstore` support
+* COPY FROM support
 * pq.ParseURL for converting urls to connection strings for sql.Open.
 * Many libpq compatible environment variables
 * Unix socket support
+* Notifications: `LISTEN`/`NOTIFY`
 
 ## Future / Things you can help with
 
-* Notifications: `LISTEN`/`NOTIFY`
-* `hstore` sugar (i.e. handling hstore in `rows.Scan`)
+* Better COPY FROM / COPY TO (see discussion in #181)
 
 ## Thank you (alphabetical)
 
@@ -61,11 +63,13 @@ code still exists in here.
 * Gary Burd (garyburd)
 * Heroku (heroku)
 * Jason McVetta (jmcvetta)
+* Jeremy Jay (pbnjay)
 * Joakim Sernbrant (serbaut)
 * John Gallagher (jgallagher)
 * Kamil Kisiel (kisielk)
 * Kelly Dunn (kellydunn)
 * Keith Rarick (kr)
+* Kir Shatrov (kirs)
 * Maciek Sakrejda (deafbybeheading)
 * Marc Brinkmann (mbr)
 * Marko Tiikkaja (johto)
@@ -74,6 +78,8 @@ code still exists in here.
 * Martin Olsen (martinolsen)
 * Mike Lewis (mikelikespie)
 * Nicolas Patry (Narsil)
+* Oliver Tonnhofer (olt)
+* Patrick Hayes (phayes)
 * Paul Hammond (paulhammond)
 * Ryan Smith (ryandotsmith)
 * Samuel Stauffer (samuel)

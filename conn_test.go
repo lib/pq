@@ -40,6 +40,15 @@ func openTestConn(t Fatalistic) *sql.DB {
 	return conn
 }
 
+func getServerVersion(t *testing.T, db *sql.DB) int {
+	var version int
+	err := db.QueryRow("SHOW server_version_num").Scan(&version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return version
+}
+
 func TestReconnect(t *testing.T) {
 	if runtime.Version() == "go1.0.2" {
 		fmt.Println("Skipping failing test; " +
@@ -94,7 +103,7 @@ func TestCommitInFailedTransaction(t *testing.T) {
 	}
 	err = txn.Commit()
 	if err != ErrInFailedTransaction {
-		t.Fatal("expected ErrInFailedTransaction; got %#v", err)
+		t.Fatalf("expected ErrInFailedTransaction; got %#v", err)
 	}
 }
 
@@ -140,22 +149,25 @@ func TestExec(t *testing.T) {
 		t.Fatalf("expected 3 rows affected, not %d", n)
 	}
 
-	r, err = db.Exec("SELECT g FROM generate_series(1, 2) g")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n, _ := r.RowsAffected(); n != 2 {
-		t.Fatalf("expected 2 rows affected, not %d", n)
-	}
+	// SELECT doesn't send the number of returned rows in the command tag
+	// before 9.0
+	if getServerVersion(t, db) >= 90000 {
+		r, err = db.Exec("SELECT g FROM generate_series(1, 2) g")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, _ := r.RowsAffected(); n != 2 {
+			t.Fatalf("expected 2 rows affected, not %d", n)
+		}
 
-	r, err = db.Exec("SELECT g FROM generate_series(1, $1) g", 3)
-	if err != nil {
-		t.Fatal(err)
+		r, err = db.Exec("SELECT g FROM generate_series(1, $1) g", 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, _ := r.RowsAffected(); n != 3 {
+			t.Fatalf("expected 3 rows affected, not %d", n)
+		}
 	}
-	if n, _ := r.RowsAffected(); n != 3 {
-		t.Fatalf("expected 3 rows affected, not %d", n)
-	}
-
 }
 
 func TestStatment(t *testing.T) {
@@ -272,7 +284,7 @@ func TestEncodeDecode(t *testing.T) {
 
 	q := `
 		SELECT
-			E'\\x000102'::bytea,
+			E'\\000\\001\\002'::bytea,
 			'foobar'::text,
 			NULL::integer,
 			'2000-1-1 01:02:03.04-7'::timestamptz,
@@ -280,7 +292,7 @@ func TestEncodeDecode(t *testing.T) {
 			123,
 			3.14::float8
 		WHERE
-			    E'\\x000102'::bytea = $1
+			    E'\\000\\001\\002'::bytea = $1
 			AND 'foobar'::text = $2
 			AND $3::integer is NULL
 	`
@@ -422,16 +434,27 @@ func TestErrorOnExec(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
-	_, err := db.Exec(sql)
-	_, ok := err.(*Error)
-	if !ok {
-		t.Fatalf("expected Error, was: %#v", err)
-	}
-
-	_, err = db.Exec("SELECT 1 WHERE true = false") // returns no rows
+	txn, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
+	}
+	defer txn.Rollback()
+
+	_, err = txn.Exec("CREATE TEMPORARY TABLE foo(f1 int PRIMARY KEY)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = txn.Exec("INSERT INTO foo VALUES (0), (0)")
+	if err == nil {
+		t.Fatal("Should have raised error")
+	}
+
+	e, ok := err.(*Error)
+	if !ok {
+		t.Fatalf("expected Error, got %#v", err)
+	} else if e.Code.Name() != "unique_violation" {
+		t.Fatalf("expected unique_violation, got %s (%+v)", e.Code.Name(), err)
 	}
 }
 
@@ -439,26 +462,27 @@ func TestErrorOnQuery(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
-	r, err := db.Query(sql)
-	if r != nil {
-		t.Fatal("Should not return rows")
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err == nil {
-		t.Fatal("Should have raised error")
-	}
-	_, ok := err.(*Error)
-	if !ok {
-		t.Fatalf("expected Error, was: %#v", err)
-	}
+	defer txn.Rollback()
 
-	r, err = db.Query("SELECT 1 WHERE true = false") // returns no rows
+	_, err = txn.Exec("CREATE TEMPORARY TABLE foo(f1 int PRIMARY KEY)")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if r.Next() {
-		t.Fatal("unexpected row")
+	_, err = txn.Query("INSERT INTO foo VALUES (0), (0)")
+	if err == nil {
+		t.Fatal("Should have raised error")
+	}
+
+	e, ok := err.(*Error)
+	if !ok {
+		t.Fatalf("expected Error, got %#v", err)
+	} else if e.Code.Name() != "unique_violation" {
+		t.Fatalf("expected unique_violation, got %s (%+v)", e.Code.Name(), err)
 	}
 }
 
@@ -466,10 +490,19 @@ func TestErrorOnQueryRowSimpleQuery(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	sql := "DO $$BEGIN RAISE unique_violation USING MESSAGE='foo'; END; $$;"
-	r := db.QueryRow(sql)
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer txn.Rollback()
+
+	_, err = txn.Exec("CREATE TEMPORARY TABLE foo(f1 int PRIMARY KEY)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	var v int
-	err := r.Scan(&v)
+	err = txn.QueryRow("INSERT INTO foo VALUES (0), (0)").Scan(&v)
 	if err == nil {
 		t.Fatal("Should have raised error")
 	}
@@ -926,6 +959,10 @@ func TestRuntimeParameters(t *testing.T) {
 		{"client_encoding=UTF8", "client_encoding", "UTF8", ResultSuccess},
 		// test a runtime parameter not supported by libpq
 		{"work_mem='139kB'", "work_mem", "139kB", ResultSuccess},
+		// test fallback_application_name
+		{"application_name=foo fallback_application_name=bar", "application_name", "foo", ResultSuccess},
+		{"application_name='' fallback_application_name=bar", "application_name", "", ResultSuccess},
+		{"fallback_application_name=bar", "application_name", "bar", ResultSuccess},
 	}
 
 	for _, test := range tests {
@@ -934,6 +971,11 @@ func TestRuntimeParameters(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer db.Close()
+
+		// application_name didn't exist before 9.0
+		if test.param == "application_name" && getServerVersion(t, db) < 90000 {
+			continue
+		}
 
 		tryGetParameterValue := func() (value string, outcome RuntimeTestResult) {
 			defer func() {

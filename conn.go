@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -39,6 +40,16 @@ func init() {
 	sql.Register("postgres", &drv{})
 }
 
+type parameterStatus struct {
+	// server version in the same format as server_version_num, or 0 if
+	// unavailable
+	serverVersion int
+
+	// the current location based on the TimeZone value of the session, if
+	// available
+	currentLocation *time.Location
+}
+
 type transactionStatus byte
 
 const (
@@ -56,7 +67,7 @@ func (s transactionStatus) String() string {
 	case txnStatusInFailedTransaction:
 		return "in a failed transaction"
 	default:
-		errorf("unknown transactionStatus %v", s)
+		errorf("unknown transactionStatus %d", s)
 	}
 	panic("not reached")
 }
@@ -67,6 +78,8 @@ type conn struct {
 	namei     int
 	scratch   [512]byte
 	txnStatus transactionStatus
+
+	parameterStatus parameterStatus
 
 	saveMessageType   byte
 	saveMessageBuffer *readBuf
@@ -90,7 +103,9 @@ func Open(name string) (_ driver.Conn, err error) {
 	// * Explicitly passed connection information
 	o.Set("host", "localhost")
 	o.Set("port", "5432")
-	o.Set("extra_float_digits", "3")
+	// N.B.: Extra float digits should be set to 3, but that breaks
+	// Postgres 8.4 and older, where the max is 2.
+	o.Set("extra_float_digits", "2")
 	for k, v := range parseEnviron(os.Environ()) {
 		o.Set(k, v)
 	}
@@ -105,6 +120,14 @@ func Open(name string) (_ driver.Conn, err error) {
 	if err := parseOpts(name, o); err != nil {
 		return nil, err
 	}
+
+	// Use the "fallback" application name if necessary
+	if fallback := o.Get("fallback_application_name"); fallback != "" {
+		if !o.Isset("application_name") {
+			o.Set("application_name", fallback)
+		}
+	}
+	o.Unset("fallback_application_name")
 
 	// We can't work with any client_encoding other than UTF-8 currently.
 	// However, we have historically allowed the user to set it to UTF-8
@@ -170,6 +193,15 @@ func (vs values) Set(k, v string) {
 
 func (vs values) Get(k string) (v string) {
 	return vs[k]
+}
+
+func (vs values) Isset(k string) bool {
+	_, ok := vs[k]
+	return ok
+}
+
+func (vs values) Unset(k string) {
+	delete(vs, k)
 }
 
 // scanner implements a tokenizer for libpq-style option strings.
@@ -473,12 +505,21 @@ func (cn *conn) prepareToSimpleStmt(q, stmtName string) (_ *stmt, err error) {
 }
 
 func (cn *conn) Prepare(q string) (driver.Stmt, error) {
+	if len(q) >= 4 && strings.EqualFold(q[:4], "COPY") {
+		return cn.prepareCopyIn(q)
+	}
 	return cn.prepareTo(q, cn.gname())
 }
 
 func (cn *conn) Close() (err error) {
 	defer errRecover(&err)
-	cn.send(cn.writeBuf('X'))
+
+	// Don't go through send(); ListenerConn relies on us not scribbling on the
+	// scratch buffer of this connection.
+	_, err = cn.c.Write([]byte("X\x00\x00\x00\x04"))
+	if err != nil {
+		return err
+	}
 
 	return cn.c.Close()
 }
@@ -616,8 +657,10 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 		}
 
 		switch t {
-		case 'A', 'N', 'S':
+		case 'A', 'N':
 			// ignore
+		case 'S':
+			cn.processParameterStatus(r)
 		default:
 			return
 		}
@@ -718,7 +761,9 @@ func (cn *conn) startup(o values) {
 	for {
 		t, r := cn.recv()
 		switch t {
-		case 'K', 'S':
+		case 'K':
+		case 'S':
+			cn.processParameterStatus(r)
 		case 'R':
 			cn.auth(r, o)
 		case 'Z':
@@ -857,7 +902,7 @@ func (st *stmt) exec(v []driver.Value) {
 		if x == nil {
 			w.int32(-1)
 		} else {
-			b := encode(x, st.paramTyps[i])
+			b := encode(&st.cn.parameterStatus, x, st.paramTyps[i])
 			w.int32(len(b))
 			w.bytes(b)
 		}
@@ -1010,15 +1055,16 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 
 	defer errRecover(&err)
 
+	conn := rs.st.cn
 	for {
-		t, r := rs.st.cn.recv1()
+		t, r := conn.recv1()
 		switch t {
 		case 'E':
 			err = parseError(r)
 		case 'C':
 			continue
 		case 'Z':
-			rs.st.cn.processReadyForQuery(r)
+			conn.processReadyForQuery(r)
 			rs.done = true
 			if err != nil {
 				return err
@@ -1035,7 +1081,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 					dest[i] = nil
 					continue
 				}
-				dest[i] = decode(r.next(l), rs.st.rowTyps[i])
+				dest[i] = decode(&conn.parameterStatus, r.next(l), rs.st.rowTyps[i])
 			}
 			return
 		default:
@@ -1046,10 +1092,39 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 	panic("not reached")
 }
 
+func quoteIdentifier(name string) string {
+	return `"` + strings.Replace(name, `"`, `""`, -1) + `"`
+}
+
 func md5s(s string) string {
 	h := md5.New()
 	h.Write([]byte(s))
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func (c *conn) processParameterStatus(r *readBuf) {
+	var err error
+
+	param := r.string()
+	switch param {
+	case "server_version":
+		var major1 int
+		var major2 int
+		var minor int
+		_, err = fmt.Sscanf(r.string(), "%d.%d.%d", &major1, &major2, &minor)
+		if err == nil {
+			c.parameterStatus.serverVersion = major1*10000 + major2*100 + minor
+		}
+
+	case "TimeZone":
+		c.parameterStatus.currentLocation, err = time.LoadLocation(r.string())
+		if err != nil {
+			c.parameterStatus.currentLocation = nil
+		}
+
+	default:
+		// ignore
+	}
 }
 
 func (c *conn) processReadyForQuery(r *readBuf) {

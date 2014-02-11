@@ -1,6 +1,8 @@
 package pq
 
 import (
+	"github.com/lib/pq/oid"
+
 	"bytes"
 	"fmt"
 	"testing"
@@ -69,7 +71,7 @@ func tryParse(str string) (t time.Time, err error) {
 			return
 		}
 	}()
-	t = parseTs(str)
+	t = parseTs(nil, str)
 	return
 }
 
@@ -96,11 +98,6 @@ func TestTimestampWithTimeZone(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	_, err = tx.Exec("create temp table test (t timestamp with time zone)")
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// try several different locations, all included in Go's zoneinfo.zip
 	for _, locName := range []string{
 		"UTC",
@@ -118,10 +115,6 @@ func TestTimestampWithTimeZone(t *testing.T) {
 		// Postgres timestamps have a resolution of 1 microsecond, so don't
 		// use the full range of the Nanosecond argument
 		refTime := time.Date(2012, 11, 6, 10, 23, 42, 123456000, loc)
-		_, err = tx.Exec("insert into test(t) values($1)", refTime)
-		if err != nil {
-			t.Fatal(err)
-		}
 
 		for _, pgTimeZone := range []string{"US/Eastern", "Australia/Darwin"} {
 			// Switch Postgres's timezone to test different output timestamp formats
@@ -131,7 +124,7 @@ func TestTimestampWithTimeZone(t *testing.T) {
 			}
 
 			var gotTime time.Time
-			row := tx.QueryRow("select t from test")
+			row := tx.QueryRow("select $1::timestamp with time zone", refTime)
 			err = row.Scan(&gotTime)
 			if err != nil {
 				t.Fatal(err)
@@ -140,11 +133,17 @@ func TestTimestampWithTimeZone(t *testing.T) {
 			if !refTime.Equal(gotTime) {
 				t.Errorf("timestamps not equal: %s != %s", refTime, gotTime)
 			}
-		}
 
-		_, err = tx.Exec("delete from test")
-		if err != nil {
-			t.Fatal(err)
+			// check that the time zone is set correctly based on TimeZone
+			pgLoc, err := time.LoadLocation(pgTimeZone)
+			if err != nil {
+				t.Logf("Could not load time zone %s - skipping", pgLoc)
+				continue
+			}
+			translated := refTime.In(pgLoc)
+			if translated.String() != gotTime.String() {
+				t.Errorf("timestamps not equal: %s != %s", translated, gotTime)
+			}
 		}
 	}
 }
@@ -205,7 +204,7 @@ func TestStringWithNul(t *testing.T) {
 	}
 }
 
-func TestByteToText(t *testing.T) {
+func TestByteaToText(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
@@ -223,9 +222,48 @@ func TestByteToText(t *testing.T) {
 	}
 }
 
+func TestTextToBytea(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	b := "hello world"
+	row := db.QueryRow("SELECT $1::bytea", b)
+
+	var result []byte
+	err := row.Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(result, []byte(b)){
+		t.Fatalf("expected %v but got %v", b, result)
+	}
+}
+
+
+func TestByteaOutputFormatEncoding(t *testing.T) {
+	input := []byte("\\x\x00\x01\x02\xFF\xFEabcdefg0123")
+	want := []byte("\\x5c78000102fffe6162636465666730313233")
+	got := encode(&parameterStatus{serverVersion: 90000}, input, oid.T_bytea)
+	if !bytes.Equal(want, got) {
+		t.Errorf("invalid hex bytea output, got %v but expected %v", got, want)
+	}
+
+	want = []byte("\\\\x\\000\\001\\002\\377\\376abcdefg0123")
+	got = encode(&parameterStatus{serverVersion: 84000}, input, oid.T_bytea)
+	if !bytes.Equal(want, got) {
+		t.Errorf("invalid escape bytea output, got %v but expected %v", got, want)
+	}
+}
+
 func TestByteaOutputFormats(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
+
+	if getServerVersion(t, db) < 90000 {
+		// skip
+		return
+	}
 
 	testByteaOutputFormat := func(f string) {
 		expectedData := []byte("\x5c\x78\x00\xff\x61\x62\x63\x01\x08")
@@ -270,4 +308,70 @@ func TestByteaOutputFormats(t *testing.T) {
 
 	testByteaOutputFormat("hex")
 	testByteaOutputFormat("escape")
+}
+
+func TestAppendEncodedText(t *testing.T) {
+	var buf []byte
+
+	buf = appendEncodedText(&parameterStatus{serverVersion:90000}, buf, int64(10))
+	buf = append(buf, '\t')
+	buf = appendEncodedText(&parameterStatus{serverVersion:90000}, buf, float32(42.0000000001))
+	buf = append(buf, '\t')
+	buf = appendEncodedText(&parameterStatus{serverVersion:90000}, buf, 42.0000000001)
+	buf = append(buf, '\t')
+	buf = appendEncodedText(&parameterStatus{serverVersion:90000}, buf, "hello\tworld")
+	buf = append(buf, '\t')
+	buf = appendEncodedText(&parameterStatus{serverVersion:90000}, buf, []byte{0, 128, 255})
+
+	if string(buf) != "10\t42\t42.0000000001\thello\\tworld\t\\\\x0080ff" {
+		t.Fatal(string(buf))
+	}
+}
+
+func TestAppendEscapedText(t *testing.T) {
+	if esc := appendEscapedText(nil, "hallo\tescape"); string(esc) != "hallo\\tescape" {
+		t.Fatal(string(esc))
+	}
+	if esc := appendEscapedText(nil, "hallo\\tescape\n"); string(esc) != "hallo\\\\tescape\\n" {
+		t.Fatal(string(esc))
+	}
+	if esc := appendEscapedText(nil, "\n\r\t\f"); string(esc) != "\\n\\r\\t\f" {
+		t.Fatal(string(esc))
+	}
+}
+
+func TestAppendEscapedTextExistingBuffer(t *testing.T) {
+	var buf []byte
+	buf = []byte("123\t")
+	if esc := appendEscapedText(buf, "hallo\tescape"); string(esc) != "123\thallo\\tescape" {
+		t.Fatal(string(esc))
+	}
+	buf = []byte("123\t")
+	if esc := appendEscapedText(buf, "hallo\\tescape\n"); string(esc) != "123\thallo\\\\tescape\\n" {
+		t.Fatal(string(esc))
+	}
+	buf = []byte("123\t")
+	if esc := appendEscapedText(buf, "\n\r\t\f"); string(esc) != "123\t\\n\\r\\t\f" {
+		t.Fatal(string(esc))
+	}
+}
+
+func BenchmarkAppendEscapedText(b *testing.B) {
+	longString := ""
+	for i := 0; i < 100; i++ {
+		longString += "123456789\n"
+	}
+	for i := 0; i < b.N; i++ {
+		appendEscapedText(nil, longString)
+	}
+}
+
+func BenchmarkAppendEscapedTextNoEscape(b *testing.B) {
+	longString := ""
+	for i := 0; i < 100; i++ {
+		longString += "1234567890"
+	}
+	for i := 0; i < b.N; i++ {
+		appendEscapedText(nil, longString)
+	}
 }
