@@ -682,6 +682,26 @@ func (cn *conn) ssl(o values) {
 		errorf(`unsupported sslmode %q; only "require" (default), "verify-full", and "disable" supported`, mode)
 	}
 
+	cn.setupSSLCertKey(&tlsConf, o)
+
+	w := cn.writeBuf(0)
+	w.int32(80877103)
+	cn.send(w)
+
+	b := cn.scratch[:1]
+	_, err := io.ReadFull(cn.c, b)
+	if err != nil {
+		panic(err)
+	}
+
+	if b[0] != 'S' {
+		panic(ErrSSLNotSupported)
+	}
+
+	cn.c = tls.Client(cn.c, &tlsConf)
+}
+
+func (cn *conn) setupSSLCertKey(tlsConf *tls.Config, o values) {
 	sslkey := o.Get("sslkey")
 	sslcert := o.Get("sslcert")
 
@@ -717,22 +737,6 @@ func (cn *conn) ssl(o values) {
 			panic(ErrSSLKeyHasWorldPermissions)
 		}
 	}
-
-	w := cn.writeBuf(0)
-	w.int32(80877103)
-	cn.send(w)
-
-	b := cn.scratch[:1]
-	_, err := io.ReadFull(cn.c, b)
-	if err != nil {
-		panic(err)
-	}
-
-	if b[0] != 'S' {
-		panic(ErrSSLNotSupported)
-	}
-
-	cn.c = tls.Client(cn.c, &tlsConf)
 }
 
 func (cn *conn) startup(o values) {
