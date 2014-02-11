@@ -23,10 +23,10 @@ import (
 
 // Common error types
 var (
-	ErrSSLNotSupported        = errors.New("pq: SSL is not enabled on the server")
-	ErrNotSupported           = errors.New("pq: Unsupported command")
-	ErrInFailedTransaction    = errors.New("pq: Could not complete operation in a failed transaction")
-	ErrKeyHasWorldPermissions = errors.New("private key file has group or world access. Permissions should be u=rw (0600) or less.")
+	ErrNotSupported              = errors.New("pq: Unsupported command")
+	ErrInFailedTransaction       = errors.New("pq: Could not complete operation in a failed transaction")
+	ErrSSLNotSupported           = errors.New("pq: SSL is not enabled on the server")
+	ErrSSLKeyHasWorldPermissions = errors.New("pq: private key file has group or world access. Permissions should be u=rw (0600) or less.")
 )
 
 type drv struct{}
@@ -658,11 +658,11 @@ func (cn *conn) ssl(o values) {
 		sslcert = filepath.Join(user.HomeDir, ".postgresql", "postgresql.crt")
 	}
 
-	_, cerr := os.Stat(sslkey)
 	kstat, kerr := os.Stat(sslcert)
+	kmode := kstat.Mode()
 
-	if cerr == nil && kerr == nil {
-		if kstat.Mode() == kstat.Mode()&0600 {
+	if kerr == nil {
+		if kmode == kmode&0600 {
 			cert, err := tls.LoadX509KeyPair(sslcert, sslkey)
 			if err != nil {
 				panic(err)
