@@ -712,7 +712,7 @@ func (cn *conn) ssl(o values) {
 			}
 			tlsConf.Certificates = []tls.Certificate{cert}
 		} else {
-			panic(ErrKeyHasWorldPermissions)
+			panic(ErrSSLKeyHasWorldPermissions)
 		}
 	}
 
