@@ -696,15 +696,17 @@ func (cn *conn) ssl(o values) {
 		}
 	} else {
 		// Automatically load certificates from ~/.postgresql
-		user, _ := user.Current()
-		sslkey = filepath.Join(user.HomeDir, ".postgresql", "postgresql.key")
-		sslcert = filepath.Join(user.HomeDir, ".postgresql", "postgresql.crt")
+		user, err := user.Current()
+		if err == nil {
+			sslkey = filepath.Join(user.HomeDir, ".postgresql", "postgresql.key")
+			sslcert = filepath.Join(user.HomeDir, ".postgresql", "postgresql.crt")
+		}
 	}
 
-	kstat, kerr := os.Stat(sslcert)
-	kmode := kstat.Mode()
+	kstat, kerr := os.Stat(sslkey)
 
 	if kerr == nil {
+		kmode := kstat.Mode()
 		if kmode == kmode&0600 {
 			cert, err := tls.LoadX509KeyPair(sslcert, sslkey)
 			if err != nil {

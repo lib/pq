@@ -36,3 +36,6 @@ script:
 
 before_script:
  - psql -c 'create database pqgotest;' -U postgres
+
+
+
