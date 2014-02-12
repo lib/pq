@@ -339,8 +339,8 @@ func (l *ListenerConn) Err() error {
 
 var errListenerClosed = errors.New("pq: Listener has been closed")
 
-var ErrChannelAlreadyOpen = errors.New("channel is already open")
-var ErrChannelNotOpen = errors.New("channel is not open")
+var ErrChannelAlreadyOpen = errors.New("pq: channel is already open")
+var ErrChannelNotOpen = errors.New("pq: channel is not open")
 
 type ListenerEventType int
 

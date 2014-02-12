@@ -8,10 +8,10 @@ import (
 )
 
 var (
-	errCopyInClosed               = errors.New("copyin statement has already been closed")
-	errBinaryCopyNotSupported     = errors.New("only text format supported for COPY")
-	errCopyToNotSupported         = errors.New("COPY TO is not supported")
-	errCopyNotSupportedOutsideTxn = errors.New("COPY is only allowed inside a transaction")
+	errCopyInClosed               = errors.New("pq: copyin statement has already been closed")
+	errBinaryCopyNotSupported     = errors.New("pq: only text format supported for COPY")
+	errCopyToNotSupported         = errors.New("pq: COPY TO is not supported")
+	errCopyNotSupportedOutsideTxn = errors.New("pq: COPY is only allowed inside a transaction")
 )
 
 // CopyIn creates a COPY FROM statement which can be prepared with
