@@ -17,12 +17,12 @@ var (
 // CopyIn creates a COPY FROM statement which can be prepared with
 // Tx.Prepare().  The target table should be visible in search_path.
 func CopyIn(table string, columns ...string) string {
-	stmt := "COPY " + quoteIdentifier(table) + " ("
+	stmt := "COPY " + QuoteIdentifier(table) + " ("
 	for i, col := range columns {
 		if i != 0 {
 			stmt += ", "
 		}
-		stmt += quoteIdentifier(col)
+		stmt += QuoteIdentifier(col)
 	}
 	stmt += ") FROM STDIN"
 	return stmt
@@ -31,12 +31,12 @@ func CopyIn(table string, columns ...string) string {
 // CopyInSchema creates a COPY FROM statement which can be prepared with
 // Tx.Prepare().
 func CopyInSchema(schema, table string, columns ...string) string {
-	stmt := "COPY " + quoteIdentifier(schema) + "." + quoteIdentifier(table) + " ("
+	stmt := "COPY " + QuoteIdentifier(schema) + "." + QuoteIdentifier(table) + " ("
 	for i, col := range columns {
 		if i != 0 {
 			stmt += ", "
 		}
-		stmt += quoteIdentifier(col)
+		stmt += QuoteIdentifier(col)
 	}
 	stmt += ") FROM STDIN"
 	return stmt

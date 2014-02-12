@@ -1054,7 +1054,16 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 	panic("not reached")
 }
 
-func quoteIdentifier(name string) string {
+// QuoteIdentifier quotes an "identifier" (e.g. a table or a column name) to be
+// used as part of an SQL statement.  For example:
+//
+//    tblname := "my_table"
+//    data := "my_data"
+//    err = db.Exec(fmt.Sprintf("INSERT INTO %s VALUES ($1)", pq.QuoteIdentifier(tblname)), data)
+//
+// Any double quotes in name will be escaped.  The quoted identifier will be
+// case sensitive when used in a query.
+func QuoteIdentifier(name string) string {
 	return `"` + strings.Replace(name, `"`, `""`, -1) + `"`;
 }
 
