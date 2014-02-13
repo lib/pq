@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/md5"
 	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/binary"
@@ -11,6 +12,7 @@ import (
 	"fmt"
 	"github.com/lib/pq/oid"
 	"io"
+	"io/ioutil"
 	"net"
 	"os"
 	"os/user"
@@ -737,6 +739,22 @@ func (cn *conn) setupSSLCertKey(tlsConf *tls.Config, o values) {
 			panic(ErrSSLKeyHasWorldPermissions)
 		}
 	}
+
+	if o.Get("sslrootcert") != "" {
+		tlsConf.RootCAs = x509.NewCertPool()
+
+		cert, err := ioutil.ReadFile(o.Get("sslrootcert"))
+
+		if err != nil {
+			panic(err)
+		}
+
+		ok := tlsConf.RootCAs.AppendCertsFromPEM(cert)
+
+		if !ok {
+			errorf("couldn't parse pem in sslrootcert")
+		}
+	}
 }
 
 func (cn *conn) startup(o values) {
@@ -750,7 +768,8 @@ func (cn *conn) startup(o values) {
 		// skip options which can't be run-time parameters
 		if k == "password" || k == "host" ||
 			k == "port" || k == "sslmode" ||
-			k == "sslcert" || k == "sslkey" {
+			k == "sslcert" || k == "sslkey" ||
+			k == "sslrootcert" {
 			continue
 		}
 		// The protocol requires us to supply the database name as "database"
@@ -1202,7 +1221,9 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("sslcert")
 		case "PGSSLKEY":
 			accrue("sslkey")
-		case "PGREQUIRESSL", "PGSSLROOTCERT", "PGSSLCRL":
+		case "PGSSLROOTCERT":
+			accrue("sslrootcert")
+		case "PGREQUIRESSL", "PGSSLCRL":
 			unsupported()
 		case "PGREQUIREPEER":
 			unsupported()
