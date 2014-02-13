@@ -1062,9 +1062,14 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 //    err = db.Exec(fmt.Sprintf("INSERT INTO %s VALUES ($1)", pq.QuoteIdentifier(tblname)), data)
 //
 // Any double quotes in name will be escaped.  The quoted identifier will be
-// case sensitive when used in a query.
+// case sensitive when used in a query.  If the input string contains a zero
+// byte, the result will be truncated immediately before it.
 func QuoteIdentifier(name string) string {
-	return `"` + strings.Replace(name, `"`, `""`, -1) + `"`;
+	end := strings.IndexByte(name, '\x00')
+	if end > -1 {
+		name = name[:end]
+	}
+	return `"` + strings.Replace(name, `"`, `""`, -1) + `"`
 }
 
 func md5s(s string) string {

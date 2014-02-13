@@ -1032,3 +1032,23 @@ func TestIsUTF8(t *testing.T) {
 		}
 	}
 }
+
+func TestQuoteIdentifier(t *testing.T) {
+	var cases = []struct {
+		input string
+		want string
+	}{
+		{`foo`, `"foo"`},
+		{`foo bar baz`, `"foo bar baz"`},
+		{`foo"bar`, `"foo""bar"`},
+		{"foo\x00bar", `"foo"`},
+		{"\x00foo", `""`},
+	}
+
+	for _, test := range cases {
+		got := QuoteIdentifier(test.input)
+		if got != test.want {
+			t.Errorf("QuoteIdentifier(%q) = %v want %v", test.input, got, test.want)
+		}
+	}
+}
