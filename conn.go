@@ -1065,7 +1065,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 // case sensitive when used in a query.  If the input string contains a zero
 // byte, the result will be truncated immediately before it.
 func QuoteIdentifier(name string) string {
-	end := strings.IndexByte(name, '\x00')
+	end := strings.IndexRune(name, 0)
 	if end > -1 {
 		name = name[:end]
 	}
