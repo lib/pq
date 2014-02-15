@@ -365,6 +365,20 @@ const (
 	ListenerEventConnectionAttemptFailed
 )
 
+// Returns a human-readable version of ListenerEventType combined with the
+// reason in err.
+func (ev ListenerEventType) FormatError(err error) string {
+	switch ev {
+	case ListenerEventDisconnected:
+		return fmt.Sprintf("Listener: lost connection to the database: %s", err.Error())
+	case ListenerEventConnectionAttemptFailed:
+		return fmt.Sprintf("Listener: could not connect to the database: %s", err.Error())
+	default:
+		return ""
+	}
+	panic("not reached")
+}
+
 type EventCallbackType func(event ListenerEventType, err error)
 
 // Listener provides an interface for listening to notifications from a
