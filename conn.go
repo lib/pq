@@ -159,7 +159,7 @@ func Open(name string) (_ driver.Conn, err error) {
 		}
 	}
 
-	c, err := net.Dial(network(o))
+	c, err := dial(o)
 	if err != nil {
 		return nil, err
 	}
@@ -169,6 +169,25 @@ func Open(name string) (_ driver.Conn, err error) {
 	cn.buf = bufio.NewReader(cn.c)
 	cn.startup(o)
 	return cn, nil
+}
+
+func dial(o values) (net.Conn, error) {
+	ntw, addr := network(o)
+
+	timeout := o.Get("connect_timeout")
+	// Ensure the option will not be sent.
+	o.Unset("connect_timeout")
+
+	// Zero or not specified means wait indefinitely.
+	if timeout != "" && timeout != "0" {
+		seconds, err := strconv.ParseInt(timeout, 10, 0)
+		if err != nil {
+			return nil, err
+		}
+		duration := time.Duration(seconds) * time.Second
+		return net.DialTimeout(ntw, addr, duration)
+	}
+	return net.Dial(ntw, addr)
 }
 
 func network(o values) (string, string) {
@@ -1176,7 +1195,7 @@ func parseEnviron(env []string) (out map[string]string) {
 		case "PGKRBSRVNAME", "PGGSSLIB":
 			unsupported()
 		case "PGCONNECT_TIMEOUT":
-			unsupported()
+			accrue("connect_timeout")
 		case "PGCLIENTENCODING":
 			accrue("client_encoding")
 		case "PGDATESTYLE":
