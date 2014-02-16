@@ -16,8 +16,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"unicode"
 	"time"
+	"unicode"
 )
 
 // Common error types
@@ -673,12 +673,12 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 		}
 
 		switch t {
-			case 'A', 'N':
-				// ignore
-			case 'S':
-				cn.processParameterStatus(r)
-			default:
-				return
+		case 'A', 'N':
+			// ignore
+		case 'S':
+			cn.processParameterStatus(r)
+		default:
+			return
 		}
 	}
 
@@ -1102,26 +1102,25 @@ func (c *conn) processParameterStatus(r *readBuf) {
 
 	param := r.string()
 	switch param {
-		case "server_version":
-			var major1 int
-			var major2 int
-			var minor int
-			_, err = fmt.Sscanf(r.string(), "%d.%d.%d", &major1, &major2, &minor)
-			if err == nil {
-				c.parameterStatus.serverVersion = major1 * 10000 + major2 * 100 + minor
-			}
+	case "server_version":
+		var major1 int
+		var major2 int
+		var minor int
+		_, err = fmt.Sscanf(r.string(), "%d.%d.%d", &major1, &major2, &minor)
+		if err == nil {
+			c.parameterStatus.serverVersion = major1*10000 + major2*100 + minor
+		}
 
-		case "TimeZone":
-			c.parameterStatus.currentLocation, err = time.LoadLocation(r.string())
-			if err != nil {
-				c.parameterStatus.currentLocation = nil
-			}
+	case "TimeZone":
+		c.parameterStatus.currentLocation, err = time.LoadLocation(r.string())
+		if err != nil {
+			c.parameterStatus.currentLocation = nil
+		}
 
-		default:
-			// ignore
+	default:
+		// ignore
 	}
 }
-
 
 func (c *conn) processReadyForQuery(r *readBuf) {
 	c.txnStatus = transactionStatus(r.byte())
