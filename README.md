@@ -83,4 +83,5 @@ code still exists in here.
 * Paul Hammond (paulhammond)
 * Ryan Smith (ryandotsmith)
 * Samuel Stauffer (samuel)
+* Timothée Peignier (cyberdelia)
 * notedit (notedit)
