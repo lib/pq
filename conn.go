@@ -532,7 +532,7 @@ func (cn *conn) Close() (err error) {
 
 	// Don't go through send(); ListenerConn relies on us not scribbling on the
 	// scratch buffer of this connection.
-	_, err = cn.c.Write([]byte("X\x00\x00\x00\x04"))
+	err = cn.sendSimpleMessage('X')
 	if err != nil {
 		return err
 	}
@@ -600,6 +600,14 @@ func (cn *conn) send(m *writeBuf) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+// Send a message of type typ to the server on the other end of cn.  The
+// message should have no payload.  This method does not use the scratch
+// buffer.
+func (cn *conn) sendSimpleMessage(typ byte) (err error) {
+	_, err = cn.c.Write([]byte{typ, '\x00', '\x00', '\x00', '\x04'})
+	return err
 }
 
 // recvMessage receives any message from the backend, or returns an error if
