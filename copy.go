@@ -225,7 +225,11 @@ func (ci *copyin) Close() (err error) {
 	if len(ci.buffer) > 0 {
 		ci.flush(ci.buffer)
 	}
-	ci.cn.send(ci.cn.writeBuf('c'))
+	// Avoid touching the scratch buffer as resploop could be using it.
+	err = ci.cn.sendSimpleMessage('c')
+	if err != nil {
+		return err
+	}
 
 	<-ci.done
 
