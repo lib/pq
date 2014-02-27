@@ -196,7 +196,8 @@ func dial(o values) (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		conn.SetDeadline(deadline)
+		err = conn.SetDeadline(deadline)
+		return conn, err
 	}
 	return net.Dial(ntw, addr)
 }
