@@ -168,6 +168,8 @@ func Open(name string) (_ driver.Conn, err error) {
 	cn.ssl(o)
 	cn.buf = bufio.NewReader(cn.c)
 	cn.startup(o)
+	// reset the deadline, in case one was set (see dial)
+	cn.c.SetDeadline(time.Time{})
 	return cn, nil
 }
 
@@ -185,7 +187,15 @@ func dial(o values) (net.Conn, error) {
 			return nil, fmt.Errorf("invalid value for parameter connect_timeout: %s", err)
 		}
 		duration := time.Duration(seconds) * time.Second
-		return net.DialTimeout(ntw, addr, duration)
+		// connect_timeout should apply to the entire connection establishment
+		// procedure, so set a timeout as well.  After startup() is done, it
+		// will be reset.
+		deadline := time.Now().Add(duration)
+		conn, err := net.DialTimeout(ntw, addr, duration)
+		if err != nil {
+			return nil, err
+		}
+		conn.SetDeadline(deadline)
 	}
 	return net.Dial(ntw, addr)
 }
