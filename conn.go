@@ -188,8 +188,9 @@ func dial(o values) (net.Conn, error) {
 		}
 		duration := time.Duration(seconds) * time.Second
 		// connect_timeout should apply to the entire connection establishment
-		// procedure, so set a timeout as well.  After startup() is done, it
-		// will be reset.
+		// procedure, so we both use a timeout for the TCP connection
+		// establishment and set a deadline for doing the initial handshake.
+		// The deadline is then reset after startup() is done.
 		deadline := time.Now().Add(duration)
 		conn, err := net.DialTimeout(ntw, addr, duration)
 		if err != nil {
