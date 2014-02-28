@@ -12,7 +12,7 @@ import (
 // test should be minimized and renamed and/or incorporated into
 // another test.
 func TestNo148(t *testing.T) {
-	fmt.Println("Skipping failing test: see https://github.com/adeven/pq/issues/148")
+	fmt.Println("Skipping failing test: see https://github.com/adjust/pq/issues/148")
 	return
 
 	db := openTestConn(t)

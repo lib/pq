@@ -4,7 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/hex"
 	"fmt"
-	"github.com/adeven/pq/oid"
+	"github.com/adjust/pq/oid"
 	"math"
 	"strconv"
 	"strings"

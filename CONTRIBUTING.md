@@ -18,7 +18,7 @@ We appreciate any bug reports, but especially ones with self-contained
 further) test cases. It's especially helpful if you can submit a pull
 request with just the failing test case (you'll probably want to
 pattern it after the tests in
-[conn_test.go](https://github.com/adeven/pq/blob/master/conn_test.go).
+[conn_test.go](https://github.com/adjust/pq/blob/master/conn_test.go).
 
 ### New functionality
 

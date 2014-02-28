@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"database/sql"
 	"database/sql/driver"
-	"github.com/adeven/pq/oid"
+	"github.com/adjust/pq/oid"
 	"io"
 	"net"
 	"strconv"

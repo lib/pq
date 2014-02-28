@@ -3,7 +3,7 @@ package pq
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/adeven/pq/oid"
+	"github.com/adjust/pq/oid"
 )
 
 type readBuf []byte
