@@ -1045,7 +1045,7 @@ func TestIsUTF8(t *testing.T) {
 func TestQuoteIdentifier(t *testing.T) {
 	var cases = []struct {
 		input string
-		want string
+		want  string
 	}{
 		{`foo`, `"foo"`},
 		{`foo bar baz`, `"foo bar baz"`},

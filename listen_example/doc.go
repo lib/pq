@@ -16,10 +16,10 @@ mechanism to avoid polling the database while waiting for more work to arrive.
     // ;
 
     package main
-    
+
     import (
         "github.com/lib/pq"
-    
+
         "database/sql"
         "fmt"
         "time"
@@ -28,7 +28,7 @@ mechanism to avoid polling the database while waiting for more work to arrive.
     func doWork(db *sql.DB, work int64) {
         // work here
     }
-    
+
     func getWork(db *sql.DB) {
         for {
             // get work from the database here
@@ -44,12 +44,12 @@ mechanism to avoid polling the database while waiting for more work to arrive.
                 fmt.Println("ran out of work")
                 return
             }
-    
+
             fmt.Println("starting work on ", work.Int64)
             go doWork(db, work.Int64)
         }
     }
-    
+
     func waitForNotification(l *pq.Listener) {
         for {
             select {
@@ -68,15 +68,15 @@ mechanism to avoid polling the database while waiting for more work to arrive.
             }
         }
     }
-    
+
     func main() {
         var conninfo string = ""
-    
+
         db, err := sql.Open("postgres", conninfo)
         if err != nil {
             panic(err)
         }
-    
+
         reportProblem := func(ev pq.ListenerEventType, err error) {
             if err != nil {
                 fmt.Println(err.Error())

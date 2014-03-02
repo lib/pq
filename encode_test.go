@@ -235,11 +235,10 @@ func TestTextToBytea(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !bytes.Equal(result, []byte(b)){
+	if !bytes.Equal(result, []byte(b)) {
 		t.Fatalf("expected %v but got %v", b, result)
 	}
 }
-
 
 func TestByteaOutputFormatEncoding(t *testing.T) {
 	input := []byte("\\x\x00\x01\x02\xFF\xFEabcdefg0123")
@@ -313,15 +312,15 @@ func TestByteaOutputFormats(t *testing.T) {
 func TestAppendEncodedText(t *testing.T) {
 	var buf []byte
 
-	buf = appendEncodedText(&parameterStatus{serverVersion:90000}, buf, int64(10))
+	buf = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, int64(10))
 	buf = append(buf, '\t')
-	buf = appendEncodedText(&parameterStatus{serverVersion:90000}, buf, float32(42.0000000001))
+	buf = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, float32(42.0000000001))
 	buf = append(buf, '\t')
-	buf = appendEncodedText(&parameterStatus{serverVersion:90000}, buf, 42.0000000001)
+	buf = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, 42.0000000001)
 	buf = append(buf, '\t')
-	buf = appendEncodedText(&parameterStatus{serverVersion:90000}, buf, "hello\tworld")
+	buf = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, "hello\tworld")
 	buf = append(buf, '\t')
-	buf = appendEncodedText(&parameterStatus{serverVersion:90000}, buf, []byte{0, 128, 255})
+	buf = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, []byte{0, 128, 255})
 
 	if string(buf) != "10\t42\t42.0000000001\thello\\tworld\t\\\\x0080ff" {
 		t.Fatal(string(buf))
