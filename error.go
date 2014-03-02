@@ -61,7 +61,7 @@ type ErrorClass string
 // condition name of the "standard" error code (i.e. the one having the last
 // three characters "000").
 func (ec ErrorClass) Name() string {
-	return errorCodeNames[ErrorCode(ec + "000")]
+	return errorCodeNames[ErrorCode(ec+"000")]
 }
 
 // Class returns the error class, e.g. "28".
