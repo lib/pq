@@ -396,7 +396,9 @@ func TestNoData(t *testing.T) {
 func TestError(t *testing.T) {
 	// Don't use the normal connection setup, this is intended to
 	// blow up in the startup packet from a non-existent user.
-	db, err := openTestConnConninfo("user=thisuserreallydoesntexist")
+	// this also serves to test a bad password
+	bad_user := "thisuserreallydoesntexist"
+	db, err := openTestConnConninfo("user=" + bad_user)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,8 +409,8 @@ func TestError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 
-	if err != driver.ErrBadConn {
-		t.Fatalf("expected driver.ErrBadConn, got: %v", err)
+	if err.Error() != fmt.Sprintf("pq: password authentication failed for user \"%s\"", bad_user) {
+		t.Fatalf("expected authentication failed, got: %v", err)
 	}
 }
 

@@ -785,7 +785,14 @@ func (cn *conn) auth(r *readBuf, o values) {
 		w.string(o.Get("password"))
 		cn.send(w)
 
-		t, r := cn.recv()
+		t, r, err := cn.recvMessage()
+		if err != nil {
+			panic(err)
+		}
+		if t == 'E' {
+			// auth error
+			errorf(parseError(r).Message)
+		}
 		if t != 'R' {
 			errorf("unexpected password response: %q", t)
 		}
@@ -799,7 +806,14 @@ func (cn *conn) auth(r *readBuf, o values) {
 		w.string("md5" + md5s(md5s(o.Get("password")+o.Get("user"))+s))
 		cn.send(w)
 
-		t, r := cn.recv()
+		t, r, err := cn.recvMessage()
+		if err != nil {
+			panic(err)
+		}
+		if t == 'E' {
+			// auth error
+			errorf(parseError(r).Message)
+		}
 		if t != 'R' {
 			errorf("unexpected password response: %q", t)
 		}
