@@ -169,8 +169,8 @@ func Open(name string) (_ driver.Conn, err error) {
 	cn.buf = bufio.NewReader(cn.c)
 	cn.startup(o)
 	// reset the deadline, in case one was set (see dial)
-	cn.c.SetDeadline(time.Time{})
-	return cn, nil
+	err = cn.c.SetDeadline(time.Time{})
+	return cn, err
 }
 
 func dial(o values) (net.Conn, error) {
