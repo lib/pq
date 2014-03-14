@@ -35,10 +35,13 @@ func TestHstore(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	// quitely create hstore if it doesn't exist
-	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS hstore")
-	if err != nil {
-		t.Log("Skipping hstore tests - hstore extension create failed. " + err.Error())
+	// ** IMPORTANT **
+	// test whether the superuser has setup hstore
+	// we want tests to run as unprivileged user
+	var i int
+	err := db.QueryRow("select count(*) from pg_extension where extname='hstore'").Scan(&i)
+	if i != 1 {
+		t.Skip("Skipping hstore tests - hstore extension not installed in this database")
 		return
 	}
 
