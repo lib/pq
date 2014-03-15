@@ -120,8 +120,8 @@ func (s *NotifySemaphore) removeChannel(channel string, ch chan<- *pq.Notificati
 // channel is in progress.  However, it is safe to Listen on a channel which
 // was previously Unlistened by a different goroutine.
 //
-// If the channel is already active, ErrChannelAlreadyOpen is returned.  If the
-// NotifySemaphore has been closed, an error is returned.
+// If the channel is already active, pq.ErrChannelAlreadyOpen is returned.  If
+// the NotifySemaphore has been closed, an error is returned.
 func (s *NotifySemaphore) Listen(channel string) (<-chan *pq.Notification, error) {
 	s.lock.Lock()
 
@@ -156,7 +156,7 @@ func (s *NotifySemaphore) Listen(channel string) (<-chan *pq.Notification, error
 // goroutine is waiting on the semaphore channel.  The channel will be closed
 // gracefully.
 //
-// Returns ErrChannelNotOpen if the channel is not currently active, or an
+// Returns pq.ErrChannelNotOpen if the channel is not currently active, or an
 // error if the NotifySemaphore has been closed.
 func (s *NotifySemaphore) Unlisten(channel string) error {
 	s.lock.Lock()
@@ -184,14 +184,19 @@ func (s *NotifySemaphore) Unlisten(channel string) error {
 	return nil
 }
 
+// Calls Ping() on the underlying Listener.
 func (s *NotifySemaphore) Ping() error {
 	return s.listener.Ping()
 }
 
+// Controls the amount of time the connection is allowed to stay idle before
+// the server is pinged via Listener.Ping().
 func (s *NotifySemaphore) SetPingInterval(interval time.Duration) {
 	s.newPingIntervalChannel <- interval
 }
 
+// Sets whether the a nil *pq.Notification should be sent automatically when
+// the server is pinged after inactivity.
 func (s *NotifySemaphore) SetBroadcastOnPingTimeout(broadcastOnPingTimeout bool) {
 	s.lock.Lock()
 	s.broadcastOnPingTimeout = broadcastOnPingTimeout
@@ -203,6 +208,8 @@ func (s *NotifySemaphore) pingTimeout() {
 		s.listener.Ping()
 	}()
 
+	// Grabbing the lock here is a bit wasteful, but ping timeouts are expected
+	// to be quite rare anyway.
 	s.lock.Lock()
 	if s.broadcastOnPingTimeout {
 		s.broadcast()
@@ -236,7 +243,7 @@ func (s *NotifySemaphore) broadcast() {
 	}
 }
 
-// Send notication on a channel.  Caller must be holding s.lock.
+// Sends a notification on a channel.  Caller must be holding s.lock.
 func (s *NotifySemaphore) notify(channel string, n *pq.Notification) {
 	ch, ok := s.channels[channel]
 	if !ok {
