@@ -246,7 +246,7 @@ func (s *NotifySemaphore) notify(channel string, n *pq.Notification) {
 		case ch <- n:
 
 		default:
-			// There's already a notification waiting in the channel, we can
+			// There's already a notification waiting in the channel; we can
 			// ignore this one.
 	}
 }
