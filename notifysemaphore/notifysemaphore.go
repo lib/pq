@@ -216,6 +216,7 @@ func (s *NotifySemaphore) pingTimeout() {
 func (s *NotifySemaphore) Close() error {
 	s.lock.Lock()
 	if s.closed {
+		s.lock.Unlock()
 		return errClosed
 	}
 	s.closed = true
