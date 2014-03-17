@@ -232,7 +232,7 @@ func (s *NotifySemaphore) Close() error {
 
 	// wait for all channels to be closed
 	s.closeWaitGroup.Wait()
-	return nil
+	return s.listener.Close()
 }
 
 // Broadcast a nil *Notification to all listeners.  Caller must be holding
