@@ -35,7 +35,7 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 	case bool:
 		return []byte(fmt.Sprintf("%t", v))
 	case time.Time:
-		return []byte(v.Format(time.RFC3339Nano))
+		return []byte(v.UTC().Format(time.RFC3339Nano))
 	default:
 		errorf("encode: unknown type for %T", v)
 	}
@@ -96,7 +96,7 @@ func appendEncodedText(parameterStatus *parameterStatus, buf []byte, x interface
 	case bool:
 		return strconv.AppendBool(buf, v)
 	case time.Time:
-		return append(buf, v.Format(time.RFC3339Nano)...)
+		return append(buf, v.UTC().Format(time.RFC3339Nano)...)
 	case nil:
 		return append(buf, "\\N"...)
 	default:
