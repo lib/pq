@@ -61,6 +61,8 @@ An example of the intended usage pattern:
  */
 package notifysemaphore
 
+// +build go1.1
+
 import (
 	"github.com/lib/pq"
 	"errors"
