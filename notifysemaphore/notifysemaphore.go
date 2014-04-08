@@ -1,3 +1,5 @@
+// +build go1.1
+
 /*
 
 NotifySemaphore is a utility type for consumers using LISTEN / NOTIFY to avoid
@@ -59,8 +61,6 @@ An example of the intended usage pattern:
         }
     }
  */
-
-// +build go1.1
 package notifysemaphore
 
 import (
