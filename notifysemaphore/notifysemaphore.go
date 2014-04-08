@@ -59,9 +59,9 @@ An example of the intended usage pattern:
         }
     }
  */
-package notifysemaphore
 
 // +build go1.1
+package notifysemaphore
 
 import (
 	"github.com/lib/pq"
