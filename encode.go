@@ -47,14 +47,10 @@ func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{}
 	switch typ {
 	case oid.T_bytea:
 		return parseBytea(s)
-	case oid.T_timestamptz:
+	case oid.T_timestamptz, oid.T_timetz:
 		return parseTs(parameterStatus.currentLocation, string(s))
-	case oid.T_timestamp, oid.T_date:
+	case oid.T_timestamp, oid.T_date, oid.T_time:
 		return parseTs(nil, string(s))
-	case oid.T_time:
-		return mustParse("15:04:05", typ, s)
-	case oid.T_timetz:
-		return mustParse("15:04:05-07", typ, s)
 	case oid.T_bool:
 		return s[0] == 't'
 	case oid.T_int8, oid.T_int2, oid.T_int4:
@@ -144,27 +140,6 @@ func appendEscapedText(buf []byte, text string) []byte {
 	return result
 }
 
-func mustParse(f string, typ oid.Oid, s []byte) time.Time {
-	str := string(s)
-
-	// Special case until time.Parse bug is fixed:
-	// http://code.google.com/p/go/issues/detail?id=3487
-	if str[len(str)-2] == '.' {
-		str += "0"
-	}
-
-	// check for a 30-minute-offset timezone
-	if (typ == oid.T_timestamptz || typ == oid.T_timetz) &&
-		str[len(str)-3] == ':' {
-		f += ":00"
-	}
-	t, err := time.Parse(f, str)
-	if err != nil {
-		errorf("decode: %s", err)
-	}
-	return t
-}
-
 func expect(str, char string, pos int) {
 	if c := str[pos : pos+1]; c != char {
 		errorf("expected '%v' at position %v; got '%v'", char, pos, c)
@@ -184,6 +159,11 @@ func mustAtoi(str string) int {
 // accounts for the discrepancies between the parsing available with
 // time.Parse and the Postgres date formatting quirks.
 func parseTs(currentLocation *time.Location, str string) (result time.Time) {
+	if str[2] == ':' {
+		// If we're dealing with *just* a time, make it look
+		// like a full timestamp and parse that
+		str = "0001-01-01 " + str
+	}
 	monSep := strings.IndexRune(str, '-')
 	year := mustAtoi(str[:monSep])
 	daySep := monSep + 3
