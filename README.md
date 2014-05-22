@@ -70,6 +70,7 @@ code still exists in here.
 * Kelly Dunn (kellydunn)
 * Keith Rarick (kr)
 * Kir Shatrov (kirs)
+* Lann Martin (lann)
 * Maciek Sakrejda (deafbybeheading)
 * Marc Brinkmann (mbr)
 * Marko Tiikkaja (johto)
