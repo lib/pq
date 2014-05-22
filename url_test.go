@@ -17,8 +17,8 @@ func TestSimpleParseURL(t *testing.T) {
 }
 
 func TestFullParseURL(t *testing.T) {
-	expected := "dbname=database host=hostname.remote password=secret port=1234 user=username"
-	str, err := ParseURL("postgres://username:secret@hostname.remote:1234/database")
+	expected := `dbname=database host=hostname.remote password=top\ secret port=1234 user=username`
+	str, err := ParseURL("postgres://username:top%20secret@hostname.remote:1234/database")
 	if err != nil {
 		t.Fatal(err)
 	}

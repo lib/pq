@@ -308,9 +308,12 @@ func parseOpts(name string, o values) error {
 
 		if r != '\'' {
 			for !unicode.IsSpace(r) {
-				if r != '\\' {
-					valRunes = append(valRunes, r)
+				if r == '\\' {
+					if r, ok = s.Next(); !ok {
+						return fmt.Errorf(`missing character after backslash`)
+					}
 				}
+				valRunes = append(valRunes, r)
 
 				if r, ok = s.Next(); !ok {
 					break
@@ -323,10 +326,11 @@ func parseOpts(name string, o values) error {
 					return fmt.Errorf(`unterminated quoted string literal in connection string`)
 				}
 				switch r {
-				case '\\':
-					continue
 				case '\'':
 					break quote
+				case '\\':
+					r, _ = s.Next()
+					fallthrough
 				default:
 					valRunes = append(valRunes, r)
 				}

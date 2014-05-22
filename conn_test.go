@@ -935,6 +935,13 @@ func TestParseOpts(t *testing.T) {
 		// The parser ignores spaces after = and interprets the next set of non-whitespace characters as the value.
 		{"user= password=foo", values{"user": "password=foo"}, true},
 
+		// Backslash escapes next char
+		{`user=a\ \'\\b`, values{"user": `a '\b`}, true},
+		{`user='a \'b'`, values{"user": `a 'b`}, true},
+
+		// Incomplete escape
+		{`user=x\`, values{}, false},
+
 		// No '=' after the key
 		{"postgre://marko@internet", values{}, false},
 		{"dbname user=goodbye", values{}, false},
