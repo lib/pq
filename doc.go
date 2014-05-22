@@ -61,6 +61,10 @@ Use single quotes for values that contain whitespace:
 
     "user=pqgotest password='with spaces'"
 
+A backslash will escape the next character in values:
+
+    "user=space\ man password='it\'s valid'
+
 Note that the connection parameter client_encoding (which sets the
 text encoding for the connection) may be set but must be "UTF8",
 matching with the same rules as Postgres. It is an error to provide

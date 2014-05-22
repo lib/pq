@@ -39,9 +39,10 @@ func ParseURL(url string) (string, error) {
 	}
 
 	var kvs []string
+	escaper := strings.NewReplacer(` `, `\ `, `'`, `\'`, `\`, `\\`)
 	accrue := func(k, v string) {
 		if v != "" {
-			kvs = append(kvs, k+"="+v)
+			kvs = append(kvs, k+"="+escaper.Replace(v))
 		}
 	}
 
