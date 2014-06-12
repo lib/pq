@@ -5,12 +5,13 @@ import (
 	"database/sql/driver"
 	"encoding/hex"
 	"fmt"
-	"github.com/lib/pq/oid"
 	"math"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lib/pq/oid"
 )
 
 func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) []byte {
@@ -25,7 +26,12 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 		if pgtypOid == oid.T_bytea {
 			return encodeBytea(parameterStatus.serverVersion, v)
 		}
-
+		if pgtypOid == oid.T_uuid {
+			if len(v) != 16 {
+				errorf("encode: slice of %v bytes, while server expects 16 byte uuid", v)
+			}
+			return []byte(fmt.Sprintf("%x", v))
+		}
 		return v
 	case string:
 		if pgtypOid == oid.T_bytea {
