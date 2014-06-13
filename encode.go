@@ -53,6 +53,13 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 
 func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{} {
 	switch typ {
+	case oid.T_uuid:
+		g := strings.Replace(string(s), "-", "", -1)
+		b, err := hex.DecodeString(g)
+		if err != nil {
+			errorf("decode: error while decoding uuid: %v", err)
+		}
+		return b
 	case oid.T_bytea:
 		return parseBytea(s)
 	case oid.T_timestamptz:
