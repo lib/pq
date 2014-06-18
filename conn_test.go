@@ -520,11 +520,12 @@ func TestErrorOnQueryRowSimpleQuery(t *testing.T) {
 	}
 }
 
-// Test the QueryRow bug workaround in exec
+// Test the QueryRow bug workarounds in stmt.exec() and simpleQuery()
 func TestQueryRowBugWorkaround(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
+	// stmt.exec()
 	_, err := db.Exec("CREATE TEMP TABLE notnulltemp (a varchar(10) not null)")
 	if err != nil {
 		t.Fatal(err)
@@ -533,14 +534,87 @@ func TestQueryRowBugWorkaround(t *testing.T) {
 	var a string
 	err = db.QueryRow("INSERT INTO notnulltemp(a) values($1) RETURNING a", nil).Scan(&a)
 	if err == sql.ErrNoRows {
-		t.Errorf("expected constraint violation error; got: %v", err)
+		t.Fatalf("expected constraint violation error; got: %v", err)
 	}
 	pge, ok := err.(*Error)
 	if !ok {
-		t.Errorf("expected *Error; got: %#v", err)
+		t.Fatalf("expected *Error; got: %#v", err)
 	}
 	if pge.Code.Name() != "not_null_violation" {
-		t.Errorf("expected not_null_violation; got: %s (%+v)", pge.Code.Name(), err)
+		t.Fatalf("expected not_null_violation; got: %s (%+v)", pge.Code.Name(), err)
+	}
+
+	// Test workaround in simpleQuery()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("unexpected error %s in Begin", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec("SET LOCAL check_function_bodies TO FALSE")
+	if err != nil {
+		t.Fatalf("could not disable check_function_bodies: %s", err)
+	}
+	_, err = tx.Exec(`
+CREATE OR REPLACE FUNCTION bad_function()
+RETURNS integer
+-- hack to prevent the function from being inlined
+SET check_function_bodies TO TRUE
+AS $$
+	SELECT text 'bad'
+$$ LANGUAGE sql`)
+	if err != nil {
+		t.Fatalf("could not create function: %s", err)
+	}
+
+	err = tx.QueryRow("SELECT * FROM bad_function()").Scan(&a)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	pge, ok = err.(*Error)
+	if !ok {
+		t.Fatalf("expected *Error; got: %#v", err)
+	}
+	if pge.Code.Name() != "invalid_function_definition" {
+		t.Fatalf("expected invalid_function_definition; got: %s (%+v)", pge.Code.Name(), err)
+	}
+
+	err = tx.Rollback()
+	if err != nil {
+		t.Fatalf("unexpected error %s in Rollback", err)
+	}
+
+	// Also test that simpleQuery()'s workaround works when the query fails
+	// after a row has been received.
+	rows, err := db.Query(`
+select
+	(select generate_series(1, ss.i))
+from (select gs.i
+      from generate_series(1, 2) gs(i)
+      order by gs.i limit 2) ss`)
+	if err != nil {
+		t.Fatalf("query failed: %s", err)
+	}
+	if !rows.Next() {
+		t.Fatalf("expected at least one result row; got %s", rows.Err())
+	}
+	var i int
+	err = rows.Scan(&i)
+	if err != nil {
+		t.Fatalf("rows.Scan() failed: %s", err)
+	}
+	if i != 1 {
+		t.Fatalf("unexpected value for i: %d", i)
+	}
+	if rows.Next() {
+		t.Fatalf("unexpected row")
+	}
+	pge, ok = rows.Err().(*Error)
+	if !ok {
+		t.Fatalf("expected *Error; got: %#v", err)
+	}
+	if pge.Code.Name() != "cardinality_violation" {
+		t.Fatalf("expected cardinality_violation; got: %s (%+v)", pge.Code.Name(), rows.Err())
 	}
 }
 
