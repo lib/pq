@@ -740,7 +740,7 @@ func (cn *conn) recvMessage(r *readBuf) (byte, error) {
 	}
 	_, err = io.ReadFull(cn.buf, y)
 	if err != nil {
-		return 0,  err
+		return 0, err
 	}
 	r.replace(y)
 	return t, nil
