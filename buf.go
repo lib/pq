@@ -46,6 +46,11 @@ func (b *readBuf) byte() byte {
 	return b.next(1)[0]
 }
 
+// Replaces the contents of the readBuf with the passed in byte slice.
+func (b *readBuf) replace(data []byte) {
+	*b = data
+}
+
 type writeBuf []byte
 
 func (b *writeBuf) int32(n int) {

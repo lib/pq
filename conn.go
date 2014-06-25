@@ -515,7 +515,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 				cn.bad = true
 				errorf("unexpected message %q in simple query execution", t)
 			}
-			res = &rows{st: st, done: true}
+			res = &rows{st: st, done: true, rb: &readBuf{}}
 		case 'Z':
 			cn.processReadyForQuery(r)
 			// done
@@ -534,7 +534,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 		case 'T':
 			// res might be non-nil here if we received a previous
 			// CommandComplete, but that's fine; just overwrite it
-			res = &rows{st: st}
+			res = &rows{st: st, rb: &readBuf{}}
 			st.cols, st.rowTyps = parseMeta(r)
 
 			// To work around a bug in QueryRow in Go 1.2 and earlier, wait
@@ -640,7 +640,7 @@ func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err err
 	}
 
 	st.exec(args)
-	return &rows{st: st}, nil
+	return &rows{st: st, rb: &readBuf{}}, nil
 }
 
 // Implement the optional "Execer" interface for one-shot queries
@@ -713,19 +713,20 @@ func (cn *conn) saveMessage(typ byte, buf *readBuf) {
 
 // recvMessage receives any message from the backend, or returns an error if
 // a problem occurred while reading the message.
-func (cn *conn) recvMessage() (byte, *readBuf, error) {
+func (cn *conn) recvMessage(r *readBuf) (byte, error) {
 	// workaround for a QueryRow bug, see exec
 	if cn.saveMessageType != 0 {
-		t, r := cn.saveMessageType, cn.saveMessageBuffer
+		t := cn.saveMessageType
+		r.replace([]byte(*cn.saveMessageBuffer))
 		cn.saveMessageType = 0
 		cn.saveMessageBuffer = nil
-		return t, r, nil
+		return t, nil
 	}
 
 	x := cn.scratch[:5]
 	_, err := io.ReadFull(cn.buf, x)
 	if err != nil {
-		return 0, nil, err
+		return 0, err
 	}
 
 	// read the type and length of the message that follows
@@ -739,10 +740,10 @@ func (cn *conn) recvMessage() (byte, *readBuf, error) {
 	}
 	_, err = io.ReadFull(cn.buf, y)
 	if err != nil {
-		return 0, nil, err
+		return 0,  err
 	}
-
-	return t, (*readBuf)(&y), nil
+	r.replace(y)
+	return t, nil
 }
 
 // recv receives a message from the backend, but if an error happened while
@@ -752,7 +753,8 @@ func (cn *conn) recvMessage() (byte, *readBuf, error) {
 func (cn *conn) recv() (t byte, r *readBuf) {
 	for {
 		var err error
-		t, r, err = cn.recvMessage()
+		r = &readBuf{}
+		t, err = cn.recvMessage(r)
 		if err != nil {
 			panic(err)
 		}
@@ -770,13 +772,11 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 	panic("not reached")
 }
 
-// recv1 receives a message from the backend, panicking if an error occurs
-// while attempting to read it.  All asynchronous messages are ignored, with
-// the exception of ErrorResponse.
-func (cn *conn) recv1() (t byte, r *readBuf) {
+// recv1Buf is exactly equivalent to recv1, except it uses a buffer supplied by
+// the caller to avoid an allocation.
+func (cn *conn) recv1Buf(r *readBuf) byte {
 	for {
-		var err error
-		t, r, err = cn.recvMessage()
+		t, err := cn.recvMessage(r)
 		if err != nil {
 			panic(err)
 		}
@@ -787,11 +787,20 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 		case 'S':
 			cn.processParameterStatus(r)
 		default:
-			return
+			return t
 		}
 	}
 
 	panic("not reached")
+}
+
+// recv1 receives a message from the backend, panicking if an error occurs
+// while attempting to read it.  All asynchronous messages are ignored, with
+// the exception of ErrorResponse.
+func (cn *conn) recv1() (t byte, r *readBuf) {
+	r = &readBuf{}
+	t = cn.recv1Buf(r)
+	return t, r
 }
 
 func (cn *conn) ssl(o values) {
@@ -951,7 +960,7 @@ func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) {
 	defer st.cn.errRecover(&err)
 
 	st.exec(v)
-	return &rows{st: st}, nil
+	return &rows{st: st, rb: &readBuf{}}, nil
 }
 
 func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
@@ -1133,6 +1142,7 @@ func (cn *conn) parseComplete(commandTag string) (driver.Result, string) {
 type rows struct {
 	st   *stmt
 	done bool
+	rb   *readBuf
 }
 
 func (rs *rows) Close() error {
@@ -1166,31 +1176,31 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 	defer conn.errRecover(&err)
 
 	for {
-		t, r := conn.recv1()
+		t := conn.recv1Buf(rs.rb)
 		switch t {
 		case 'E':
-			err = parseError(r)
 		case 'C', 'I':
+			err = parseError(rs.rb)
 			continue
 		case 'Z':
-			conn.processReadyForQuery(r)
+			conn.processReadyForQuery(rs.rb)
 			rs.done = true
 			if err != nil {
 				return err
 			}
 			return io.EOF
 		case 'D':
-			n := r.int16()
+			n := rs.rb.int16()
 			if n < len(dest) {
 				dest = dest[:n]
 			}
 			for i := range dest {
-				l := r.int32()
+				l := rs.rb.int32()
 				if l == -1 {
 					dest[i] = nil
 					continue
 				}
-				dest[i] = decode(&conn.parameterStatus, r.next(l), rs.st.rowTyps[i])
+				dest[i] = decode(&conn.parameterStatus, rs.rb.next(l), rs.st.rowTyps[i])
 			}
 			return
 		default:
