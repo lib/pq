@@ -524,8 +524,8 @@ func (l *Listener) Unlisten(channel string) error {
 
 // UnlistenAll removes all channels from the Listener's channel list.  Returns
 // immediately with no error if there is no connection.  Note that you might
-// still get notifications for any of the deleted channels even after Unlisten
-// has returned.
+// still get notifications for any of the deleted channels even after
+// UnlistenAll has returned.
 func (l *Listener) UnlistenAll() error {
 	l.lock.Lock()
 	defer l.lock.Unlock()
