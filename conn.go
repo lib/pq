@@ -665,10 +665,10 @@ func (cn *conn) recvMessage() (byte, *readBuf, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	t := x[0]
 
-	b := readBuf(x[1:])
-	n := b.int32() - 4
+	// read the type and length of the message that follows
+	t := x[0]
+	n := int(binary.BigEndian.Uint32(x[1:])) - 4
 	var y []byte
 	if n <= len(cn.scratch) {
 		y = cn.scratch[:n]
