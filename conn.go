@@ -738,7 +738,7 @@ func (cn *conn) ssl(o values) {
 	case "require", "":
 		tlsConf.InsecureSkipVerify = true
 	case "verify-full":
-		// fall out
+		tlsConf.ServerName = o.Get("host")
 	case "disable":
 		return
 	default:
