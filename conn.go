@@ -734,11 +734,14 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 
 func (cn *conn) ssl(o values) {
 	tlsConf := tls.Config{}
+	var optional bool
 	switch mode := o.Get("sslmode"); mode {
 	case "require", "":
 		tlsConf.InsecureSkipVerify = true
 	case "verify-full":
 		// fall out
+	case "prefer":
+		optional = true
 	case "disable":
 		return
 	default:
@@ -755,7 +758,9 @@ func (cn *conn) ssl(o values) {
 		panic(err)
 	}
 
-	if b[0] != 'S' {
+	if b[0] == 'N' && optional {
+		return
+	} else if b[0] != 'S' {
 		panic(ErrSSLNotSupported)
 	}
 
