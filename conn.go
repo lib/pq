@@ -496,11 +496,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 	panic("not reached")
 }
 
-func (cn *conn) prepareTo(q, stmtName string) (_ driver.Stmt, err error) {
-	return cn.prepareToSimpleStmt(q, stmtName)
-}
-
-func (cn *conn) prepareToSimpleStmt(q, stmtName string) (_ *stmt, err error) {
+func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
 	defer errRecover(&err)
 
 	st := &stmt{cn: cn, name: stmtName, query: q}
@@ -576,7 +572,7 @@ func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err err
 		return cn.simpleQuery(query)
 	}
 
-	st, err := cn.prepareToSimpleStmt(query, "")
+	st, err := cn.prepareTo(query, "")
 	if err != nil {
 		panic(err)
 	}
