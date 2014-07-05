@@ -56,6 +56,7 @@ code still exists in here.
 * Brad Fitzpatrick (bradfitz)
 * Chris Walsh (cwds)
 * Daniel Farina (fdr)
+* Eric Chlebek (echlebek)
 * Everyone at The Go Team
 * Evan Shaw (edsrzf)
 * Ewan Chou (coocood)
