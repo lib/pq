@@ -89,8 +89,6 @@ func (c *conn) writeBuf(b byte) *writeBuf {
 }
 
 func Open(name string) (_ driver.Conn, err error) {
-	defer errRecover(&err)
-
 	o := make(values)
 
 	// A number of defaults are applied here, in this order:
@@ -103,7 +101,11 @@ func Open(name string) (_ driver.Conn, err error) {
 	// N.B.: Extra float digits should be set to 3, but that breaks
 	// Postgres 8.4 and older, where the max is 2.
 	o.Set("extra_float_digits", "2")
-	for k, v := range parseEnviron(os.Environ()) {
+	parsedEnviron, err := parseEnviron(os.Environ())
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range parsedEnviron {
 		o.Set(k, v)
 	}
 
@@ -165,9 +167,15 @@ func Open(name string) (_ driver.Conn, err error) {
 	}
 
 	cn := &conn{c: c}
-	cn.ssl(o)
+	err = cn.ssl(o)
+	if err != nil {
+		return nil, err
+	}
 	cn.buf = bufio.NewReader(cn.c)
-	cn.startup(o)
+	err = cn.startup(o)
+	if err != nil {
+		return nil, err
+	}
 	// reset the deadline, in case one was set (see dial)
 	err = cn.c.SetDeadline(time.Time{})
 	return cn, err
@@ -684,20 +692,20 @@ func (cn *conn) recvMessage() (byte, *readBuf, error) {
 }
 
 // recv receives a message from the backend, but if an error happened while
-// reading the message or the received message was an ErrorResponse, it panics.
-// NoticeResponses are ignored.  This function should generally be used only
-// during the startup sequence.
-func (cn *conn) recv() (t byte, r *readBuf) {
+// reading the message or the received message was an ErrorResponse, an error
+// is returned.  NoticeResponses are ignored.  This function should generally
+// only be used during the startup sequence.
+func (cn *conn) recv() (t byte, r *readBuf, err error) {
 	for {
-		var err error
 		t, r, err = cn.recvMessage()
 		if err != nil {
-			panic(err)
+			return
 		}
 
 		switch t {
 		case 'E':
-			panic(parseError(r))
+			err = parseError(r)
+			return
 		case 'N':
 			// ignore
 		default:
@@ -732,7 +740,7 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 	panic("not reached")
 }
 
-func (cn *conn) ssl(o values) {
+func (cn *conn) ssl(o values) error {
 	tlsConf := tls.Config{}
 	switch mode := o.Get("sslmode"); mode {
 	case "require", "":
@@ -740,9 +748,9 @@ func (cn *conn) ssl(o values) {
 	case "verify-full":
 		tlsConf.ServerName = o.Get("host")
 	case "disable":
-		return
+		return nil
 	default:
-		errorf(`unsupported sslmode %q; only "require" (default), "verify-full", and "disable" supported`, mode)
+		return fmt.Errorf(`unsupported sslmode %q; only "require" (default), "verify-full", and "disable" supported`, mode)
 	}
 
 	w := cn.writeBuf(0)
@@ -752,17 +760,18 @@ func (cn *conn) ssl(o values) {
 	b := cn.scratch[:1]
 	_, err := io.ReadFull(cn.c, b)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	if b[0] != 'S' {
-		panic(ErrSSLNotSupported)
+		return ErrSSLNotSupported
 	}
 
 	cn.c = tls.Client(cn.c, &tlsConf)
+	return nil
 }
 
-func (cn *conn) startup(o values) {
+func (cn *conn) startup(o values) error {
 	w := cn.writeBuf(0)
 	w.int32(196608)
 	// Send the backend the name of the database we want to connect to, and the
@@ -787,7 +796,10 @@ func (cn *conn) startup(o values) {
 	cn.send(w)
 
 	for {
-		t, r := cn.recv()
+		t, r, err := cn.recv()
+		if err != nil {
+			return err
+		}
 		switch t {
 		case 'K':
 		case 'S':
@@ -796,14 +808,14 @@ func (cn *conn) startup(o values) {
 			cn.auth(r, o)
 		case 'Z':
 			cn.processReadyForQuery(r)
-			return
+			return nil
 		default:
-			errorf("unknown response for startup: %q", t)
+			return fmt.Errorf("unknown response for startup: %q", t)
 		}
 	}
 }
 
-func (cn *conn) auth(r *readBuf, o values) {
+func (cn *conn) auth(r *readBuf, o values) error {
 	switch code := r.int32(); code {
 	case 0:
 		// OK
@@ -812,13 +824,16 @@ func (cn *conn) auth(r *readBuf, o values) {
 		w.string(o.Get("password"))
 		cn.send(w)
 
-		t, r := cn.recv()
+		t, r, err := cn.recv()
+		if err != nil {
+			return err
+		}
 		if t != 'R' {
-			errorf("unexpected password response: %q", t)
+			return fmt.Errorf("unexpected password response: %q", t)
 		}
 
 		if r.int32() != 0 {
-			errorf("unexpected authentication response: %q", t)
+			return fmt.Errorf("unexpected authentication response: %q", t)
 		}
 	case 5:
 		s := string(r.next(4))
@@ -826,17 +841,21 @@ func (cn *conn) auth(r *readBuf, o values) {
 		w.string("md5" + md5s(md5s(o.Get("password")+o.Get("user"))+s))
 		cn.send(w)
 
-		t, r := cn.recv()
+		t, r, err := cn.recv()
+		if err != nil {
+			return err
+		}
 		if t != 'R' {
-			errorf("unexpected password response: %q", t)
+			return fmt.Errorf("unexpected password response: %q", t)
 		}
 
 		if r.int32() != 0 {
-			errorf("unexpected authentication response: %q", t)
+			return fmt.Errorf("unexpected authentication response: %q", t)
 		}
 	default:
-		errorf("unknown authentication response: %d", code)
+		return fmt.Errorf("unknown authentication response: %d", code)
 	}
+	return nil
 }
 
 type stmt struct {
@@ -1193,7 +1212,7 @@ func parseMeta(r *readBuf) (cols []string, rowTyps []oid.Oid) {
 // Environment-set connection information is intended to have a higher
 // precedence than a library default but lower than any explicitly
 // passed information (such as in the URL or connection string).
-func parseEnviron(env []string) (out map[string]string) {
+func parseEnviron(env []string) (out map[string]string, err error) {
 	out = make(map[string]string)
 
 	for _, v := range env {
@@ -1202,8 +1221,8 @@ func parseEnviron(env []string) (out map[string]string) {
 		accrue := func(keyname string) {
 			out[keyname] = parts[1]
 		}
-		unsupported := func() {
-			panic(fmt.Sprintf("setting %v not supported", parts[0]))
+		unsupported := func() (out map[string]string, err error) {
+			return nil, fmt.Errorf("setting %v not supported", parts[0])
 		}
 
 		// The order of these is the same as is seen in the
@@ -1216,7 +1235,7 @@ func parseEnviron(env []string) (out map[string]string) {
 		case "PGHOST":
 			accrue("host")
 		case "PGHOSTADDR":
-			unsupported()
+			return unsupported()
 		case "PGPORT":
 			accrue("port")
 		case "PGDATABASE":
@@ -1226,7 +1245,7 @@ func parseEnviron(env []string) (out map[string]string) {
 		case "PGPASSWORD":
 			accrue("password")
 		case "PGPASSFILE", "PGSERVICE", "PGSERVICEFILE", "PGREALM":
-			unsupported()
+			return unsupported()
 		case "PGOPTIONS":
 			accrue("options")
 		case "PGAPPNAME":
@@ -1234,11 +1253,11 @@ func parseEnviron(env []string) (out map[string]string) {
 		case "PGSSLMODE":
 			accrue("sslmode")
 		case "PGREQUIRESSL", "PGSSLCERT", "PGSSLKEY", "PGSSLROOTCERT", "PGSSLCRL":
-			unsupported()
+			return unsupported()
 		case "PGREQUIREPEER":
-			unsupported()
+			return unsupported()
 		case "PGKRBSRVNAME", "PGGSSLIB":
-			unsupported()
+			return unsupported()
 		case "PGCONNECT_TIMEOUT":
 			accrue("connect_timeout")
 		case "PGCLIENTENCODING":
@@ -1250,11 +1269,11 @@ func parseEnviron(env []string) (out map[string]string) {
 		case "PGGEQO":
 			accrue("geqo")
 		case "PGSYSCONFDIR", "PGLOCALEDIR":
-			unsupported()
+			return unsupported()
 		}
 	}
 
-	return out
+	return out, nil
 }
 
 // isUTF8 returns whether name is a fuzzy variation of the string "UTF-8".

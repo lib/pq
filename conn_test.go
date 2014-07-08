@@ -393,7 +393,7 @@ func TestNoData(t *testing.T) {
 	}
 }
 
-func TestError(t *testing.T) {
+func TestErrorDuringStartup(t *testing.T) {
 	// Don't use the normal connection setup, this is intended to
 	// blow up in the startup packet from a non-existent user.
 	db, err := openTestConnConninfo("user=thisuserreallydoesntexist")
@@ -407,8 +407,11 @@ func TestError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 
-	if err != driver.ErrBadConn {
-		t.Fatalf("expected driver.ErrBadConn, got: %v", err)
+	e, ok := err.(*Error)
+	if !ok {
+		t.Fatalf("expected Error, got %#v", err)
+	} else if e.Code.Name() != "invalid_authorization_specification" {
+		t.Fatalf("expected unique_violation, got %s (%+v)", e.Code.Name(), err)
 	}
 }
 
@@ -810,7 +813,10 @@ var envParseTests = []struct {
 
 func TestParseEnviron(t *testing.T) {
 	for i, tt := range envParseTests {
-		results := parseEnviron(tt.Env)
+		results, err := parseEnviron(tt.Env)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !reflect.DeepEqual(tt.Expected, results) {
 			t.Errorf("%d: Expected: %#v Got: %#v", i, tt.Expected, results)
 		}
@@ -1044,8 +1050,7 @@ func TestParseOpts(t *testing.T) {
 func TestRuntimeParameters(t *testing.T) {
 	type RuntimeTestResult int
 	const (
-		ResultBadConn RuntimeTestResult = iota
-		ResultPanic
+		ResultPanic RuntimeTestResult = iota
 		ResultSuccess
 		ResultError // other error
 	)
@@ -1057,7 +1062,7 @@ func TestRuntimeParameters(t *testing.T) {
 		expectedOutcome RuntimeTestResult
 	}{
 		// invalid parameter
-		{"DOESNOTEXIST=foo", "", "", ResultBadConn},
+		{"DOESNOTEXIST=foo", "", "", ResultError},
 		// we can only work with a specific value for these two
 		{"client_encoding=SQL_ASCII", "", "", ResultError},
 		{"datestyle='ISO, YDM'", "", "", ResultPanic},
@@ -1095,9 +1100,6 @@ func TestRuntimeParameters(t *testing.T) {
 			}()
 			row := db.QueryRow("SELECT current_setting($1)", test.param)
 			err = row.Scan(&value)
-			if err == driver.ErrBadConn {
-				return "", ResultBadConn
-			}
 			if err != nil {
 				return "", ResultError
 			}
