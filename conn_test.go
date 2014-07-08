@@ -411,7 +411,7 @@ func TestErrorDuringStartup(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Error, got %#v", err)
 	} else if e.Code.Name() != "invalid_authorization_specification" {
-		t.Fatalf("expected unique_violation, got %s (%+v)", e.Code.Name(), err)
+		t.Fatalf("expected invalid_authorization_specification, got %s (%+v)", e.Code.Name(), err)
 	}
 }
 
