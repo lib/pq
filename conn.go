@@ -813,6 +813,7 @@ func (cn *conn) startup(o values) error {
 			return fmt.Errorf("unknown response for startup: %q", t)
 		}
 	}
+	panic("not reached")
 }
 
 func (cn *conn) auth(r *readBuf, o values) error {
