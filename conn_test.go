@@ -1050,8 +1050,7 @@ func TestParseOpts(t *testing.T) {
 func TestRuntimeParameters(t *testing.T) {
 	type RuntimeTestResult int
 	const (
-		ResultFailedOpen RuntimeTestResult = iota
-		ResultPanic
+		ResultPanic RuntimeTestResult = iota
 		ResultSuccess
 		ResultError // other error
 	)
@@ -1063,9 +1062,9 @@ func TestRuntimeParameters(t *testing.T) {
 		expectedOutcome RuntimeTestResult
 	}{
 		// invalid parameter
-		{"DOESNOTEXIST=foo", "", "", ResultFailedOpen},
+		{"DOESNOTEXIST=foo", "", "", ResultError},
 		// we can only work with a specific value for these two
-		{"client_encoding=SQL_ASCII", "", "", ResultFailedOpen},
+		{"client_encoding=SQL_ASCII", "", "", ResultError},
 		{"datestyle='ISO, YDM'", "", "", ResultPanic},
 		// "options" should work exactly as it does in libpq
 		{"options='-c search_path=pqgotest'", "search_path", "pqgotest", ResultSuccess},
@@ -1099,10 +1098,6 @@ func TestRuntimeParameters(t *testing.T) {
 					outcome = ResultPanic
 				}
 			}()
-			err = db.Ping()
-			if err != nil {
-				return "", ResultFailedOpen
-			}
 			row := db.QueryRow("SELECT current_setting($1)", test.param)
 			err = row.Scan(&value)
 			if err != nil {
