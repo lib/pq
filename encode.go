@@ -9,6 +9,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -179,6 +180,37 @@ func mustAtoi(str string) int {
 	return result
 }
 
+// The location cache caches the time zones typically used by the client.
+type locationCache struct {
+	cache map[int]*time.Location
+	lock  sync.Mutex
+}
+
+// All connections share the same list of timezones. Benchmarking shows that
+// about 5% speed could be gained by putting the cache in the connection and
+// losing the mutex, at the cost of a small amount of memory and a somewhat
+// significant increase in code complexity.
+var globalLocationCache *locationCache = newLocationCache()
+
+func newLocationCache() *locationCache {
+	return &locationCache{cache: make(map[int]*time.Location)}
+}
+
+// Returns the cached timezone for the specified offset, creating and caching
+// it if necessary.
+func (c *locationCache) getLocation(offset int) *time.Location {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	location, ok := c.cache[offset]
+	if !ok {
+		location = time.FixedZone("", offset)
+		c.cache[offset] = location
+	}
+
+	return location
+}
+
 // This is a time function specific to the Postgres default DateStyle
 // setting ("ISO, MDY"), the only one we currently support. This
 // accounts for the discrepancies between the parsing available with
@@ -257,7 +289,7 @@ func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 	}
 	t := time.Date(bcSign*year, time.Month(month), day,
 		hour, minute, second, nanoSec,
-		time.FixedZone("", tzOff))
+		globalLocationCache.getLocation(tzOff))
 
 	if currentLocation != nil {
 		// Set the location of the returned Time based on the session's
