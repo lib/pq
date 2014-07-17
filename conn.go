@@ -14,7 +14,6 @@ import (
 	"net"
 	"os"
 	"path"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1302,65 +1301,4 @@ func (m mappedLocationCache) getLocation(offset int) *time.Location {
 	}
 
 	return location
-}
-
-
-
-type sortedLocationCacheEntry struct {
-	offset int
-	location *time.Location
-}
-type sortedLocationByOffset []*sortedLocationCacheEntry
-func (a sortedLocationByOffset) Len() int           { return len(a) }
-func (a sortedLocationByOffset) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a sortedLocationByOffset) Less(i, j int) bool { return a[i].offset < a[j].offset }
-
-//
-// The sortedLocationCache object implements locationCache using a sorted list of offsets. Lookups and inserts can be
-// reasonably fast because of the sorted nature of the entries. (In testing, its about twice as slow as a map though)
-//
-type sortedLocationCache struct {
-	cache sortedLocationByOffset
-}
-
-func newSortedLocationCache() *sortedLocationCache {
-	return &sortedLocationCache{}
-}
-
-func (c *sortedLocationCache) getLocation(offset int) *time.Location {
-
-	i := sort.Search(len(c.cache), func(i int) bool { return c.cache[i].offset >= offset})
-	if i < len(c.cache) && c.cache[i].offset == offset {
-		return c.cache[i].location
-	}
-
-	// else
-	entry := &sortedLocationCacheEntry {
-		offset: offset,
-		location: time.FixedZone("", offset),
-	}
-
-	// This adds a new entry to the slice and then shifts the items to make room for the new entry to be inserted
-	// in its sorted position (which is returned by i). It is several orders of magnitude faster then running
-	// sort.Sort(c.cache)
-	c.cache = append(c.cache, nil)
-	copy(c.cache[i+1:], c.cache[i:])
-	c.cache[i] = entry
-
-	return entry.location
-}
-
-
-//
-// The noCacheLocationCache object implements locationCache by not caching anything! It is useful for testing the
-// performance of the code with caching turned off
-//
-type noCacheLocationCache struct {}
-
-func newNoCacheLocationCache() *noCacheLocationCache {
-	return &noCacheLocationCache{}
-}
-
-func (c *noCacheLocationCache) getLocation(offset int) *time.Location {
-	return time.FixedZone("", offset)
 }
