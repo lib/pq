@@ -9,6 +9,7 @@ import (
 	"database/sql/driver"
 	"github.com/lib/pq/oid"
 	"io"
+	"math/rand"
 	"net"
 	"strconv"
 	"strings"
@@ -323,7 +324,7 @@ var testIntBytes = []byte("1234")
 
 func BenchmarkDecodeInt64(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		decode(&parameterStatus{}, testIntBytes, oid.T_int8)
+		decode(nil, nil, testIntBytes, oid.T_int8)
 	}
 }
 
@@ -331,7 +332,7 @@ var testFloatBytes = []byte("3.14159")
 
 func BenchmarkDecodeFloat64(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		decode(&parameterStatus{}, testFloatBytes, oid.T_float8)
+		decode(nil, nil, testFloatBytes, oid.T_float8)
 	}
 }
 
@@ -339,7 +340,7 @@ var testBoolBytes = []byte{'t'}
 
 func BenchmarkDecodeBool(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		decode(&parameterStatus{}, testBoolBytes, oid.T_bool)
+		decode(nil, nil, testBoolBytes, oid.T_bool)
 	}
 }
 
@@ -354,9 +355,50 @@ func TestDecodeBool(t *testing.T) {
 
 var testTimestamptzBytes = []byte("2013-09-17 22:15:32.360754-07")
 
+// BenchmarkDecodeTimestamptz tests the speed of decoding an oid.T_timestamptz using a mapped location cache
 func BenchmarkDecodeTimestamptz(b *testing.B) {
+	cache := newMappedLocationCache()
+	ps := &parameterStatus{}
 	for i := 0; i < b.N; i++ {
-		decode(&parameterStatus{}, testTimestamptzBytes, oid.T_timestamptz)
+		decode(cache, ps, testTimestamptzBytes, oid.T_timestamptz)
+	}
+}
+
+// BenchmarkDecodeTimestamptzNoCache tests the speed of decoding an oid.T_timestamptz using no location cache
+func BenchmarkDecodeTimestamptzNoCache(b *testing.B) {
+	cache := newNoCacheLocationCache()
+	ps := &parameterStatus{}
+	for i := 0; i < b.N; i++ {
+		decode(cache, ps, testTimestamptzBytes, oid.T_timestamptz)
+	}
+}
+
+// BenchmarkLocationCacheMapped tests the speed of mappedLocationCache lookups under two unfavorable conditions. First,
+// the number of items (about 10,000) is much higher then normal. Second, the lookups are random, resulting in frequent
+// tree rebalances.
+func BenchmarkLocationCacheMapped(b *testing.B) {
+	cache := newMappedLocationCache()
+	for i := 0; i < b.N; i++ {
+		cache.getLocation(rand.Intn(10000))
+	}
+}
+
+// BenchmarkLocationCacheSorted tests the speed of sortedLocationCache lookups under two unfavorable conditions. First,
+// the number of items (about 10,000) is much higher then normal. Second, the lookups are random, resulting in unsorted
+// inserts into a sorted list.
+func BenchmarkLocationCacheSorted(b *testing.B) {
+	cache := newSortedLocationCache()
+	for i := 0; i < b.N; i++ {
+		cache.getLocation(rand.Intn(10000))
+	}
+}
+
+// BenchmarkLocationCacheSorted tests the speed of noCacheLocationCache lookups. This shows the cost and speed of not
+// using a cache for location. It also uses random inserts to make the three benchmarks equivalent in all respects.
+func BenchmarkLocationCacheNone(b *testing.B) {
+	cache := newNoCacheLocationCache()
+	for i := 0; i < b.N; i++ {
+		cache.getLocation(rand.Intn(10000))
 	}
 }
 
