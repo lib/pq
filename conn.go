@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -80,6 +81,8 @@ type conn struct {
 
 	saveMessageType   byte
 	saveMessageBuffer *readBuf
+
+	locationCache locationCache
 }
 
 func (c *conn) writeBuf(b byte) *writeBuf {
@@ -164,7 +167,7 @@ func Open(name string) (_ driver.Conn, err error) {
 		return nil, err
 	}
 
-	cn := &conn{c: c}
+	cn := &conn{c: c, locationCache: newMappedLocationCache()}
 	cn.ssl(o)
 	cn.buf = bufio.NewReader(cn.c)
 	cn.startup(o)
@@ -1108,7 +1111,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 					dest[i] = nil
 					continue
 				}
-				dest[i] = decode(&conn.parameterStatus, r.next(l), rs.st.rowTyps[i])
+				dest[i] = decode(conn.locationCache, &conn.parameterStatus, r.next(l), rs.st.rowTyps[i])
 			}
 			return
 		default:
@@ -1272,4 +1275,92 @@ func alnumLowerASCII(ch rune) rune {
 		return ch
 	}
 	return -1 // discard
+}
+
+
+
+type locationCache interface {
+	getLocation(offset int) *time.Location
+}
+
+
+//
+// mappedLocationCache implements locationCache using a simple map.
+//
+type mappedLocationCache map[int]*time.Location
+
+func newMappedLocationCache() mappedLocationCache {
+	return make(map[int]*time.Location)
+}
+
+func (m mappedLocationCache) getLocation(offset int) *time.Location {
+
+	location, ok := m[offset]
+	if !ok {
+		location = time.FixedZone("", offset)
+		m[offset] = location
+	}
+
+	return location
+}
+
+
+
+type sortedLocationCacheEntry struct {
+	offset int
+	location *time.Location
+}
+type sortedLocationByOffset []*sortedLocationCacheEntry
+func (a sortedLocationByOffset) Len() int           { return len(a) }
+func (a sortedLocationByOffset) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a sortedLocationByOffset) Less(i, j int) bool { return a[i].offset < a[j].offset }
+
+//
+// The sortedLocationCache object implements locationCache using a sorted list of offsets. Lookups and inserts can be
+// reasonably fast because of the sorted nature of the entries. (In testing, its about twice as slow as a map though)
+//
+type sortedLocationCache struct {
+	cache sortedLocationByOffset
+}
+
+func newSortedLocationCache() *sortedLocationCache {
+	return &sortedLocationCache{}
+}
+
+func (c *sortedLocationCache) getLocation(offset int) *time.Location {
+
+	i := sort.Search(len(c.cache), func(i int) bool { return c.cache[i].offset >= offset})
+	if i < len(c.cache) && c.cache[i].offset == offset {
+		return c.cache[i].location
+	}
+
+	// else
+	entry := &sortedLocationCacheEntry {
+		offset: offset,
+		location: time.FixedZone("", offset),
+	}
+
+	// This adds a new entry to the slice and then shifts the items to make room for the new entry to be inserted
+	// in its sorted position (which is returned by i). It is several orders of magnitude faster then running
+	// sort.Sort(c.cache)
+	c.cache = append(c.cache, nil)
+	copy(c.cache[i+1:], c.cache[i:])
+	c.cache[i] = entry
+
+	return entry.location
+}
+
+
+//
+// The noCacheLocationCache object implements locationCache by not caching anything! It is useful for testing the
+// performance of the code with caching turned off
+//
+type noCacheLocationCache struct {}
+
+func newNoCacheLocationCache() *noCacheLocationCache {
+	return &noCacheLocationCache{}
+}
+
+func (c *noCacheLocationCache) getLocation(offset int) *time.Location {
+	return time.FixedZone("", offset)
 }
