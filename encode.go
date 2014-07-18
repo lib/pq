@@ -9,6 +9,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -43,14 +44,14 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 	panic("not reached")
 }
 
-func decode(cache locationCache, parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{} {
+func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{} {
 	switch typ {
 	case oid.T_bytea:
 		return parseBytea(s)
 	case oid.T_timestamptz:
-		return parseTs(cache, parameterStatus.currentLocation, string(s))
+		return parseTs(parameterStatus.currentLocation, string(s))
 	case oid.T_timestamp, oid.T_date:
-		return parseTs(cache, nil, string(s))
+		return parseTs(nil, string(s))
 	case oid.T_time:
 		return mustParse("15:04:05", typ, s)
 	case oid.T_timetz:
@@ -179,11 +180,35 @@ func mustAtoi(str string) int {
 	return result
 }
 
+// This map holds locations by time zone offset. It is a cache because its expensive to create the location for every
+// single time that is allocated. (The expense is because the Location struct includes two slices that must be alloced
+// and then GCed when the time is released.) Benchmarks show that caching results in 3 fewer allocations per op and 
+// 147 fewer bytes alloced, for a speed improvement just under 20%.
+var locationCache map[int]*time.Location
+var locationCacheLock sync.Mutex
+
+func cachedLocation(offset int) *time.Location {
+	locationCacheLock.Lock()
+	defer locationCacheLock.Unlock()
+
+	if nil == locationCache {
+		locationCache = make(map[int]*time.Location)
+	}
+
+	location, ok := locationCache[offset]
+	if !ok {
+		location = time.FixedZone("", offset)
+		locationCache[offset] = location
+	}
+
+	return location
+}
+
 // This is a time function specific to the Postgres default DateStyle
 // setting ("ISO, MDY"), the only one we currently support. This
 // accounts for the discrepancies between the parsing available with
 // time.Parse and the Postgres date formatting quirks.
-func parseTs(cache locationCache, currentLocation *time.Location, str string) (result time.Time) {
+func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 	monSep := strings.IndexRune(str, '-')
 	year := mustAtoi(str[:monSep])
 	daySep := monSep + 3
@@ -257,7 +282,7 @@ func parseTs(cache locationCache, currentLocation *time.Location, str string) (r
 	}
 	t := time.Date(bcSign*year, time.Month(month), day,
 		hour, minute, second, nanoSec,
-		cache.getLocation(tzOff))
+		cachedLocation(tzOff))
 
 	if currentLocation != nil {
 		// Set the location of the returned Time based on the session's

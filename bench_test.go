@@ -9,7 +9,6 @@ import (
 	"database/sql/driver"
 	"github.com/lib/pq/oid"
 	"io"
-	"math/rand"
 	"net"
 	"strconv"
 	"strings"
@@ -324,7 +323,7 @@ var testIntBytes = []byte("1234")
 
 func BenchmarkDecodeInt64(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		decode(nil, nil, testIntBytes, oid.T_int8)
+		decode(&parameterStatus{}, testIntBytes, oid.T_int8)
 	}
 }
 
@@ -332,7 +331,7 @@ var testFloatBytes = []byte("3.14159")
 
 func BenchmarkDecodeFloat64(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		decode(nil, nil, testFloatBytes, oid.T_float8)
+		decode(&parameterStatus{}, testFloatBytes, oid.T_float8)
 	}
 }
 
@@ -340,7 +339,7 @@ var testBoolBytes = []byte{'t'}
 
 func BenchmarkDecodeBool(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		decode(nil, nil, testBoolBytes, oid.T_bool)
+		decode(&parameterStatus{}, testBoolBytes, oid.T_bool)
 	}
 }
 
@@ -356,17 +355,8 @@ func TestDecodeBool(t *testing.T) {
 var testTimestamptzBytes = []byte("2013-09-17 22:15:32.360754-07")
 
 func BenchmarkDecodeTimestamptz(b *testing.B) {
-	cache := newMappedLocationCache()
-	ps := &parameterStatus{}
 	for i := 0; i < b.N; i++ {
-		decode(cache, ps, testTimestamptzBytes, oid.T_timestamptz)
-	}
-}
-
-func BenchmarkLocationCacheMapped(b *testing.B) {
-	cache := newMappedLocationCache()
-	for i := 0; i < b.N; i++ {
-		cache.getLocation(rand.Intn(10000))
+		decode(&parameterStatus{}, testTimestamptzBytes, oid.T_timestamptz)
 	}
 }
 

@@ -80,8 +80,6 @@ type conn struct {
 
 	saveMessageType   byte
 	saveMessageBuffer *readBuf
-
-	locationCache locationCache
 }
 
 func (c *conn) writeBuf(b byte) *writeBuf {
@@ -166,7 +164,7 @@ func Open(name string) (_ driver.Conn, err error) {
 		return nil, err
 	}
 
-	cn := &conn{c: c, locationCache: newMappedLocationCache()}
+	cn := &conn{c: c}
 	cn.ssl(o)
 	cn.buf = bufio.NewReader(cn.c)
 	cn.startup(o)
@@ -1110,7 +1108,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 					dest[i] = nil
 					continue
 				}
-				dest[i] = decode(conn.locationCache, &conn.parameterStatus, r.next(l), rs.st.rowTyps[i])
+				dest[i] = decode(&conn.parameterStatus, r.next(l), rs.st.rowTyps[i])
 			}
 			return
 		default:
@@ -1274,31 +1272,4 @@ func alnumLowerASCII(ch rune) rune {
 		return ch
 	}
 	return -1 // discard
-}
-
-
-
-type locationCache interface {
-	getLocation(offset int) *time.Location
-}
-
-
-//
-// mappedLocationCache implements locationCache using a simple map.
-//
-type mappedLocationCache map[int]*time.Location
-
-func newMappedLocationCache() mappedLocationCache {
-	return make(map[int]*time.Location)
-}
-
-func (m mappedLocationCache) getLocation(offset int) *time.Location {
-
-	location, ok := m[offset]
-	if !ok {
-		location = time.FixedZone("", offset)
-		m[offset] = location
-	}
-
-	return location
 }

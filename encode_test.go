@@ -64,33 +64,26 @@ var timeTests = []struct {
 		time.FixedZone("", -7*60*60))},
 }
 
-func tryParse(str string, cache locationCache) (t time.Time, err error) {
+func tryParse(str string) (t time.Time, err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = fmt.Errorf("%v", p)
 			return
 		}
 	}()
-
-	t = parseTs(cache, nil, str)
+	t = parseTs(nil, str)
 	return
 }
 
 func TestParseTs(t *testing.T) {
-	cache := newMappedLocationCache()
 	for i, tt := range timeTests {
-		val, err := tryParse(tt.str, cache)
+		val, err := tryParse(tt.str)
 		if val.String() != tt.expected.String() {
 			t.Errorf("%d: expected to parse '%v' into '%v'; got '%v'",
 				i, tt.str, tt.expected, val)
 		}
 		if err != nil {
 			t.Errorf("%d: got error: %v", i, err)
-		}
-		_, offset := tt.expected.Zone()
-		_, ok := cache[offset]
-		if !ok {
-			t.Errorf("%d: expected cache to have offset %d, but it didn't", i, offset)
 		}
 	}
 }
