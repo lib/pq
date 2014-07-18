@@ -179,30 +179,35 @@ func mustAtoi(str string) int {
 	}
 	return result
 }
-
-// This map holds locations by time zone offset. It is a cache because its expensive to create the location for every
-// single time that is allocated. (The expense is because the Location struct includes two slices that must be alloced
-// and then GCed when the time is released.) Benchmarks show that caching results in 3 fewer allocations per op and 
-// 147 fewer bytes alloced, for a speed improvement just under 20%.
-var locationCache map[int]*time.Location
-var locationCacheLock sync.Mutex
-
-func cachedLocation(offset int) *time.Location {
-	locationCacheLock.Lock()
-	defer locationCacheLock.Unlock()
-
-	if nil == locationCache {
-		locationCache = make(map[int]*time.Location)
-	}
-
-	location, ok := locationCache[offset]
-	if !ok {
-		location = time.FixedZone("", offset)
-		locationCache[offset] = location
-	}
-
-	return location
+  
+// The location cache caches the time zones typically used by the client. A RWMutex does not seem to improve performance.
+type locationCache struct {
+	cache map[int]*time.Location
+	lock sync.Mutex
 }
+
+// All connections share the same list of timezones. Benchmarking shows that about 5% speed could be gained by putting
+// the cache in the connection and losing the mutex, at the cost of a small amount of memory and a somewhat significant
+// increase in code complexity.
+var globalLocationCache *locationCache = newLocationCache()
+
+func newLocationCache() *locationCache {
+	return &locationCache { cache: make(map[int]*time.Location) }
+}
+
+// Returns the cached timezone for the specified offset, creating and caching it if necessary.
+func (c *locationCache) getLocation(offset int) *time.Location {
+ 	c.lock.Lock()
+ 	defer c.lock.Unlock()
+ 
+ 	location, ok := c.cache[offset]
+ 	if !ok {
+ 		location = time.FixedZone("", offset)
+ 		c.cache[offset] = location
+ 	}
+ 
+ 	return location
+ }
 
 // This is a time function specific to the Postgres default DateStyle
 // setting ("ISO, MDY"), the only one we currently support. This
@@ -282,7 +287,7 @@ func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 	}
 	t := time.Date(bcSign*year, time.Month(month), day,
 		hour, minute, second, nanoSec,
-		cachedLocation(tzOff))
+		globalLocationCache.getLocation(tzOff))
 
 	if currentLocation != nil {
 		// Set the location of the returned Time based on the session's
