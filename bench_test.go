@@ -372,7 +372,7 @@ func BenchmarkDecodeTimestamptzMultiThread(b *testing.B) {
 	f := func(wg *sync.WaitGroup, loops int) {
 		defer wg.Done()
 		for i := 0; i < loops; i++ {
-		decode(&parameterStatus{}, testTimestamptzBytes, oid.T_timestamptz)
+			decode(&parameterStatus{}, testTimestamptzBytes, oid.T_timestamptz)
 		}
 	}
 
@@ -380,7 +380,7 @@ func BenchmarkDecodeTimestamptzMultiThread(b *testing.B) {
 	b.ResetTimer()
 	for j := 0; j < 10; j++ {
 		wg.Add(1)
-		go f(wg, b.N / 10)
+		go f(wg, b.N/10)
 	}
 	wg.Wait()
 }
@@ -409,7 +409,7 @@ func BenchmarkLocationCacheMultiThread(b *testing.B) {
 	b.ResetTimer()
 	for j := 0; j < 10; j++ {
 		wg.Add(1)
-		go f(wg, b.N / 10)
+		go f(wg, b.N/10)
 	}
 	wg.Wait()
 }
