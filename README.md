@@ -50,6 +50,7 @@ code still exists in here.
 
 * Andy Balholm (andybalholm)
 * Ben Berkert (benburkert)
+* Benjamin Heatwole (bheatwole)
 * Bill Mill (llimllib)
 * Bjørn Madsen (aeons)
 * Blake Gentry (bgentry)
