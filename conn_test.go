@@ -8,6 +8,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -774,6 +775,11 @@ func TestIssue196(t *testing.T) {
 // Test that any CommandComplete messages sent before the query results are
 // ignored.
 func TestIssue282(t *testing.T) {
+	if strings.HasPrefix(runtime.Version(), "go1.0") {
+		fmt.Println("Skipping test due to lack of Queryer implementation")
+		return
+	}
+
 	db := openTestConn(t)
 	defer db.Close()
 
