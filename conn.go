@@ -482,11 +482,11 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 			cn.saveMessage(t, r)
 			return
 		case 'T':
-			if res != nil {
-				errorf("unexpected RowDescription in simple query execution")
-			}
+			// res might be non-nil here if we received a previous
+			// CommandComplete, but that's fine; just overwrite it
 			res = &rows{st: st}
 			st.cols, st.rowTyps = parseMeta(r)
+
 			// To work around a bug in QueryRow in Go 1.2 and earlier, wait
 			// until the first DataRow has been received.
 		default:

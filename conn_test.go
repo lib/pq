@@ -771,6 +771,25 @@ func TestIssue196(t *testing.T) {
 	}
 }
 
+// Test that any CommandComplete messages sent before the query results are
+// ignored.
+func TestIssue282(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	var search_path string
+	err := db.QueryRow(`
+		SET LOCAL search_path TO pg_catalog;
+		SET LOCAL search_path TO pg_catalog;
+		SHOW search_path`).Scan(&search_path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if search_path != "pg_catalog" {
+		t.Fatalf("unexpected search_path %s", search_path)
+	}
+}
+
 func TestReadFloatPrecision(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
