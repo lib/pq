@@ -437,7 +437,7 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 			return
 		case 'E':
 			err = parseError(r)
-		case 'T', 'D':
+		case 'T', 'D', 'I':
 			// ignore any results
 		default:
 			errorf("unknown response for simple query: %q", t)
@@ -458,13 +458,13 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 	for {
 		t, r := cn.recv1()
 		switch t {
-		case 'C':
+		case 'C', 'I':
 			// We allow queries which don't return any results through Query as
 			// well as Exec.  We still have to give database/sql a rows object
 			// the user can close, though, to avoid connections from being
 			// leaked.  A "rows" with done=true works fine for that purpose.
 			if err != nil {
-				errorf("unexpected CommandComplete in simple query execution")
+				errorf("unexpected message %q in simple query execution", t)
 			}
 			res = &rows{st: st, done: true}
 		case 'Z':
@@ -978,7 +978,7 @@ workaround:
 		switch t {
 		case 'E':
 			err = parseError(r)
-		case 'C', 'D':
+		case 'C', 'D', 'I':
 			// the query didn't fail, but we can't process this message
 			st.cn.saveMessage(t, r)
 			return
@@ -1084,7 +1084,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 		switch t {
 		case 'E':
 			err = parseError(r)
-		case 'C':
+		case 'C', 'I':
 			continue
 		case 'Z':
 			conn.processReadyForQuery(r)

@@ -284,6 +284,60 @@ func TestParameterCountMismatch(t *testing.T) {
 	}
 }
 
+// Test that EmptyQueryResponses are handled correctly.
+func TestEmptyQuery(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Exec("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cols) != 0 {
+		t.Fatalf("unexpected number of columns %d in response to an empty query", len(cols))
+	}
+	if rows.Next() {
+		t.Fatal("unexpected row")
+	}
+	if rows.Err() != nil {
+		t.Fatal(rows.Err())
+	}
+
+	stmt, err := db.Prepare("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = stmt.Exec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err = stmt.Query()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cols, err = rows.Columns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cols) != 0 {
+		t.Fatalf("unexpected number of columns %d in response to an empty query", len(cols))
+	}
+	if rows.Next() {
+		t.Fatal("unexpected row")
+	}
+	if rows.Err() != nil {
+		t.Fatal(rows.Err())
+	}
+}
+
 func TestEncodeDecode(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
