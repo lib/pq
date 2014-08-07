@@ -69,6 +69,10 @@ func (s transactionStatus) String() string {
 	panic("not reached")
 }
 
+type dialer interface {
+	Dial(network, address string) (net.Conn, error)
+}
+
 type conn struct {
 	c         net.Conn
 	buf       *bufio.Reader
@@ -89,6 +93,10 @@ func (c *conn) writeBuf(b byte) *writeBuf {
 }
 
 func Open(name string) (_ driver.Conn, err error) {
+	return Dialopen(&net.Dialer{}, name)
+}
+
+func Dialopen(d dialer, name string) (_ driver.Conn, err error) {
 	defer errRecover(&err)
 
 	o := make(values)
@@ -159,7 +167,7 @@ func Open(name string) (_ driver.Conn, err error) {
 		}
 	}
 
-	c, err := dial(o)
+	c, err := dial(d, o)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +181,7 @@ func Open(name string) (_ driver.Conn, err error) {
 	return cn, err
 }
 
-func dial(o values) (net.Conn, error) {
+func dial(d dialer, o values) (net.Conn, error) {
 	ntw, addr := network(o)
 
 	timeout := o.Get("connect_timeout")
@@ -199,7 +207,7 @@ func dial(o values) (net.Conn, error) {
 		err = conn.SetDeadline(deadline)
 		return conn, err
 	}
-	return net.Dial(ntw, addr)
+	return d.Dial(ntw, addr)
 }
 
 func network(o values) (string, string) {
