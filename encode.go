@@ -278,7 +278,7 @@ func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 			tzSec = mustAtoi(str[tzStart+7 : tzStart+9])
 			remainderIdx += 3
 		}
-		tzOff = (tzSign * tzHours * (60 * 60)) + (tzMin * 60) + tzSec
+		tzOff = tzSign * ((tzHours * 60 * 60) + (tzMin * 60) + tzSec)
 	}
 	if remainderIdx < len(str) && str[remainderIdx:remainderIdx+3] == " BC" {
 		bcSign = -1
