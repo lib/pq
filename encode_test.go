@@ -79,7 +79,7 @@ func TestParseTs(t *testing.T) {
 	for i, tt := range timeTests {
 		val, err := tryParse(tt.str)
 		if val.String() != tt.expected.String() {
-			t.Errorf("%d: expected to parse '%v' into '%v'; got '%v'",
+			t.Errorf("%d: expected to parse %q into %q; got %q",
 				i, tt.str, tt.expected, val)
 		}
 		if err != nil {
