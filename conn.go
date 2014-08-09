@@ -4,12 +4,10 @@ import (
 	"bufio"
 	"crypto/md5"
 	"crypto/tls"
-	"database/sql"
 	"database/sql/driver"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/lib/pq/oid"
 	"io"
 	"net"
 	"os"
@@ -18,6 +16,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/lib/pq/oid"
 )
 
 // Common error types
@@ -26,16 +26,6 @@ var (
 	ErrNotSupported        = errors.New("pq: Unsupported command")
 	ErrInFailedTransaction = errors.New("pq: Could not complete operation in a failed transaction")
 )
-
-type drv struct{}
-
-func (d *drv) Open(name string) (driver.Conn, error) {
-	return Open(name)
-}
-
-func init() {
-	sql.Register("postgres", &drv{})
-}
 
 type parameterStatus struct {
 	// server version in the same format as server_version_num, or 0 if
