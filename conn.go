@@ -69,8 +69,16 @@ func (s transactionStatus) String() string {
 	panic("not reached")
 }
 
-type dialer interface {
+type Dialer interface {
 	Dial(network, address string) (net.Conn, error)
+	DialTimeout(network, address string, timeout time.Duration) (net.Conn, error)
+}
+
+type defaultDialer struct{}
+
+func (d *defaultDialer) Dial(ntw, addr string) (net.Conn, error) { return net.Dial(ntw, addr) }
+func (d *defaultDialer) DialTimeout(ntw, addr string, timeout time.Duration) (net.Conn, error) {
+	return net.DialTimeout(ntw, addr, timeout)
 }
 
 type conn struct {
@@ -93,10 +101,10 @@ func (c *conn) writeBuf(b byte) *writeBuf {
 }
 
 func Open(name string) (_ driver.Conn, err error) {
-	return Dialopen(&net.Dialer{}, name)
+	return DialOpen(&defaultDialer{}, name)
 }
 
-func Dialopen(d dialer, name string) (_ driver.Conn, err error) {
+func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	defer errRecover(&err)
 
 	o := make(values)
@@ -181,7 +189,7 @@ func Dialopen(d dialer, name string) (_ driver.Conn, err error) {
 	return cn, err
 }
 
-func dial(d dialer, o values) (net.Conn, error) {
+func dial(d Dialer, o values) (net.Conn, error) {
 	ntw, addr := network(o)
 
 	timeout := o.Get("connect_timeout")
@@ -200,7 +208,7 @@ func dial(d dialer, o values) (net.Conn, error) {
 		// establishment and set a deadline for doing the initial handshake.
 		// The deadline is then reset after startup() is done.
 		deadline := time.Now().Add(duration)
-		conn, err := net.DialTimeout(ntw, addr, duration)
+		conn, err := d.DialTimeout(ntw, addr, duration)
 		if err != nil {
 			return nil, err
 		}
