@@ -986,6 +986,7 @@ workaround:
 			if err == nil {
 				errorf("unexpected ReadyForQuery during extended query execution")
 			}
+			st.cn.processReadyForQuery(r)
 			panic(err)
 		default:
 			errorf("unexpected message during query execution: %q", t)
