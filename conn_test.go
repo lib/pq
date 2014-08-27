@@ -451,7 +451,9 @@ func TestNoData(t *testing.T) {
 func TestError(t *testing.T) {
 	// Don't use the normal connection setup, this is intended to
 	// blow up in the startup packet from a non-existent user.
-	db, err := openTestConnConninfo("user=thisuserreallydoesntexist")
+	// this also serves to test a bad password where TEST_PGAUTHMETHOD is password or md5
+	bad_user := "thisuserreallydoesntexist"
+	db, err := openTestConnConninfo("user=" + bad_user)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,8 +464,23 @@ func TestError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 
-	if err != driver.ErrBadConn {
-		t.Fatalf("expected driver.ErrBadConn, got: %v", err)
+	tm := os.Getenv("TEST_PGAUTHMETHOD")
+	switch tm {
+	case "trust":
+		// no auth challenge is issued
+		// behaviour very much depends on the wider pg_hba.conf setup of the user
+		// i.e. does a route exist for bad_user
+		// testing every case here isn't sensible. we don't handle this in *conn.startup...
+		// hence we will just ensure we get the generic bad connection error
+		if err != driver.ErrBadConn {
+			t.Fatalf("expected driver.ErrBadConn, got: %v", err)
+		}
+	case "md5", "password":
+		if err.Error() != fmt.Sprintf("pq: password authentication failed for user \"%s\"", bad_user) {
+			t.Fatalf("expected authentication failed, got: %v", err)
+		}
+	default:
+		t.Fatalf("Need to ensure TEST_PGAUTHMETHOD is set to known value. Got %s", tm)
 	}
 }
 

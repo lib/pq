@@ -802,13 +802,21 @@ func (cn *conn) startup(o values) {
 func (cn *conn) auth(r *readBuf, o values) {
 	switch code := r.int32(); code {
 	case 0:
-		// OK
+		// This means the server is trust-ing connections... hence
+		// no challenge for password, md5 etc is made
 	case 3:
 		w := cn.writeBuf('p')
 		w.string(o.Get("password"))
 		cn.send(w)
 
-		t, r := cn.recv()
+		t, r, err := cn.recvMessage()
+		if err != nil {
+			panic(err)
+		}
+		if t == 'E' {
+			// auth error - either username or password not correct
+			errorf(parseError(r).Message)
+		}
 		if t != 'R' {
 			errorf("unexpected password response: %q", t)
 		}
@@ -822,7 +830,14 @@ func (cn *conn) auth(r *readBuf, o values) {
 		w.string("md5" + md5s(md5s(o.Get("password")+o.Get("user"))+s))
 		cn.send(w)
 
-		t, r := cn.recv()
+		t, r, err := cn.recvMessage()
+		if err != nil {
+			panic(err)
+		}
+		if t == 'E' {
+			// auth error - either username or password not correct
+			errorf(parseError(r).Message)
+		}
 		if t != 'R' {
 			errorf("unexpected password response: %q", t)
 		}
