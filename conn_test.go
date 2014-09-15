@@ -892,10 +892,7 @@ var envParseTests = []struct {
 
 func TestParseEnviron(t *testing.T) {
 	for i, tt := range envParseTests {
-		results, err := parseEnviron(tt.Env)
-		if err != nil {
-			t.Fatal(err)
-		}
+		results := parseEnviron(tt.Env)
 		if !reflect.DeepEqual(tt.Expected, results) {
 			t.Errorf("%d: Expected: %#v Got: %#v", i, tt.Expected, results)
 		}
@@ -1144,7 +1141,7 @@ func TestRuntimeParameters(t *testing.T) {
 		{"DOESNOTEXIST=foo", "", "", ResultError},
 		// we can only work with a specific value for these two
 		{"client_encoding=SQL_ASCII", "", "", ResultError},
-		{"datestyle='ISO, YDM'", "", "", ResultPanic},
+		{"datestyle='ISO, YDM'", "", "", ResultError},
 		// "options" should work exactly as it does in libpq
 		{"options='-c search_path=pqgotest'", "search_path", "pqgotest", ResultSuccess},
 		// pq should override client_encoding in this case

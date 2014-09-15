@@ -89,6 +89,22 @@ func (c *conn) writeBuf(b byte) *writeBuf {
 }
 
 func Open(name string) (_ driver.Conn, err error) {
+	defer func() {
+		// Handle any panics during connection initialization.  Note that we
+		// specifically do *not* want to use errRecover(), as that would turn
+		// any connection errors into ErrBadConns, hiding the real error.
+		var ok bool
+		e := recover()
+		if e == nil {
+			// Do nothing
+			return
+		}
+		err, ok = e.(*Error)
+		if !ok {
+			err = fmt.Errorf("pq: unexpected error: %#v", e)
+		}
+	}()
+
 	o := make(values)
 
 	// A number of defaults are applied here, in this order:
@@ -101,11 +117,7 @@ func Open(name string) (_ driver.Conn, err error) {
 	// N.B.: Extra float digits should be set to 3, but that breaks
 	// Postgres 8.4 and older, where the max is 2.
 	o.Set("extra_float_digits", "2")
-	parsedEnviron, err := parseEnviron(os.Environ())
-	if err != nil {
-		return nil, err
-	}
-	for k, v := range parsedEnviron {
+	for k, v := range parseEnviron(os.Environ()) {
 		o.Set(k, v)
 	}
 
@@ -167,15 +179,9 @@ func Open(name string) (_ driver.Conn, err error) {
 	}
 
 	cn := &conn{c: c}
-	err = cn.ssl(o)
-	if err != nil {
-		return nil, err
-	}
+	cn.ssl(o)
 	cn.buf = bufio.NewReader(cn.c)
-	err = cn.startup(o)
-	if err != nil {
-		return nil, err
-	}
+	cn.startup(o)
 	// reset the deadline, in case one was set (see dial)
 	err = cn.c.SetDeadline(time.Time{})
 	return cn, err
@@ -687,21 +693,21 @@ func (cn *conn) recvMessage() (byte, *readBuf, error) {
 	return t, (*readBuf)(&y), nil
 }
 
-// recv receives a a single message from the backend.  NoticeResponse messages
-// are automatically ignored.  If an error happened while reading the message
-// or the received message was an ErrorResponse, an error is returned.  This
-// function should generally only be used during the startup sequence.
-func (cn *conn) recv() (t byte, r *readBuf, err error) {
+// recv receives a message from the backend, but if an error happened while
+// reading the message or the received message was an ErrorResponse, it panics.
+// NoticeResponses are ignored.  This function should generally be used only
+// during the startup sequence.
+func (cn *conn) recv() (t byte, r *readBuf) {
 	for {
+		var err error
 		t, r, err = cn.recvMessage()
 		if err != nil {
-			return
+			panic(err)
 		}
 
 		switch t {
 		case 'E':
-			err = parseError(r)
-			return
+			panic(parseError(r))
 		case 'N':
 			// ignore
 		default:
@@ -736,7 +742,7 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 	panic("not reached")
 }
 
-func (cn *conn) ssl(o values) error {
+func (cn *conn) ssl(o values) {
 	tlsConf := tls.Config{}
 	switch mode := o.Get("sslmode"); mode {
 	case "require", "":
@@ -744,9 +750,9 @@ func (cn *conn) ssl(o values) error {
 	case "verify-full":
 		tlsConf.ServerName = o.Get("host")
 	case "disable":
-		return nil
+		return
 	default:
-		return fmt.Errorf(`unsupported sslmode %q; only "require" (default), "verify-full", and "disable" supported`, mode)
+		errorf(`unsupported sslmode %q; only "require" (default), "verify-full", and "disable" supported`, mode)
 	}
 
 	w := cn.writeBuf(0)
@@ -756,18 +762,17 @@ func (cn *conn) ssl(o values) error {
 	b := cn.scratch[:1]
 	_, err := io.ReadFull(cn.c, b)
 	if err != nil {
-		return err
+		panic(err)
 	}
 
 	if b[0] != 'S' {
-		return ErrSSLNotSupported
+		panic(ErrSSLNotSupported)
 	}
 
 	cn.c = tls.Client(cn.c, &tlsConf)
-	return nil
 }
 
-func (cn *conn) startup(o values) error {
+func (cn *conn) startup(o values) {
 	w := cn.writeBuf(0)
 	w.int32(196608)
 	// Send the backend the name of the database we want to connect to, and the
@@ -792,10 +797,7 @@ func (cn *conn) startup(o values) error {
 	cn.send(w)
 
 	for {
-		t, r, err := cn.recv()
-		if err != nil {
-			return err
-		}
+		t, r := cn.recv()
 		switch t {
 		case 'K':
 		case 'S':
@@ -804,15 +806,14 @@ func (cn *conn) startup(o values) error {
 			cn.auth(r, o)
 		case 'Z':
 			cn.processReadyForQuery(r)
-			return nil
+			return
 		default:
-			return fmt.Errorf("unknown response for startup: %q", t)
+			errorf("unknown response for startup: %q", t)
 		}
 	}
-	panic("not reached")
 }
 
-func (cn *conn) auth(r *readBuf, o values) error {
+func (cn *conn) auth(r *readBuf, o values) {
 	switch code := r.int32(); code {
 	case 0:
 		// OK
@@ -821,16 +822,13 @@ func (cn *conn) auth(r *readBuf, o values) error {
 		w.string(o.Get("password"))
 		cn.send(w)
 
-		t, r, err := cn.recv()
-		if err != nil {
-			return err
-		}
+		t, r := cn.recv()
 		if t != 'R' {
-			return fmt.Errorf("unexpected password response: %q", t)
+			errorf("unexpected password response: %q", t)
 		}
 
 		if r.int32() != 0 {
-			return fmt.Errorf("unexpected authentication response: %q", t)
+			errorf("unexpected authentication response: %q", t)
 		}
 	case 5:
 		s := string(r.next(4))
@@ -838,21 +836,17 @@ func (cn *conn) auth(r *readBuf, o values) error {
 		w.string("md5" + md5s(md5s(o.Get("password")+o.Get("user"))+s))
 		cn.send(w)
 
-		t, r, err := cn.recv()
-		if err != nil {
-			return err
-		}
+		t, r := cn.recv()
 		if t != 'R' {
-			return fmt.Errorf("unexpected password response: %q", t)
+			errorf("unexpected password response: %q", t)
 		}
 
 		if r.int32() != 0 {
-			return fmt.Errorf("unexpected authentication response: %q", t)
+			errorf("unexpected authentication response: %q", t)
 		}
 	default:
-		return fmt.Errorf("unknown authentication response: %d", code)
+		errorf("unknown authentication response: %d", code)
 	}
-	return nil
 }
 
 type stmt struct {
@@ -1210,7 +1204,7 @@ func parseMeta(r *readBuf) (cols []string, rowTyps []oid.Oid) {
 // Environment-set connection information is intended to have a higher
 // precedence than a library default but lower than any explicitly
 // passed information (such as in the URL or connection string).
-func parseEnviron(env []string) (out map[string]string, err error) {
+func parseEnviron(env []string) (out map[string]string) {
 	out = make(map[string]string)
 
 	for _, v := range env {
@@ -1219,8 +1213,8 @@ func parseEnviron(env []string) (out map[string]string, err error) {
 		accrue := func(keyname string) {
 			out[keyname] = parts[1]
 		}
-		unsupported := func() (out map[string]string, err error) {
-			return nil, fmt.Errorf("setting %v not supported", parts[0])
+		unsupported := func() {
+			panic(fmt.Sprintf("setting %v not supported", parts[0]))
 		}
 
 		// The order of these is the same as is seen in the
@@ -1233,7 +1227,7 @@ func parseEnviron(env []string) (out map[string]string, err error) {
 		case "PGHOST":
 			accrue("host")
 		case "PGHOSTADDR":
-			return unsupported()
+			unsupported()
 		case "PGPORT":
 			accrue("port")
 		case "PGDATABASE":
@@ -1243,7 +1237,7 @@ func parseEnviron(env []string) (out map[string]string, err error) {
 		case "PGPASSWORD":
 			accrue("password")
 		case "PGPASSFILE", "PGSERVICE", "PGSERVICEFILE", "PGREALM":
-			return unsupported()
+			unsupported()
 		case "PGOPTIONS":
 			accrue("options")
 		case "PGAPPNAME":
@@ -1251,11 +1245,11 @@ func parseEnviron(env []string) (out map[string]string, err error) {
 		case "PGSSLMODE":
 			accrue("sslmode")
 		case "PGREQUIRESSL", "PGSSLCERT", "PGSSLKEY", "PGSSLROOTCERT", "PGSSLCRL":
-			return unsupported()
+			unsupported()
 		case "PGREQUIREPEER":
-			return unsupported()
+			unsupported()
 		case "PGKRBSRVNAME", "PGGSSLIB":
-			return unsupported()
+			unsupported()
 		case "PGCONNECT_TIMEOUT":
 			accrue("connect_timeout")
 		case "PGCLIENTENCODING":
@@ -1267,11 +1261,11 @@ func parseEnviron(env []string) (out map[string]string, err error) {
 		case "PGGEQO":
 			accrue("geqo")
 		case "PGSYSCONFDIR", "PGLOCALEDIR":
-			return unsupported()
+			unsupported()
 		}
 	}
 
-	return out, nil
+	return out
 }
 
 // isUTF8 returns whether name is a fuzzy variation of the string "UTF-8".
