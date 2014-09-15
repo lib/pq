@@ -1126,7 +1126,7 @@ func TestParseOpts(t *testing.T) {
 func TestRuntimeParameters(t *testing.T) {
 	type RuntimeTestResult int
 	const (
-		ResultPanic RuntimeTestResult = iota
+		ResultUnknown RuntimeTestResult = iota
 		ResultSuccess
 		ResultError // other error
 	)
@@ -1169,11 +1169,6 @@ func TestRuntimeParameters(t *testing.T) {
 		}
 
 		tryGetParameterValue := func() (value string, outcome RuntimeTestResult) {
-			defer func() {
-				if p := recover(); p != nil {
-					outcome = ResultPanic
-				}
-			}()
 			row := db.QueryRow("SELECT current_setting($1)", test.param)
 			err = row.Scan(&value)
 			if err != nil {
