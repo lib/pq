@@ -687,10 +687,10 @@ func (cn *conn) recvMessage() (byte, *readBuf, error) {
 	return t, (*readBuf)(&y), nil
 }
 
-// recv receives a message from the backend, but if an error happened while
-// reading the message or the received message was an ErrorResponse, an error
-// is returned.  NoticeResponses are ignored.  This function should generally
-// only be used during the startup sequence.
+// recv receives a a single message from the backend.  NoticeResponse messages
+// are automatically ignored.  If an error happened while reading the message
+// or the received message was an ErrorResponse, an error is returned.  This
+// function should generally only be used during the startup sequence.
 func (cn *conn) recv() (t byte, r *readBuf, err error) {
 	for {
 		t, r, err = cn.recvMessage()
