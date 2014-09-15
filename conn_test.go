@@ -8,6 +8,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -280,6 +281,60 @@ func TestParameterCountMismatch(t *testing.T) {
 	err = db.QueryRow("SELECT 1").Scan(&notused)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Test that EmptyQueryResponses are handled correctly.
+func TestEmptyQuery(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Exec("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cols) != 0 {
+		t.Fatalf("unexpected number of columns %d in response to an empty query", len(cols))
+	}
+	if rows.Next() {
+		t.Fatal("unexpected row")
+	}
+	if rows.Err() != nil {
+		t.Fatal(rows.Err())
+	}
+
+	stmt, err := db.Prepare("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = stmt.Exec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err = stmt.Query()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cols, err = rows.Columns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cols) != 0 {
+		t.Fatalf("unexpected number of columns %d in response to an empty query", len(cols))
+	}
+	if rows.Next() {
+		t.Fatal("unexpected row")
+	}
+	if rows.Err() != nil {
+		t.Fatal(rows.Err())
 	}
 }
 
@@ -771,6 +826,30 @@ func TestIssue196(t *testing.T) {
 	}
 	if !float8match {
 		t.Errorf("Expected float8 fidelity to be maintained; got no match")
+	}
+}
+
+// Test that any CommandComplete messages sent before the query results are
+// ignored.
+func TestIssue282(t *testing.T) {
+	if strings.HasPrefix(runtime.Version(), "go1.0") {
+		fmt.Println("Skipping test due to lack of Queryer implementation")
+		return
+	}
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	var search_path string
+	err := db.QueryRow(`
+		SET LOCAL search_path TO pg_catalog;
+		SET LOCAL search_path TO pg_catalog;
+		SHOW search_path`).Scan(&search_path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if search_path != "pg_catalog" {
+		t.Fatalf("unexpected search_path %s", search_path)
 	}
 }
 

@@ -50,6 +50,7 @@ code still exists in here.
 
 * Andy Balholm (andybalholm)
 * Ben Berkert (benburkert)
+* Benjamin Heatwole (bheatwole)
 * Bill Mill (llimllib)
 * Bjørn Madsen (aeons)
 * Blake Gentry (bgentry)
@@ -67,6 +68,7 @@ code still exists in here.
 * Jeremy Jay (pbnjay)
 * Joakim Sernbrant (serbaut)
 * John Gallagher (jgallagher)
+* Joël Stemmer (jstemmer)
 * Kamil Kisiel (kisielk)
 * Kelly Dunn (kellydunn)
 * Keith Rarick (kr)
