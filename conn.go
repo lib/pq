@@ -99,7 +99,7 @@ func Open(name string) (_ driver.Conn, err error) {
 			// Do nothing
 			return
 		}
-		err, ok = e.(*Error)
+		err, ok = e.(error)
 		if !ok {
 			err = fmt.Errorf("pq: unexpected error: %#v", e)
 		}
