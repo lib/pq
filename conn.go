@@ -92,7 +92,8 @@ func Open(name string) (_ driver.Conn, err error) {
 	defer func() {
 		// Handle any panics during connection initialization.  Note that we
 		// specifically do *not* want to use errRecover(), as that would turn
-		// any connection errors into ErrBadConns, hiding the real error.
+		// any connection errors into ErrBadConns, hiding the real error
+		// message from the user.
 		var ok bool
 		e := recover()
 		if e == nil {
