@@ -36,7 +36,8 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 	case bool:
 		return []byte(fmt.Sprintf("%t", v))
 	case time.Time:
-		return []byte(v.Format(time.RFC3339Nano))
+		return formatTs(v)
+
 	default:
 		errorf("encode: unknown type for %T", v)
 	}
@@ -97,7 +98,7 @@ func appendEncodedText(parameterStatus *parameterStatus, buf []byte, x interface
 	case bool:
 		return strconv.AppendBool(buf, v)
 	case time.Time:
-		return append(buf, v.Format(time.RFC3339Nano)...)
+		return append(buf, formatTs(v)...)
 	case nil:
 		return append(buf, "\\N"...)
 	default:
@@ -278,7 +279,7 @@ func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 			tzSec = mustAtoi(str[tzStart+7 : tzStart+9])
 			remainderIdx += 3
 		}
-		tzOff = (tzSign * tzHours * (60 * 60)) + (tzMin * 60) + tzSec
+		tzOff = tzSign * ((tzHours * 60 * 60) + (tzMin * 60) + tzSec)
 	}
 	if remainderIdx < len(str) && str[remainderIdx:remainderIdx+3] == " BC" {
 		bcSign = -1
@@ -303,6 +304,28 @@ func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 	}
 
 	return t
+}
+
+// formatTs formats t as time.RFC3339Nano and appends time zone seconds if
+// needed.
+func formatTs(t time.Time) (b []byte) {
+	b = []byte(t.Format(time.RFC3339Nano))
+
+	_, offset := t.Zone()
+	offset = offset % 60
+	if offset == 0 {
+		return b
+	}
+
+	if offset < 0 {
+		offset = -offset
+	}
+
+	b = append(b, ':')
+	if offset < 10 {
+		b = append(b, '0')
+	}
+	return strconv.AppendInt(b, int64(offset), 10)
 }
 
 // Parse a bytea value received from the server.  Both "hex" and the legacy

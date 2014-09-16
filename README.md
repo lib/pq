@@ -68,6 +68,7 @@ code still exists in here.
 * Jeremy Jay (pbnjay)
 * Joakim Sernbrant (serbaut)
 * John Gallagher (jgallagher)
+* Joël Stemmer (jstemmer)
 * Kamil Kisiel (kisielk)
 * Kelly Dunn (kellydunn)
 * Keith Rarick (kr)
