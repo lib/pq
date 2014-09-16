@@ -448,7 +448,7 @@ func TestNoData(t *testing.T) {
 	}
 }
 
-func TestError(t *testing.T) {
+func TestErrorDuringStartup(t *testing.T) {
 	// Don't use the normal connection setup, this is intended to
 	// blow up in the startup packet from a non-existent user.
 	db, err := openTestConnConninfo("user=thisuserreallydoesntexist")
@@ -462,8 +462,11 @@ func TestError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 
-	if err != driver.ErrBadConn {
-		t.Fatalf("expected driver.ErrBadConn, got: %v", err)
+	e, ok := err.(*Error)
+	if !ok {
+		t.Fatalf("expected Error, got %#v", err)
+	} else if e.Code.Name() != "invalid_authorization_specification" {
+		t.Fatalf("expected invalid_authorization_specification, got %s (%+v)", e.Code.Name(), err)
 	}
 }
 
@@ -1123,8 +1126,7 @@ func TestParseOpts(t *testing.T) {
 func TestRuntimeParameters(t *testing.T) {
 	type RuntimeTestResult int
 	const (
-		ResultBadConn RuntimeTestResult = iota
-		ResultPanic
+		ResultUnknown RuntimeTestResult = iota
 		ResultSuccess
 		ResultError // other error
 	)
@@ -1136,10 +1138,10 @@ func TestRuntimeParameters(t *testing.T) {
 		expectedOutcome RuntimeTestResult
 	}{
 		// invalid parameter
-		{"DOESNOTEXIST=foo", "", "", ResultBadConn},
+		{"DOESNOTEXIST=foo", "", "", ResultError},
 		// we can only work with a specific value for these two
 		{"client_encoding=SQL_ASCII", "", "", ResultError},
-		{"datestyle='ISO, YDM'", "", "", ResultPanic},
+		{"datestyle='ISO, YDM'", "", "", ResultError},
 		// "options" should work exactly as it does in libpq
 		{"options='-c search_path=pqgotest'", "search_path", "pqgotest", ResultSuccess},
 		// pq should override client_encoding in this case
@@ -1167,16 +1169,8 @@ func TestRuntimeParameters(t *testing.T) {
 		}
 
 		tryGetParameterValue := func() (value string, outcome RuntimeTestResult) {
-			defer func() {
-				if p := recover(); p != nil {
-					outcome = ResultPanic
-				}
-			}()
 			row := db.QueryRow("SELECT current_setting($1)", test.param)
 			err = row.Scan(&value)
-			if err == driver.ErrBadConn {
-				return "", ResultBadConn
-			}
 			if err != nil {
 				return "", ResultError
 			}
