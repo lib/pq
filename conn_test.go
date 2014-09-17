@@ -473,17 +473,19 @@ func TestErrorDuringStartup(t *testing.T) {
 func TestBadConn(t *testing.T) {
 	var err error
 
+	cn := conn{}
 	func() {
-		cn := conn{}
 		defer cn.errRecover(&err)
 		panic(io.EOF)
 	}()
-
 	if err != driver.ErrBadConn {
 		t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
 	}
+	if !cn.bad {
+		t.Fatalf("expected cn.bad")
+	}
 
-	cn := conn{}
+	cn = conn{}
 	func() {
 		defer cn.errRecover(&err)
 		e := &Error{Severity: Efatal}
