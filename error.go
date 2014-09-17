@@ -459,7 +459,7 @@ func errorf(s string, args ...interface{}) {
 	panic(fmt.Errorf("pq: %s", fmt.Sprintf(s, args...)))
 }
 
-func errRecover(err *error) {
+func (c *conn) errRecover(err *error) {
 	e := recover()
 	switch v := e.(type) {
 	case nil:
@@ -483,5 +483,9 @@ func errRecover(err *error) {
 
 	default:
 		panic(fmt.Sprintf("unknown error: %#v", e))
+	}
+
+	if *err == driver.ErrBadConn {
+		c.bad = true
 	}
 }

@@ -474,7 +474,8 @@ func TestBadConn(t *testing.T) {
 	var err error
 
 	func() {
-		defer errRecover(&err)
+		cn := conn{}
+		defer cn.errRecover(&err)
 		panic(io.EOF)
 	}()
 
@@ -482,14 +483,17 @@ func TestBadConn(t *testing.T) {
 		t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
 	}
 
+	cn := conn{}
 	func() {
-		defer errRecover(&err)
+		defer cn.errRecover(&err)
 		e := &Error{Severity: Efatal}
 		panic(e)
 	}()
-
 	if err != driver.ErrBadConn {
 		t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
+	}
+	if !cn.bad {
+		t.Fatalf("expected cn.bad")
 	}
 }
 
