@@ -125,7 +125,7 @@ func (l *ListenerConn) setState(newState int32) bool {
 // away or should be discarded because we couldn't agree on the state with the
 // server backend.
 func (l *ListenerConn) listenerConnLoop() (err error) {
-	defer errRecover(&err)
+	defer l.cn.errRecover(&err)
 
 	for {
 		t, r, err := l.cn.recvMessage()
@@ -239,7 +239,7 @@ func (l *ListenerConn) Ping() error {
 // The caller must be holding senderLock (see acquireSenderLock and
 // releaseSenderLock).
 func (l *ListenerConn) sendSimpleQuery(q string) (err error) {
-	defer errRecover(&err)
+	defer l.cn.errRecover(&err)
 
 	// must set connection state before sending the query
 	if !l.setState(connStateExpectResponse) {
