@@ -858,7 +858,6 @@ type stmt struct {
 	rowTyps   []oid.Oid
 	paramTyps []oid.Oid
 	closed    bool
-	lasterr   error
 }
 
 func (st *stmt) Close() (err error) {
@@ -1086,10 +1085,6 @@ func (rs *rows) Columns() []string {
 func (rs *rows) Next(dest []driver.Value) (err error) {
 	if rs.done {
 		return io.EOF
-	}
-
-	if rs.st.lasterr != nil {
-		return rs.st.lasterr
 	}
 
 	defer errRecover(&err)
