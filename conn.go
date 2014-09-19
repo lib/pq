@@ -76,8 +76,8 @@ type Dialer interface {
 
 type defaultDialer struct{}
 
-func (d *defaultDialer) Dial(ntw, addr string) (net.Conn, error) { return net.Dial(ntw, addr) }
-func (d *defaultDialer) DialTimeout(ntw, addr string, timeout time.Duration) (net.Conn, error) {
+func (d defaultDialer) Dial(ntw, addr string) (net.Conn, error) { return net.Dial(ntw, addr) }
+func (d defaultDialer) DialTimeout(ntw, addr string, timeout time.Duration) (net.Conn, error) {
 	return net.DialTimeout(ntw, addr, timeout)
 }
 
@@ -101,7 +101,7 @@ func (c *conn) writeBuf(b byte) *writeBuf {
 }
 
 func Open(name string) (_ driver.Conn, err error) {
-	return DialOpen(&defaultDialer{}, name)
+	return DialOpen(defaultDialer{}, name)
 }
 
 func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
