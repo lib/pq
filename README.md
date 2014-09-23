@@ -62,6 +62,7 @@ code still exists in here.
 * Evan Shaw (edsrzf)
 * Ewan Chou (coocood)
 * Federico Romero (federomero)
+* Fumin (fumin)
 * Gary Burd (garyburd)
 * Heroku (heroku)
 * Jason McVetta (jmcvetta)
