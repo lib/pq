@@ -75,6 +75,8 @@ func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{}
 			errorf("%s", err)
 		}
 		return f
+	case oid.T_varchar, oid.T_text:
+		return string(s)
 	}
 
 	return s

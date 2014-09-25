@@ -330,6 +330,26 @@ func TestByteaOutputFormats(t *testing.T) {
 	testByteaOutputFormat("escape")
 }
 
+func TestTextOutput(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	s := "hello world"
+	var resText, resVarchar interface{}
+	err := db.QueryRow("SELECT $1::text, $2::varchar", s, s).Scan(&resText, &resVarchar)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := resText.(string); !ok {
+		t.Errorf("unexpected data type output: %T", resText)
+	}
+
+	if _, ok := resVarchar.(string); !ok {
+		t.Errorf("unexpected data type output: %T", resVarchar)
+	}
+}
+
 func TestAppendEncodedText(t *testing.T) {
 	var buf []byte
 
