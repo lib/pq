@@ -570,7 +570,7 @@ func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
 		switch t {
 		case '1':
 		case 't':
-			nparams := int(r.int16())
+			nparams := r.int16()
 			st.paramTyps = make([]oid.Oid, nparams)
 
 			for i := range st.paramTyps {
