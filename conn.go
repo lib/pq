@@ -717,7 +717,7 @@ func (cn *conn) recvMessage(r *readBuf) (byte, error) {
 	// workaround for a QueryRow bug, see exec
 	if cn.saveMessageType != 0 {
 		t := cn.saveMessageType
-		r.replace([]byte(*cn.saveMessageBuffer))
+		*r = []byte(*cn.saveMessageBuffer)
 		cn.saveMessageType = 0
 		cn.saveMessageBuffer = nil
 		return t, nil
@@ -742,7 +742,7 @@ func (cn *conn) recvMessage(r *readBuf) (byte, error) {
 	if err != nil {
 		return 0, err
 	}
-	r.replace(y)
+	*r = y
 	return t, nil
 }
 
