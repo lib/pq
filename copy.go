@@ -96,11 +96,13 @@ awaitCopyInResponse:
 			err = parseError(r)
 		case 'Z':
 			if err == nil {
+				cn.bad = true
 				errorf("unexpected ReadyForQuery in response to COPY")
 			}
 			cn.processReadyForQuery(r)
 			return nil, err
 		default:
+			cn.bad = true
 			errorf("unknown response for copy query: %q", t)
 		}
 	}
@@ -119,6 +121,7 @@ awaitCopyInResponse:
 			cn.processReadyForQuery(r)
 			return nil, err
 		default:
+			cn.bad = true
 			errorf("unknown response for CopyFail: %q", t)
 		}
 	}
@@ -150,6 +153,7 @@ func (ci *copyin) resploop() {
 			err := parseError(r)
 			ci.setError(err)
 		default:
+			ci.cn.bad = true
 			errorf("unknown response: %q", t)
 		}
 	}

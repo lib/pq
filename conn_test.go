@@ -914,7 +914,8 @@ func TestParseComplete(t *testing.T) {
 				}
 			}
 		}()
-		res, c := parseComplete(commandTag)
+		cn := &conn{}
+		res, c := cn.parseComplete(commandTag)
 		if c != command {
 			t.Errorf("Expected %v, got %v", command, c)
 		}

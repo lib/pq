@@ -387,6 +387,7 @@ func (cn *conn) isInTransaction() bool {
 
 func (cn *conn) checkIsInTransaction(intxn bool) {
 	if cn.isInTransaction() != intxn {
+		cn.bad = true
 		errorf("unexpected transaction status %v", cn.txnStatus)
 	}
 }
@@ -476,7 +477,7 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 		t, r := cn.recv1()
 		switch t {
 		case 'C':
-			res, commandTag = parseComplete(r.string())
+			res, commandTag = cn.parseComplete(r.string())
 		case 'Z':
 			cn.processReadyForQuery(r)
 			// done
@@ -486,6 +487,7 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 		case 'T', 'D', 'I':
 			// ignore any results
 		default:
+			cn.bad = true
 			errorf("unknown response for simple query: %q", t)
 		}
 	}
@@ -510,6 +512,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 			// the user can close, though, to avoid connections from being
 			// leaked.  A "rows" with done=true works fine for that purpose.
 			if err != nil {
+				cn.bad = true
 				errorf("unexpected message %q in simple query execution", t)
 			}
 			res = &rows{st: st, done: true}
@@ -522,6 +525,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 			err = parseError(r)
 		case 'D':
 			if res == nil {
+				cn.bad = true
 				errorf("unexpected DataRow in simple query execution")
 			}
 			// the query didn't fail; kick off to Next
@@ -536,6 +540,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 			// To work around a bug in QueryRow in Go 1.2 and earlier, wait
 			// until the first DataRow has been received.
 		default:
+			cn.bad = true
 			errorf("unknown response for simple query: %q", t)
 		}
 	}
@@ -581,6 +586,7 @@ func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
 		case 'E':
 			err = parseError(r)
 		default:
+			cn.bad = true
 			errorf("unexpected describe rows response: %q", t)
 		}
 	}
@@ -698,6 +704,7 @@ func (cn *conn) sendSimpleMessage(typ byte) (err error) {
 // the message yourself.
 func (cn *conn) saveMessage(typ byte, buf *readBuf) {
 	if cn.saveMessageType != 0 {
+		cn.bad = true
 		errorf("unexpected saveMessageType %d", cn.saveMessageType)
 	}
 	cn.saveMessageType = typ
@@ -922,12 +929,14 @@ func (st *stmt) Close() (err error) {
 
 	t, _ := st.cn.recv1()
 	if t != '3' {
+		st.cn.bad = true
 		errorf("unexpected close response: %q", t)
 	}
 	st.closed = true
 
 	t, r := st.cn.recv1()
 	if t != 'Z' {
+		st.cn.bad = true
 		errorf("expected ready for query, but got: %q", t)
 	}
 	st.cn.processReadyForQuery(r)
@@ -964,7 +973,7 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 		case 'E':
 			err = parseError(r)
 		case 'C':
-			res, _ = parseComplete(r.string())
+			res, _ = st.cn.parseComplete(r.string())
 		case 'Z':
 			st.cn.processReadyForQuery(r)
 			// done
@@ -972,6 +981,7 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 		case 'T', 'D':
 			// ignore any results
 		default:
+			st.cn.bad = true
 			errorf("unknown exec response: %q", t)
 		}
 	}
@@ -1026,6 +1036,7 @@ func (st *stmt) exec(v []driver.Value) {
 			}
 			return
 		default:
+			st.cn.bad = true
 			errorf("unexpected bind response: %q", t)
 		}
 	}
@@ -1051,11 +1062,13 @@ workaround:
 			return
 		case 'Z':
 			if err == nil {
+				st.cn.bad = true
 				errorf("unexpected ReadyForQuery during extended query execution")
 			}
 			st.cn.processReadyForQuery(r)
 			panic(err)
 		default:
+			st.cn.bad = true
 			errorf("unexpected message during query execution: %q", t)
 		}
 	}
@@ -1069,7 +1082,7 @@ func (st *stmt) NumInput() int {
 // returns the number of rows affected (if applicable) and a string
 // identifying only the command that was executed, e.g. "ALTER TABLE".  If the
 // command tag could not be parsed, parseComplete panics.
-func parseComplete(commandTag string) (driver.Result, string) {
+func (cn *conn) parseComplete(commandTag string) (driver.Result, string) {
 	commandsWithAffectedRows := []string{
 		"SELECT ",
 		// INSERT is handled below
@@ -1096,6 +1109,7 @@ func parseComplete(commandTag string) (driver.Result, string) {
 	if affectedRows == nil && strings.HasPrefix(commandTag, "INSERT ") {
 		parts := strings.Split(commandTag, " ")
 		if len(parts) != 3 {
+			cn.bad = true
 			errorf("unexpected INSERT command tag %s", commandTag)
 		}
 		affectedRows = &parts[len(parts)-1]
@@ -1107,6 +1121,7 @@ func parseComplete(commandTag string) (driver.Result, string) {
 	}
 	n, err := strconv.ParseInt(*affectedRows, 10, 64)
 	if err != nil {
+		cn.bad = true
 		errorf("could not parse commandTag: %s", err)
 	}
 	return driver.RowsAffected(n), commandTag
