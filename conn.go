@@ -1179,8 +1179,8 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 		t := conn.recv1Buf(&rs.rb)
 		switch t {
 		case 'E':
-		case 'C', 'I':
 			err = parseError(&rs.rb)
+		case 'C', 'I':
 			continue
 		case 'Z':
 			conn.processReadyForQuery(&rs.rb)
