@@ -990,6 +990,9 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 }
 
 func (st *stmt) exec(v []driver.Value) {
+	if len(v) >= 65536 {
+		errorf("got %d parameters but PostgreSQL only supports 65535 parameters", len(v))
+	}
 	if len(v) != len(st.paramTyps) {
 		errorf("got %d parameters but the statement requires %d", len(v), len(st.paramTyps))
 	}
