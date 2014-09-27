@@ -94,6 +94,10 @@ type conn struct {
 
 	saveMessageType   byte
 	saveMessageBuffer *readBuf
+
+	// If true, this connection is bad and all public-facing functions should
+	// return ErrBadConn.
+	bad bool
 }
 
 func (c *conn) writeBuf(b byte) *writeBuf {
@@ -388,7 +392,10 @@ func (cn *conn) checkIsInTransaction(intxn bool) {
 }
 
 func (cn *conn) Begin() (_ driver.Tx, err error) {
-	defer errRecover(&err)
+	if cn.bad {
+		return nil, driver.ErrBadConn
+	}
+	defer cn.errRecover(&err)
 
 	cn.checkIsInTransaction(false)
 	_, commandTag, err := cn.simpleExec("BEGIN")
@@ -405,7 +412,10 @@ func (cn *conn) Begin() (_ driver.Tx, err error) {
 }
 
 func (cn *conn) Commit() (err error) {
-	defer errRecover(&err)
+	if cn.bad {
+		return driver.ErrBadConn
+	}
+	defer cn.errRecover(&err)
 
 	cn.checkIsInTransaction(true)
 	// We don't want the client to think that everything is okay if it tries
@@ -433,7 +443,10 @@ func (cn *conn) Commit() (err error) {
 }
 
 func (cn *conn) Rollback() (err error) {
-	defer errRecover(&err)
+	if cn.bad {
+		return driver.ErrBadConn
+	}
+	defer cn.errRecover(&err)
 
 	cn.checkIsInTransaction(true)
 	_, commandTag, err := cn.simpleExec("ROLLBACK")
@@ -453,7 +466,7 @@ func (cn *conn) gname() string {
 }
 
 func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err error) {
-	defer errRecover(&err)
+	defer cn.errRecover(&err)
 
 	b := cn.writeBuf('Q')
 	b.string(q)
@@ -480,7 +493,7 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 }
 
 func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
-	defer errRecover(&err)
+	defer cn.errRecover(&err)
 
 	st := &stmt{cn: cn, name: "", query: q}
 
@@ -530,7 +543,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 }
 
 func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
-	defer errRecover(&err)
+	defer cn.errRecover(&err)
 
 	st := &stmt{cn: cn, name: stmtName, query: q}
 
@@ -576,6 +589,10 @@ func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
 }
 
 func (cn *conn) Prepare(q string) (driver.Stmt, error) {
+	if cn.bad {
+		return nil, driver.ErrBadConn
+	}
+
 	if len(q) >= 4 && strings.EqualFold(q[:4], "COPY") {
 		return cn.prepareCopyIn(q)
 	}
@@ -583,7 +600,10 @@ func (cn *conn) Prepare(q string) (driver.Stmt, error) {
 }
 
 func (cn *conn) Close() (err error) {
-	defer errRecover(&err)
+	if cn.bad {
+		return driver.ErrBadConn
+	}
+	defer cn.errRecover(&err)
 
 	// Don't go through send(); ListenerConn relies on us not scribbling on the
 	// scratch buffer of this connection.
@@ -597,7 +617,10 @@ func (cn *conn) Close() (err error) {
 
 // Implement the "Queryer" interface
 func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err error) {
-	defer errRecover(&err)
+	if cn.bad {
+		return nil, driver.ErrBadConn
+	}
+	defer cn.errRecover(&err)
 
 	// Check to see if we can use the "simpleQuery" interface, which is
 	// *much* faster than going through prepare/exec
@@ -616,7 +639,10 @@ func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err err
 
 // Implement the optional "Execer" interface for one-shot queries
 func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err error) {
-	defer errRecover(&err)
+	if cn.bad {
+		return nil, driver.ErrBadConn
+	}
+	defer cn.errRecover(&err)
 
 	// Check to see if we can use the "simpleExec" interface, which is
 	// *much* faster than going through prepare/exec
@@ -882,8 +908,10 @@ func (st *stmt) Close() (err error) {
 	if st.closed {
 		return nil
 	}
-
-	defer errRecover(&err)
+	if st.cn.bad {
+		return driver.ErrBadConn
+	}
+	defer st.cn.errRecover(&err)
 
 	w := st.cn.writeBuf('C')
 	w.byte('S')
@@ -908,13 +936,20 @@ func (st *stmt) Close() (err error) {
 }
 
 func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) {
-	defer errRecover(&err)
+	if st.cn.bad {
+		return nil, driver.ErrBadConn
+	}
+	defer st.cn.errRecover(&err)
+
 	st.exec(v)
 	return &rows{st: st}, nil
 }
 
 func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
-	defer errRecover(&err)
+	if st.cn.bad {
+		return nil, driver.ErrBadConn
+	}
+	defer st.cn.errRecover(&err)
 
 	if len(v) == 0 {
 		// ignore commandTag, our caller doesn't care
@@ -1083,6 +1118,7 @@ type rows struct {
 }
 
 func (rs *rows) Close() error {
+	// no need to look at cn.bad as Next() will
 	for {
 		err := rs.Next(nil)
 		switch err {
@@ -1105,9 +1141,12 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 		return io.EOF
 	}
 
-	defer errRecover(&err)
-
 	conn := rs.st.cn
+	if conn.bad {
+		return driver.ErrBadConn
+	}
+	defer conn.errRecover(&err)
+
 	for {
 		t, r := conn.recv1()
 		switch t {
