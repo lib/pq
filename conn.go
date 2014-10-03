@@ -467,8 +467,6 @@ func (cn *conn) gname() string {
 }
 
 func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err error) {
-	defer cn.errRecover(&err)
-
 	b := cn.writeBuf('Q')
 	b.string(q)
 	cn.send(b)
