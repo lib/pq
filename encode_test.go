@@ -475,6 +475,50 @@ func TestScanTextArray(t *testing.T) {
 	}
 }
 
+func TestValueArrayStatement(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	stmt, err := db.Prepare("SELECT $1::text[]")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	row := stmt.QueryRow([]string{`h"e"llo`, "wo`rl`d"})
+
+	var result []string
+	err = row.Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result) != 2 {
+		t.Errorf("Expected result to have 2 elements, got %d.\n#v", len(result), result)
+	}
+
+	if result[0] != `h"e"llo` {
+		t.Errorf("Expected result[0] to equal 'hello', got %s", result[0])
+	}
+
+	if result[1] != "wo`rl`d" {
+		t.Errorf("Expected result[1] to equal 'world', got %s", result[1])
+	}
+}
+
+
+// Known limitation: slice type cannot be converted if used directly by db.Exec/Query/QueryRow
+func TestValueArrayQuery(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+	_, err := db.Exec("SELECT $1::text[]", []string{`h"e"llo`, "wo`rl`d"})
+
+	expectedErrStr := `sql: converting Exec argument #0's type: unsupported type []string, a slice`
+
+	if err.Error() != expectedErrStr {
+		t.Errorf("Expected error \"%s\", got \"%s\"", expectedErrStr, err)
+	}
+}
+
 // Not supported yet. Can parse it, but can't get it out of the pq.decoder
 // func TestSelectMultidimensionStringArray(t *testing.T) {
 // 	db := openTestConn(t)
