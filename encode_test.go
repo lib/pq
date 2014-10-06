@@ -396,7 +396,7 @@ func BenchmarkAppendEscapedTextNoEscape(b *testing.B) {
 	}
 }
 
-func TestSelectIntArray(t *testing.T) {
+func TestScanIntArray(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
@@ -425,11 +425,36 @@ func TestSelectIntArray(t *testing.T) {
 	}
 }
 
-func TestSelectStringArray(t *testing.T) {
+func TestScanVarcharArray(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
 	row := db.QueryRow("SELECT '{\"hello\", \"world\"}'::varchar[]")
+
+	var result []string
+	err := row.Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result) != 2 {
+		t.Errorf("Expected result to have 2 elements, got %d.\n#v", len(result), result)
+	}
+
+	if result[0] != "hello" {
+		t.Errorf("Expected result[0] to equal 'hello', got %s", result[0])
+	}
+
+	if result[1] != "world" {
+		t.Errorf("Expected result[1] to equal 'world', got %s", result[1])
+	}
+}
+
+func TestScanTextArray(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	row := db.QueryRow("SELECT '{hello, world}'::text[]")
 
 	var result []string
 	err := row.Scan(&result)

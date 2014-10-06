@@ -82,7 +82,7 @@ func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{}
 			errorf("%s", err)
 		}
 		return v
-	case oid.T__varchar:
+	case oid.T__varchar, oid.T__text:
 		var v []string
 		if err := arrays.Unmarshal(s, &v); err != nil {
 			errorf("%s", err)
