@@ -310,6 +310,11 @@ func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 // needed.
 func formatTs(t time.Time) (b []byte) {
 	b = []byte(t.Format(time.RFC3339Nano))
+	// Need to send dates before 0001 A.D. with " BC" suffix, instead of the
+	// minus sign preferred by Go.
+	if b[0] == '-' {
+		b = append(b[1:], ' ', 'B', 'C')
+	}
 
 	_, offset := t.Zone()
 	offset = offset % 60
