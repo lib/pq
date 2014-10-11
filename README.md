@@ -65,6 +65,7 @@ code still exists in here.
 * Fumin (fumin)
 * Gary Burd (garyburd)
 * Heroku (heroku)
+* James Pozdena (jpoz)
 * Jason McVetta (jmcvetta)
 * Jeremy Jay (pbnjay)
 * Joakim Sernbrant (serbaut)
