@@ -13,7 +13,9 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/user"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -22,9 +24,10 @@ import (
 
 // Common error types
 var (
-	ErrSSLNotSupported     = errors.New("pq: SSL is not enabled on the server")
-	ErrNotSupported        = errors.New("pq: Unsupported command")
-	ErrInFailedTransaction = errors.New("pq: Could not complete operation in a failed transaction")
+	ErrNotSupported              = errors.New("pq: Unsupported command")
+	ErrInFailedTransaction       = errors.New("pq: Could not complete operation in a failed transaction")
+	ErrSSLNotSupported           = errors.New("pq: SSL is not enabled on the server")
+	ErrSSLKeyHasWorldPermissions = errors.New("pq: Private key file has group or world access. Permissions should be u=rw (0600) or less.")
 )
 
 type drv struct{}
@@ -798,6 +801,8 @@ func (cn *conn) ssl(o values) {
 		errorf(`unsupported sslmode %q; only "require" (default), "verify-full", and "disable" supported`, mode)
 	}
 
+	cn.setupSSLClientCertificates(&tlsConf, o)
+
 	w := cn.writeBuf(0)
 	w.int32(80877103)
 	cn.send(w)
@@ -815,6 +820,66 @@ func (cn *conn) ssl(o values) {
 	cn.c = tls.Client(cn.c, &tlsConf)
 }
 
+// This function sets up SSL client certificates based on either the "sslkey"
+// and "sslcert" settings (possibly set via the environment variables PGSSLKEY
+// and PGSSLCERT, respectively), or if they aren't set, from the .postgresql
+// directory in the user's home directory.  If the file paths are set
+// explicitly, the files must exist.  The key file must also not be
+// world-readable, or this function will panic with
+// ErrSSLKeyHasWorldPermissions.
+func (cn *conn) setupSSLClientCertificates(tlsConf *tls.Config, o values) {
+	var missingOk bool
+
+	sslkey := o.Get("sslkey")
+	sslcert := o.Get("sslcert")
+	if sslkey != "" && sslcert != "" {
+		// If the user has set a sslkey and sslcert, they *must* exist.
+		missingOk = false
+	} else {
+		// Automatically load certificates from ~/.postgresql.
+		user, err := user.Current()
+		if err != nil {
+			// user.Current() might fail when cross-compiling.  We have to
+			// ignore the error and continue without client certificates, since
+			// we wouldn't know where to load them from.
+			return
+		}
+
+		sslkey = filepath.Join(user.HomeDir, ".postgresql", "postgresql.key")
+		sslcert = filepath.Join(user.HomeDir, ".postgresql", "postgresql.crt")
+		missingOk = true
+	}
+
+	// Check that both files exist, and report the error or stop depending on
+	// which behaviour we want.  Note that we don't do any more extensive
+	// checks than this (such as checking that the paths aren't directories);
+	// LoadX509KeyPair() will take care of the rest.
+	keyfinfo, err := os.Stat(sslkey)
+	if err != nil && missingOk {
+		return
+	} else if err != nil {
+		panic(err)
+	}
+	_, err = os.Stat(sslcert)
+	if err != nil && missingOk {
+		return
+	} else if err != nil {
+		panic(err)
+	}
+
+	// If we got this far, the key file must also have the correct permissions
+	kmode := keyfinfo.Mode()
+	if kmode != kmode&0600 {
+		panic(ErrSSLKeyHasWorldPermissions)
+	}
+
+	cert, err := tls.LoadX509KeyPair(sslcert, sslkey)
+	if err != nil {
+		panic(err)
+	}
+	tlsConf.Certificates = []tls.Certificate{cert}
+}
+
 // isDriverSetting returns true iff a setting is purely for the configuring the
 // driver's options and should not be sent to the server in the connection
 // startup packet.
@@ -824,7 +889,7 @@ func isDriverSetting(key string) bool {
 		return true
 	case "password":
 		return true
-	case "sslmode":
+	case "sslmode", "sslcert", "sslkey":
 		return true
 	case "fallback_application_name":
 		return true
@@ -1327,7 +1392,11 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("application_name")
 		case "PGSSLMODE":
 			accrue("sslmode")
-		case "PGREQUIRESSL", "PGSSLCERT", "PGSSLKEY", "PGSSLROOTCERT", "PGSSLCRL":
+		case "PGSSLCERT":
+			accrue("sslcert")
+		case "PGSSLKEY":
+			accrue("sslkey")
+		case "PGREQUIRESSL", "PGSSLROOTCERT", "PGSSLCRL":
 			unsupported()
 		case "PGREQUIREPEER":
 			unsupported()
