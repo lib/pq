@@ -161,7 +161,6 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 			o.Set("application_name", fallback)
 		}
 	}
-	o.Unset("fallback_application_name")
 
 	// We can't work with any client_encoding other than UTF-8 currently.
 	// However, we have historically allowed the user to set it to UTF-8
@@ -214,8 +213,6 @@ func dial(d Dialer, o values) (net.Conn, error) {
 	ntw, addr := network(o)
 
 	timeout := o.Get("connect_timeout")
-	// Ensure the option will not be sent.
-	o.Unset("connect_timeout")
 
 	// Zero or not specified means wait indefinitely.
 	if timeout != "" && timeout != "0" {
@@ -263,10 +260,6 @@ func (vs values) Get(k string) (v string) {
 func (vs values) Isset(k string) bool {
 	_, ok := vs[k]
 	return ok
-}
-
-func (vs values) Unset(k string) {
-	delete(vs, k)
 }
 
 // scanner implements a tokenizer for libpq-style option strings.
@@ -822,6 +815,28 @@ func (cn *conn) ssl(o values) {
 	cn.c = tls.Client(cn.c, &tlsConf)
 }
 
+// isDriverSetting returns true iff a setting is purely for the configuring the
+// driver's options and should not be sent to the server in the connection
+// startup packet.
+func isDriverSetting(key string) bool {
+	switch key {
+	case "host", "port":
+		return true
+	case "password":
+		return true
+	case "sslmode":
+		return true
+	case "fallback_application_name":
+		return true
+	case "connect_timeout":
+		return true
+
+	default:
+		return false
+	}
+	panic("not reached")
+}
+
 func (cn *conn) startup(o values) {
 	w := cn.writeBuf(0)
 	w.int32(196608)
@@ -830,9 +845,8 @@ func (cn *conn) startup(o values) {
 	// parameters potentially included in the connection string.  If the server
 	// doesn't recognize any of them, it will reply with an error.
 	for k, v := range o {
-		// skip options which can't be run-time parameters
-		if k == "password" || k == "host" ||
-			k == "port" || k == "sslmode" {
+		if isDriverSetting(k) {
+			// skip options which can't be run-time parameters
 			continue
 		}
 		// The protocol requires us to supply the database name as "database"
