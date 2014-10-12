@@ -41,6 +41,11 @@ before_install:
   - sudo /etc/init.d/postgresql restart
 
 env:
+  global:
+    - PGUSER=postgres
+    - PQGOSSLTESTS=1
+    - PQSSLCERTTEST_CERT=$PWD/certs/postgresql.crt
+    - PQSSLCERTTEST_KEY=$PWD/certs/postgresql.key
   matrix:
     - PGVERSION=9.3
     - PGVERSION=9.2
@@ -49,7 +54,7 @@ env:
     - PGVERSION=8.4
 
 script:
- - env PQSSLCERTTEST_KEY=$PWD/certs/postgresql.key PQSSLCERTTEST_CERT=$PWD/certs/postgresql.crt PQGOSSLTESTS=1 PGUSER=postgres go test -v ./...
+ - go test -v ./...
 
 before_script:
  - psql -c 'create database pqgotest' -U postgres
