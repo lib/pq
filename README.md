@@ -55,6 +55,7 @@ code still exists in here.
 * Bjørn Madsen (aeons)
 * Blake Gentry (bgentry)
 * Brad Fitzpatrick (bradfitz)
+* Charlie Melbye (cmelbye)
 * Chris Walsh (cwds)
 * Daniel Farina (fdr)
 * Eric Chlebek (echlebek)
