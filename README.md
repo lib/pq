@@ -56,6 +56,7 @@ code still exists in here.
 * Blake Gentry (bgentry)
 * Brad Fitzpatrick (bradfitz)
 * Charlie Melbye (cmelbye)
+* Chris Bandy (cbandy)
 * Chris Walsh (cwds)
 * Daniel Farina (fdr)
 * Eric Chlebek (echlebek)
