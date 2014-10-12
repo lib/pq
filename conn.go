@@ -791,10 +791,16 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 }
 
 func (cn *conn) ssl(o values) {
+	verifyCaOnly := false
 	tlsConf := tls.Config{}
 	switch mode := o.Get("sslmode"); mode {
 	case "require", "":
 		tlsConf.InsecureSkipVerify = true
+	case "verify-ca":
+		// We must skip TLS's own verification since it requires full
+		// verification since Go 1.3.
+		tlsConf.InsecureSkipVerify = true
+		verifyCaOnly = true
 	case "verify-full":
 		tlsConf.ServerName = o.Get("host")
 	case "disable":
@@ -820,8 +826,39 @@ func (cn *conn) ssl(o values) {
 		panic(ErrSSLNotSupported)
 	}
 
-	cn.c = tls.Client(cn.c, &tlsConf)
+	client := tls.Client(cn.c, &tlsConf)
+	if verifyCaOnly {
+		cn.verifyCA(client, &tlsConf)
+	}
+	cn.c = client
 }
+
+// verifyCA carries out a TLS handshake to the server and verifies the
+// presented certificate against the effective CA, i.e. the one specified in
+// sslrootcert or the system CA if sslrootcert was not specified.
+func (cn *conn) verifyCA(client *tls.Conn, tlsConf *tls.Config) {
+	err := client.Handshake()
+	if err != nil {
+		panic(err)
+	}
+	certs := client.ConnectionState().PeerCertificates
+	opts := x509.VerifyOptions{
+		DNSName: client.ConnectionState().ServerName,
+		Intermediates: x509.NewCertPool(),
+		Roots: tlsConf.RootCAs,
+	}
+	for i, cert := range certs {
+		if i == 0 {
+			continue
+		}
+		opts.Intermediates.AddCert(cert)
+	}
+	_, err = certs[0].Verify(opts)
+	if err != nil {
+		panic(err)
+	}
+}
+
 
 // This function sets up SSL client certificates based on either the "sslkey"
 // and "sslcert" settings (possibly set via the environment variables PGSSLKEY

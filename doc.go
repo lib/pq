@@ -55,7 +55,8 @@ Valid values for sslmode are:
 
 	* disable - No SSL
 	* require - Always SSL (skip verification)
-	* verify-full - Always SSL (require verification)
+	* verify-ca - Always SSL (verify that the certificate presented by the server was signed by a trusted CA)
+	* verify-full - Always SSL (verify that the certification presented by the server was signed by a trusted CA and the server host name matches the one in the certificate)
 
 See http://www.postgresql.org/docs/current/static/libpq-connect.html#LIBPQ-CONNSTRING
 for more information about connection string parameters.
