@@ -3,6 +3,7 @@ package pq
 // This file contains SSL tests
 
 import (
+	_ "crypto/sha256"
 	"crypto/x509"
 	"database/sql"
 	"fmt"
