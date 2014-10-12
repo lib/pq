@@ -37,15 +37,14 @@ before_install:
   - sudo sh -c "echo 127.0.0.1 postgres >> /etc/hosts"
   - sudo ls -l /var/lib/postgresql/$PGVERSION/main/
   - sudo cat /etc/postgresql/$PGVERSION/main/postgresql.conf
-  - sudo chmod og-xwr certs/postgresql.key
+  - sudo chmod 600 $PQSSLCERTTEST_PATH/postgresql.key
   - sudo /etc/init.d/postgresql restart
 
 env:
   global:
     - PGUSER=postgres
     - PQGOSSLTESTS=1
-    - PQSSLCERTTEST_CERT=$PWD/certs/postgresql.crt
-    - PQSSLCERTTEST_KEY=$PWD/certs/postgresql.key
+    - PQSSLCERTTEST_PATH=$PWD/certs
   matrix:
     - PGVERSION=9.3
     - PGVERSION=9.2
