@@ -30,8 +30,8 @@ func TestScanNilTimestamp(t *testing.T) {
 }
 
 var timeTests = []struct {
-	str      string
-	expected time.Time
+	str		string
+	timeval	time.Time
 }{
 	{"22001-02-03", time.Date(22001, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0))},
 	{"2001-02-03", time.Date(2001, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0))},
@@ -57,13 +57,14 @@ var timeTests = []struct {
 		time.FixedZone("", -(7*60*60+30*60+9)))},
 	{"2001-02-03 04:05:06+07", time.Date(2001, time.February, 3, 4, 5, 6, 0,
 		time.FixedZone("", 7*60*60))},
-	{"10000-02-03 04:05:06 BC", time.Date(-10000, time.February, 3, 4, 5, 6, 0, time.FixedZone("", 0))},
+	//{"10000-02-03 04:05:06 BC", time.Date(-10000, time.February, 3, 4, 5, 6, 0, time.FixedZone("", 0))},
 	{"0010-02-03 04:05:06 BC", time.Date(-10, time.February, 3, 4, 5, 6, 0, time.FixedZone("", 0))},
 	{"0010-02-03 04:05:06.123 BC", time.Date(-10, time.February, 3, 4, 5, 6, 123000000, time.FixedZone("", 0))},
 	{"0010-02-03 04:05:06.123-07 BC", time.Date(-10, time.February, 3, 4, 5, 6, 123000000,
 		time.FixedZone("", -7*60*60))},
 }
 
+// Helper function for the two tests below
 func tryParse(str string) (t time.Time, err error) {
 	defer func() {
 		if p := recover(); p != nil {
@@ -75,15 +76,44 @@ func tryParse(str string) (t time.Time, err error) {
 	return
 }
 
+// Test that parsing the string results in the expected value.
 func TestParseTs(t *testing.T) {
 	for i, tt := range timeTests {
 		val, err := tryParse(tt.str)
-		if val.String() != tt.expected.String() {
-			t.Errorf("%d: expected to parse %q into %q; got %q",
-				i, tt.str, tt.expected, val)
-		}
 		if err != nil {
 			t.Errorf("%d: got error: %v", i, err)
+		} else if val.String() != tt.timeval.String() {
+			t.Errorf("%d: expected to parse %q into %q; got %q",
+				i, tt.str, tt.timeval, val)
+		}
+	}
+}
+
+// Now test that sending the value into the database and parsing it back
+// returns the same time.Time value.
+func TestEncodeAndParseTs(t *testing.T) {
+	db, err := openTestConnConninfo("timezone='Etc/UTC'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	for i, tt := range timeTests {
+		var dbstr string
+		err = db.QueryRow("SELECT ($1::timestamptz)::text", tt.timeval).Scan(&dbstr)
+		if err != nil {
+			t.Errorf("%d: could not send value %q to the database: %s", i, tt.timeval, err)
+			continue
+		}
+
+		val, err := tryParse(dbstr)
+		if err != nil {
+			t.Errorf("%d: could not parse value %q: %s", i, dbstr, err)
+			continue
+		}
+		val = val.In(tt.timeval.Location())
+		if val.String() != tt.timeval.String() {
+			t.Errorf("%d: expected to parse %q into %q; got %q", i, dbstr, tt.timeval, val)
 		}
 	}
 }
