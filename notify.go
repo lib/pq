@@ -127,8 +127,9 @@ func (l *ListenerConn) setState(newState int32) bool {
 func (l *ListenerConn) listenerConnLoop() (err error) {
 	defer l.cn.errRecover(&err)
 
+	r := &readBuf{}
 	for {
-		t, r, err := l.cn.recvMessage()
+		t, err := l.cn.recvMessage(r)
 		if err != nil {
 			return err
 		}
