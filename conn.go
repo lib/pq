@@ -544,8 +544,6 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 }
 
 func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
-	defer cn.errRecover(&err)
-
 	st := &stmt{cn: cn, name: stmtName, query: q}
 
 	b := cn.writeBuf('P')
@@ -590,10 +588,11 @@ func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
 	panic("not reached")
 }
 
-func (cn *conn) Prepare(q string) (driver.Stmt, error) {
+func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
+	defer cn.errRecover(&err)
 
 	if len(q) >= 4 && strings.EqualFold(q[:4], "COPY") {
 		return cn.prepareCopyIn(q)

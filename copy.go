@@ -59,8 +59,6 @@ const ciBufferSize = 64 * 1024
 const ciBufferFlushSize = 63 * 1024
 
 func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
-	defer cn.errRecover(&err)
-
 	if !cn.isInTransaction() {
 		return nil, errCopyNotSupportedOutsideTxn
 	}
