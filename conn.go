@@ -493,7 +493,7 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 	defer cn.errRecover(&err)
 
-	st := &stmt{cn: cn, name: "", query: q}
+	st := &stmt{cn: cn, name: ""}
 
 	b := cn.writeBuf('Q')
 	b.string(q)
@@ -544,7 +544,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 }
 
 func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
-	st := &stmt{cn: cn, name: stmtName, query: q}
+	st := &stmt{cn: cn, name: stmtName}
 
 	b := cn.writeBuf('P')
 	b.string(st.name)
@@ -1046,7 +1046,6 @@ func (cn *conn) auth(r *readBuf, o values) {
 type stmt struct {
 	cn        *conn
 	name      string
-	query     string
 	cols      []string
 	rowTyps   []oid.Oid
 	paramTyps []oid.Oid
@@ -1102,11 +1101,6 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 	}
 	defer st.cn.errRecover(&err)
 
-	if len(v) == 0 {
-		// ignore commandTag, our caller doesn't care
-		r, _, err := st.cn.simpleExec(st.query)
-		return r, err
-	}
 	st.exec(v)
 
 	for {
@@ -1120,7 +1114,7 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 			st.cn.processReadyForQuery(r)
 			// done
 			return
-		case 'T', 'D':
+		case 'T', 'D', 'I':
 			// ignore any results
 		default:
 			st.cn.bad = true
