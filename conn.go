@@ -402,9 +402,11 @@ func (cn *conn) Begin() (_ driver.Tx, err error) {
 		return nil, err
 	}
 	if commandTag != "BEGIN" {
+		cn.bad = true
 		return nil, fmt.Errorf("unexpected command tag %s", commandTag)
 	}
 	if cn.txnStatus != txnStatusIdleInTransaction {
+		cn.bad = true
 		return nil, fmt.Errorf("unexpected transaction status %v", cn.txnStatus)
 	}
 	return cn, nil
@@ -435,6 +437,7 @@ func (cn *conn) Commit() (err error) {
 		return err
 	}
 	if commandTag != "COMMIT" {
+		cn.bad = true
 		return fmt.Errorf("unexpected command tag %s", commandTag)
 	}
 	cn.checkIsInTransaction(false)
