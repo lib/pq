@@ -98,7 +98,7 @@ type conn struct {
 	parameterStatus parameterStatus
 
 	saveMessageType   byte
-	saveMessageBuffer *readBuf
+	saveMessageBuffer []byte
 
 	// If true, this connection is bad and all public-facing functions should
 	// return ErrBadConn.
@@ -703,7 +703,7 @@ func (cn *conn) saveMessage(typ byte, buf *readBuf) {
 		errorf("unexpected saveMessageType %d", cn.saveMessageType)
 	}
 	cn.saveMessageType = typ
-	cn.saveMessageBuffer = buf
+	cn.saveMessageBuffer = *buf
 }
 
 // recvMessage receives any message from the backend, or returns an error if
@@ -712,7 +712,7 @@ func (cn *conn) recvMessage(r *readBuf) (byte, error) {
 	// workaround for a QueryRow bug, see exec
 	if cn.saveMessageType != 0 {
 		t := cn.saveMessageType
-		*r = []byte(*cn.saveMessageBuffer)
+		*r = cn.saveMessageBuffer
 		cn.saveMessageType = 0
 		cn.saveMessageBuffer = nil
 		return t, nil
