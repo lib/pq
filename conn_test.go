@@ -13,10 +13,6 @@ import (
 	"time"
 )
 
-type Fatalistic interface {
-	Fatal(args ...interface{})
-}
-
 func openTestConnConninfo(conninfo string) (*sql.DB, error) {
 	datname := os.Getenv("PGDATABASE")
 	sslmode := os.Getenv("PGSSLMODE")
@@ -37,7 +33,7 @@ func openTestConnConninfo(conninfo string) (*sql.DB, error) {
 	return sql.Open("postgres", conninfo)
 }
 
-func openTestConn(t Fatalistic) *sql.DB {
+func openTestConn(t testing.TB) *sql.DB {
 	conn, err := openTestConnConninfo("")
 	if err != nil {
 		t.Fatal(err)
