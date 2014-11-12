@@ -1082,7 +1082,7 @@ func (this defaultConverter) ConvertValue(v interface{}) (returnValue driver.Val
 			mySlice = append(mySlice, myString)
 		}
 		returnValue = "{" + strings.Join(mySlice, ",") + "}"
-		return
+		return returnValue, nil
 	}
 	// still error? sorry, but we have to return now!
 	return

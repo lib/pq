@@ -535,6 +535,27 @@ func TestValueArrayStatement(t *testing.T) {
 	}
 }
 
+func TestEmptyValueArrayStatement(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	stmt, err := db.Prepare("SELECT $1::text[]")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	row := stmt.QueryRow([]string{})
+
+	var result []string
+	err = row.Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result) != 0 {
+		t.Errorf("Expected result to have 0 elements, got %d.\n#v", len(result), result)
+	}
+}
 
 // Known limitation: slice type cannot be converted if used directly by db.Exec/Query/QueryRow
 func TestValueArrayQuery(t *testing.T) {
