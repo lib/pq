@@ -1168,14 +1168,15 @@ func TestRuntimeParameters(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer db.Close()
 
 		// application_name didn't exist before 9.0
 		if test.param == "application_name" && getServerVersion(t, db) < 90000 {
+			db.Close()
 			continue
 		}
 
 		tryGetParameterValue := func() (value string, outcome RuntimeTestResult) {
+			defer db.Close()
 			row := db.QueryRow("SELECT current_setting($1)", test.param)
 			err = row.Scan(&value)
 			if err != nil {
