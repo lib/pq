@@ -94,7 +94,7 @@ func TestSSLVerifyFull(t *testing.T) {
 	rootCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "root.crt")
 	rootCert := "sslrootcert=" + rootCertPath + " "
 	// No match on Common Name
-	_, err = openSSLConn(t, rootCert + "host=127.0.0.1 sslmode=verify-full user=pqgossltest")
+	_, err = openSSLConn(t, rootCert+"host=127.0.0.1 sslmode=verify-full user=pqgossltest")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -103,7 +103,7 @@ func TestSSLVerifyFull(t *testing.T) {
 		t.Fatalf("expected x509.HostnameError, got %#+v", err)
 	}
 	// OK
-	_, err = openSSLConn(t, rootCert + "host=postgres sslmode=verify-full user=pqgossltest")
+	_, err = openSSLConn(t, rootCert+"host=postgres sslmode=verify-full user=pqgossltest")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,17 +131,16 @@ func TestSSLVerifyCA(t *testing.T) {
 	rootCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "root.crt")
 	rootCert := "sslrootcert=" + rootCertPath + " "
 	// No match on Common Name, but that's OK
-	_, err = openSSLConn(t, rootCert + "host=127.0.0.1 sslmode=verify-ca user=pqgossltest")
+	_, err = openSSLConn(t, rootCert+"host=127.0.0.1 sslmode=verify-ca user=pqgossltest")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Everything OK
-	_, err = openSSLConn(t, rootCert + "host=postgres sslmode=verify-ca user=pqgossltest")
+	_, err = openSSLConn(t, rootCert+"host=postgres sslmode=verify-ca user=pqgossltest")
 	if err != nil {
 		t.Fatal(err)
 	}
 }
-
 
 func getCertConninfo(t *testing.T, source string) string {
 	var sslkey string

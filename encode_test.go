@@ -30,8 +30,8 @@ func TestScanNilTimestamp(t *testing.T) {
 }
 
 var timeTests = []struct {
-	str		string
-	timeval	time.Time
+	str     string
+	timeval time.Time
 }{
 	{"22001-02-03", time.Date(22001, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0))},
 	{"2001-02-03", time.Date(2001, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0))},
