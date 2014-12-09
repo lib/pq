@@ -123,8 +123,6 @@ awaitCopyInResponse:
 			errorf("unknown response for CopyFail: %q", t)
 		}
 	}
-
-	panic("not reached")
 }
 
 func (ci *copyin) flush(buf []byte) {

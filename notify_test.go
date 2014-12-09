@@ -24,7 +24,6 @@ func expectNotification(t *testing.T, ch <-chan *Notification, relname string, e
 	case <-time.After(1500 * time.Millisecond):
 		return fmt.Errorf("timeout")
 	}
-	panic("not reached")
 }
 
 func expectNoNotification(t *testing.T, ch <-chan *Notification) error {
@@ -34,7 +33,6 @@ func expectNoNotification(t *testing.T, ch <-chan *Notification) error {
 	case <-time.After(100 * time.Millisecond):
 		return nil
 	}
-	panic("not reached")
 }
 
 func expectEvent(t *testing.T, eventch <-chan ListenerEventType, et ListenerEventType) error {
@@ -47,7 +45,6 @@ func expectEvent(t *testing.T, eventch <-chan ListenerEventType, et ListenerEven
 	case <-time.After(1500 * time.Millisecond):
 		return fmt.Errorf("timeout")
 	}
-	panic("not reached")
 }
 
 func expectNoEvent(t *testing.T, eventch <-chan ListenerEventType) error {
@@ -57,7 +54,6 @@ func expectNoEvent(t *testing.T, eventch <-chan ListenerEventType) error {
 	case <-time.After(100 * time.Millisecond):
 		return nil
 	}
-	panic("not reached")
 }
 
 func newTestListenerConn(t *testing.T) (*ListenerConn, <-chan *Notification) {
