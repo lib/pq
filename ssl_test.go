@@ -48,7 +48,7 @@ func checkSSLSetup(t *testing.T, conninfo string) {
 	db, err := openSSLConn(t, conninfo)
 	if err == nil {
 		db.Close()
-		t.Fatal("expected error with conninfo=%q", conninfo)
+		t.Fatalf("expected error with conninfo=%q", conninfo)
 	}
 }
 
