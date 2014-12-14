@@ -884,7 +884,7 @@ func (cn *conn) setupSSLClientCertificates(tlsConf *tls.Config, o values) {
 	sslkey := o.Get("sslkey")
 	sslcert := o.Get("sslcert")
 	if sslkey != "" && sslcert != "" {
-		// If the user has set a sslkey and sslcert, they *must* exist.
+		// If the user has set an sslkey and sslcert, they *must* exist.
 		missingOk = false
 	} else {
 		// Automatically load certificates from ~/.postgresql.
@@ -901,7 +901,7 @@ func (cn *conn) setupSSLClientCertificates(tlsConf *tls.Config, o values) {
 		missingOk = true
 	}
 
-	// Check that both files exist, and report the error or stop depending on
+	// Check that both files exist, and report the error or stop, depending on
 	// which behaviour we want.  Note that we don't do any more extensive
 	// checks than this (such as checking that the paths aren't directories);
 	// LoadX509KeyPair() will take care of the rest.
@@ -948,7 +948,7 @@ func (cn *conn) setupSSLCA(tlsConf *tls.Config, o values) {
 	}
 }
 
-// isDriverSetting returns true iff a setting is purely for the configuring the
+// isDriverSetting returns true iff a setting is purely for configuring the
 // driver's options and should not be sent to the server in the connection
 // startup packet.
 func isDriverSetting(key string) bool {
