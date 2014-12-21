@@ -170,8 +170,6 @@ func (l *ListenerConn) listenerConnLoop() (err error) {
 			return fmt.Errorf("unexpected message %q from server in listenerConnLoop", t)
 		}
 	}
-
-	panic("not reached")
 }
 
 // This is the main routine for the goroutine receiving on the database
@@ -318,8 +316,6 @@ func (l *ListenerConn) ExecSimpleQuery(q string) (executed bool, err error) {
 			return false, fmt.Errorf("unknown response for simple query: %q", m.typ)
 		}
 	}
-
-	panic("not reached")
 }
 
 func (l *ListenerConn) Close() error {
@@ -631,8 +627,6 @@ func (l *Listener) resync(cn *ListenerConn, notificationChan <-chan *Notificatio
 			return err
 		}
 	}
-
-	panic("not reached")
 }
 
 // caller should NOT be holding l.lock
