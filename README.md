@@ -72,6 +72,7 @@ code still exists in here.
 * Jeremy Jay (pbnjay)
 * Joakim Sernbrant (serbaut)
 * John Gallagher (jgallagher)
+* Jonathan Rudenberg (titanous)
 * Joël Stemmer (jstemmer)
 * Kamil Kisiel (kisielk)
 * Kelly Dunn (kellydunn)
