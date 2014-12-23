@@ -71,6 +71,7 @@ func (s transactionStatus) String() string {
 	default:
 		errorf("unknown transactionStatus %d", s)
 	}
+
 	panic("not reached")
 }
 
@@ -490,7 +491,6 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 			errorf("unknown response for simple query: %q", t)
 		}
 	}
-	panic("not reached")
 }
 
 func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
@@ -543,7 +543,6 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 			errorf("unknown response for simple query: %q", t)
 		}
 	}
-	panic("not reached")
 }
 
 func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
@@ -587,8 +586,6 @@ func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
 			errorf("unexpected describe rows response: %q", t)
 		}
 	}
-
-	panic("not reached")
 }
 
 func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
@@ -766,8 +763,6 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 			return
 		}
 	}
-
-	panic("not reached")
 }
 
 // recv1Buf is exactly equivalent to recv1, except it uses a buffer supplied by
@@ -788,8 +783,6 @@ func (cn *conn) recv1Buf(r *readBuf) byte {
 			return t
 		}
 	}
-
-	panic("not reached")
 }
 
 // recv1 receives a message from the backend, panicking if an error occurs
@@ -967,7 +960,6 @@ func isDriverSetting(key string) bool {
 	default:
 		return false
 	}
-	panic("not reached")
 }
 
 func (cn *conn) startup(o values) {
@@ -1124,8 +1116,6 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 			errorf("unknown exec response: %q", t)
 		}
 	}
-
-	panic("not reached")
 }
 
 func (st *stmt) exec(v []driver.Value) {
@@ -1287,7 +1277,6 @@ func (rs *rows) Close() error {
 			return err
 		}
 	}
-	panic("not reached")
 }
 
 func (rs *rows) Columns() []string {
@@ -1337,8 +1326,6 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 			errorf("unexpected message after execute: %q", t)
 		}
 	}
-
-	panic("not reached")
 }
 
 // QuoteIdentifier quotes an "identifier" (e.g. a table or a column name) to be
