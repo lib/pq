@@ -12,21 +12,18 @@ import (
 	"testing"
 )
 
-func shouldSkipSSLTests(t *testing.T) bool {
+func maybeSkipSSLTests(t *testing.T) {
 	// Require some special variables for testing certificates
 	if os.Getenv("PQSSLCERTTEST_PATH") == "" {
-		return true
+		t.Skip("PQSSLCERTTEST_PATH not set, skipping SSL tests")
 	}
 
 	value := os.Getenv("PQGOSSLTESTS")
 	if value == "" || value == "0" {
-		return true
-	} else if value == "1" {
-		return false
-	} else {
+		t.Skip("PQGOSSLTESTS not enabled, skipping SSL tests")
+	} else if value != "1" {
 		t.Fatalf("unexpected value %q for PQGOSSLTESTS", value)
 	}
-	panic("not reached")
 }
 
 func openSSLConn(t *testing.T, conninfo string) (*sql.DB, error) {
@@ -54,10 +51,7 @@ func checkSSLSetup(t *testing.T, conninfo string) {
 
 // Connect over SSL and run a simple query to test the basics
 func TestSSLConnection(t *testing.T) {
-	if shouldSkipSSLTests(t) {
-		t.Log("skipping SSL test")
-		return
-	}
+	maybeSkipSSLTests(t)
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
@@ -74,10 +68,7 @@ func TestSSLConnection(t *testing.T) {
 
 // Test sslmode=verify-full
 func TestSSLVerifyFull(t *testing.T) {
-	if shouldSkipSSLTests(t) {
-		t.Log("skipping SSL test")
-		return
-	}
+	maybeSkipSSLTests(t)
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
@@ -111,10 +102,7 @@ func TestSSLVerifyFull(t *testing.T) {
 
 // Test sslmode=verify-ca
 func TestSSLVerifyCA(t *testing.T) {
-	if shouldSkipSSLTests(t) {
-		t.Log("skipping SSL test")
-		return
-	}
+	maybeSkipSSLTests(t)
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
@@ -169,10 +157,7 @@ func getCertConninfo(t *testing.T, source string) string {
 
 // Authenticate over SSL using client certificates
 func TestSSLClientCertificates(t *testing.T) {
-	if shouldSkipSSLTests(t) {
-		t.Log("skipping SSL test")
-		return
-	}
+	maybeSkipSSLTests(t)
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
@@ -204,10 +189,7 @@ func TestSSLClientCertificates(t *testing.T) {
 
 // Test errors with ssl certificates
 func TestSSLClientCertificatesMissingFiles(t *testing.T) {
-	if shouldSkipSSLTests(t) {
-		t.Log("skipping SSL test")
-		return
-	}
+	maybeSkipSSLTests(t)
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 

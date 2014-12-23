@@ -215,8 +215,7 @@ func TestNotifyExtra(t *testing.T) {
 	defer db.Close()
 
 	if getServerVersion(t, db) < 90000 {
-		t.Log("skipping test due to old PG version")
-		return
+		t.Skip("skipping NOTIFY payload test since the server does not appear to support it")
 	}
 
 	l, channel := newTestListenerConn(t)
