@@ -35,7 +35,6 @@ func BenchmarkSelectSeries(b *testing.B) {
 }
 
 func benchQuery(b *testing.B, query string, result interface{}) {
-	b.Skip("current pq database-backed benchmarks are inconsistent")
 	b.StopTimer()
 	db := openTestConn(b)
 	defer db.Close()
@@ -183,7 +182,6 @@ func BenchmarkPreparedSelectSeries(b *testing.B) {
 }
 
 func benchPreparedQuery(b *testing.B, query string, result interface{}) {
-	b.Skip("current pq database-backed benchmarks are inconsistent")
 	b.StopTimer()
 	db := openTestConn(b)
 	defer db.Close()
