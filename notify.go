@@ -424,6 +424,13 @@ func NewListener(name string,
 	return l
 }
 
+// Returns the notification channel for this listener.  This is the same
+// channel as Notify, and will not be recreated during the life time of the
+// Listener.
+func (l *Listener) NotificationChannel() <-chan *Notification {
+	return l.Notify
+}
+
 // Listen starts listening for notifications on a channel.  Calls to this
 // function will block until an acknowledgement has been received from the
 // server.  Note that Listener automatically re-establishes the connection
