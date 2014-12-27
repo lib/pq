@@ -1,6 +1,6 @@
 // Package pq is a pure Go Postgres driver for the database/sql package.
 
-// +build darwin freebsd linux nacl netbsd openbsd solaris
+// +build darwin dragonfly freebsd linux nacl netbsd openbsd solaris
 
 package pq
 
