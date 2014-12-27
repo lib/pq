@@ -275,6 +275,62 @@ func TestCopySyntaxError(t *testing.T) {
 	}
 }
 
+// Tests for connection errors in copyin.resploop()
+func TestCopyRespLoopConnectionError(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer txn.Rollback()
+
+	var pid int
+	err = txn.QueryRow("SELECT pg_backend_pid()").Scan(&pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = txn.Exec("CREATE TEMP TABLE temp (a int)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stmt, err := txn.Prepare(CopyIn("temp", "a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec("SELECT pg_terminate_backend($1)", pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// We have to try and send something over, since postgres won't process
+	// SIGTERMs while it's waiting for CopyData/CopyEnd messages; see
+	// tcop/postgres.c.
+	_, err = stmt.Exec(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = stmt.Exec()
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	pge, ok := err.(*Error)
+	if !ok {
+		t.Fatalf("expected *pq.Error, got %+#v", err)
+	} else if pge.Code.Name() != "admin_shutdown" {
+		t.Fatalf("expected admin_shutdown, got %s", pge.Code.Name())
+	}
+
+	err = stmt.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func BenchmarkCopyIn(b *testing.B) {
 	db := openTestConn(b)
 	defer db.Close()

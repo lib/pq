@@ -4,7 +4,8 @@ import (
 	"database/sql/driver"
 	"encoding/binary"
 	"errors"
-	"sync/atomic"
+	"fmt"
+	"sync"
 )
 
 var (
@@ -49,8 +50,9 @@ type copyin struct {
 	done    chan bool
 
 	closed   bool
+
+	sync.Mutex // guards err
 	err      error
-	errorset int32
 }
 
 const ciBufferSize = 64 * 1024
@@ -67,7 +69,7 @@ func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
 		cn:      cn,
 		buffer:  make([]byte, 0, ciBufferSize),
 		rowData: make(chan []byte),
-		done:    make(chan bool),
+		done:    make(chan bool, 1),
 	}
 	// add CopyData identifier + 4 bytes for message length
 	ci.buffer = append(ci.buffer, 'd', 0, 0, 0, 0)
@@ -137,31 +139,48 @@ func (ci *copyin) flush(buf []byte) {
 
 func (ci *copyin) resploop() {
 	for {
-		t, r := ci.cn.recv1()
+		var r readBuf
+		t, err := ci.cn.recvMessage(&r)
+		if err != nil {
+			ci.cn.bad = true
+			ci.setError(err)
+			ci.done <- true
+			return
+		}
 		switch t {
 		case 'C':
 			// complete
 		case 'Z':
-			ci.cn.processReadyForQuery(r)
+			ci.cn.processReadyForQuery(&r)
 			ci.done <- true
 			return
 		case 'E':
-			err := parseError(r)
+			err := parseError(&r)
 			ci.setError(err)
 		default:
 			ci.cn.bad = true
-			errorf("unknown response: %q", t)
+			ci.setError(fmt.Errorf("unknown response during CopyIn: %q", t))
+			ci.done <- true
+			return
 		}
 	}
 }
 
 func (ci *copyin) isErrorSet() bool {
-	return atomic.LoadInt32(&ci.errorset) != 0
+	ci.Lock()
+	isSet := (ci.err != nil)
+	ci.Unlock()
+	return isSet
 }
 
+// setError() sets ci.err if one has not been set already.  Caller must not be
+// holding ci.Mutex.
 func (ci *copyin) setError(err error) {
-	ci.err = err
-	atomic.StoreInt32(&ci.errorset, 1)
+	ci.Lock()
+	if ci.err == nil {
+		ci.err = err
+	}
+	ci.Unlock()
 }
 
 func (ci *copyin) NumInput() int {
