@@ -218,6 +218,8 @@ func (c *locationCache) getLocation(offset int) *time.Location {
 // time.Parse and the Postgres date formatting quirks.
 func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 	monSep := strings.IndexRune(str, '-')
+	// this is Gregorian year, not ISO Year
+	// In Gregorian system, the year 1 BC is followed by AD 1
 	year := mustAtoi(str[:monSep])
 	daySep := monSep + 3
 	month := mustAtoi(str[monSep+1 : daySep])
@@ -245,7 +247,6 @@ func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 
 	nanoSec := 0
 	tzOff := 0
-	bcSign := 1
 
 	if remainderIdx < len(str) && str[remainderIdx:remainderIdx+1] == "." {
 		fracStart := remainderIdx + 1
@@ -281,14 +282,17 @@ func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 		}
 		tzOff = tzSign * ((tzHours * 60 * 60) + (tzMin * 60) + tzSec)
 	}
+	var isoYear int
 	if remainderIdx < len(str) && str[remainderIdx:remainderIdx+3] == " BC" {
-		bcSign = -1
+		isoYear = 1 - year
 		remainderIdx += 3
+	} else {
+		isoYear = year
 	}
 	if remainderIdx < len(str) {
 		errorf("expected end of input, got %v", str[remainderIdx:])
 	}
-	t := time.Date(bcSign*year, time.Month(month), day,
+	t := time.Date(isoYear, time.Month(month), day,
 		hour, minute, second, nanoSec,
 		globalLocationCache.getLocation(tzOff))
 
@@ -312,8 +316,16 @@ func formatTs(t time.Time) (b []byte) {
 	b = []byte(t.Format(time.RFC3339Nano))
 	// Need to send dates before 0001 A.D. with " BC" suffix, instead of the
 	// minus sign preferred by Go.
-	if b[0] == '-' {
-		b = append(b[1:], ' ', 'B', 'C')
+	// Beware, "0000" in ISO is "1 BC", "-0001" is "2 BC" and so on
+	bc := false
+	if t.Year() <= 0 {
+		// flip year sign, and add 1, e.g: "0" will be "1", and "-10" will be "11"
+		t = t.AddDate((-t.Year())*2+1, 0, 0)
+		bc = true
+	}
+	b = []byte(t.Format(time.RFC3339Nano))
+	if bc {
+		b = append(b, "  BC"...)
 	}
 
 	_, offset := t.Zone()
