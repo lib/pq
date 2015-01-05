@@ -218,6 +218,8 @@ func (c *locationCache) getLocation(offset int) *time.Location {
 // time.Parse and the Postgres date formatting quirks.
 func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 	monSep := strings.IndexRune(str, '-')
+	// this is Gregorian year, not ISO Year
+	// In Gregorian system, the year 1 BC is followed by AD 1
 	year := mustAtoi(str[:monSep])
 	daySep := monSep + 3
 	month := mustAtoi(str[monSep+1 : daySep])
@@ -245,7 +247,6 @@ func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 
 	nanoSec := 0
 	tzOff := 0
-	bcSign := 1
 
 	if remainderIdx < len(str) && str[remainderIdx:remainderIdx+1] == "." {
 		fracStart := remainderIdx + 1
@@ -281,14 +282,17 @@ func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 		}
 		tzOff = tzSign * ((tzHours * 60 * 60) + (tzMin * 60) + tzSec)
 	}
+	var isoYear int
 	if remainderIdx < len(str) && str[remainderIdx:remainderIdx+3] == " BC" {
-		bcSign = -1
+		isoYear = 1 - year
 		remainderIdx += 3
+	} else {
+		isoYear = year
 	}
 	if remainderIdx < len(str) {
 		errorf("expected end of input, got %v", str[remainderIdx:])
 	}
-	t := time.Date(bcSign*year, time.Month(month), day,
+	t := time.Date(isoYear, time.Month(month), day,
 		hour, minute, second, nanoSec,
 		globalLocationCache.getLocation(tzOff))
 
@@ -306,15 +310,26 @@ func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 	return t
 }
 
+const (
+	RFC3339NanoNoYear = "-01-02T15:04:05.999999999Z07:00"
+)
+
 // formatTs formats t as time.RFC3339Nano and appends time zone seconds if
 // needed.
 func formatTs(t time.Time) (b []byte) {
-	b = []byte(t.Format(time.RFC3339Nano))
+	timeString := t.Format(RFC3339NanoNoYear)
 	// Need to send dates before 0001 A.D. with " BC" suffix, instead of the
 	// minus sign preferred by Go.
-	if b[0] == '-' {
-		b = append(b[1:], ' ', 'B', 'C')
+	// Beware, "0000" in ISO is "1 BC", "-0001" is "2 BC" and so on
+	yyyy := t.Year()
+	if yyyy > 0 {
+		yearString := fmt.Sprintf("%04d", yyyy)
+		timeString = yearString + timeString
+	} else {
+		yearString := fmt.Sprintf("%04d", 1-yyyy)
+		timeString = yearString + timeString + " BC"
 	}
+	b = []byte(timeString)
 
 	_, offset := t.Zone()
 	offset = offset % 60
