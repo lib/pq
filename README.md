@@ -93,4 +93,5 @@ code still exists in here.
 * Ryan Smith (ryandotsmith)
 * Samuel Stauffer (samuel)
 * Timothée Peignier (cyberdelia)
+* TruongSinh Tran-Nguyen (truongsinh)
 * notedit (notedit)
