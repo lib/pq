@@ -5,6 +5,7 @@
 package pq
 
 import (
+	"errors"
 	"os"
 	"os/user"
 )
@@ -20,5 +21,5 @@ func userCurrent() (string, error) {
 		return name, nil
 	}
 
-	return "", nil
+	return "", errors.New("Current OS user cannot be detected")
 }
