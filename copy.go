@@ -49,10 +49,10 @@ type copyin struct {
 	rowData chan []byte
 	done    chan bool
 
-	closed   bool
+	closed bool
 
 	sync.Mutex // guards err
-	err      error
+	err        error
 }
 
 const ciBufferSize = 64 * 1024
