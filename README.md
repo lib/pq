@@ -58,6 +58,7 @@ code still exists in here.
 * Charlie Melbye (cmelbye)
 * Chris Bandy (cbandy)
 * Chris Walsh (cwds)
+* Dan Sosedoff (sosedoff)
 * Daniel Farina (fdr)
 * Eric Chlebek (echlebek)
 * Everyone at The Go Team
