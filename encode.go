@@ -326,6 +326,7 @@ func formatTs(t time.Time) (b []byte) {
 	_, offset := t.Zone()
 	offset = offset % 60
 	if offset != 0 {
+		// RFC3339Nano already printed the minus sign
 		if offset < 0 {
 			offset = -offset
 		}
