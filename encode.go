@@ -310,8 +310,7 @@ func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 	return t
 }
 
-// formatTs formats t as time.RFC3339Nano and appends time zone seconds if
-// needed.
+// formatTs formats t into a format postgres understands.
 func formatTs(t time.Time) (b []byte) {
 	// Need to send dates before 0001 A.D. with " BC" suffix, instead of the
 	// minus sign preferred by Go.
@@ -323,25 +322,25 @@ func formatTs(t time.Time) (b []byte) {
 		bc = true
 	}
 	b = []byte(t.Format(time.RFC3339Nano))
-	if bc {
-		b = append(b, "  BC"...)
-	}
 
 	_, offset := t.Zone()
 	offset = offset % 60
-	if offset == 0 {
-		return b
+	if offset != 0 {
+		if offset < 0 {
+			offset = -offset
+		}
+
+		b = append(b, ':')
+		if offset < 10 {
+			b = append(b, '0')
+		}
+		b = strconv.AppendInt(b, int64(offset), 10)
 	}
 
-	if offset < 0 {
-		offset = -offset
+	if bc {
+		b = append(b, " BC"...)
 	}
-
-	b = append(b, ':')
-	if offset < 10 {
-		b = append(b, '0')
-	}
-	return strconv.AppendInt(b, int64(offset), 10)
+	return b
 }
 
 // Parse a bytea value received from the server.  Both "hex" and the legacy
