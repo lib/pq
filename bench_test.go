@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"database/sql"
 	"database/sql/driver"
-	"github.com/lib/pq/oid"
 	"io"
 	"math/rand"
 	"net"
@@ -17,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/lib/pq/oid"
 )
 
 var (

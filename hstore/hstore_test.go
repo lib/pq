@@ -2,9 +2,10 @@ package hstore
 
 import (
 	"database/sql"
-	_ "github.com/lib/pq"
 	"os"
 	"testing"
+
+	_ "github.com/lib/pq"
 )
 
 type Fatalistic interface {
