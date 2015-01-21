@@ -323,9 +323,12 @@ func formatTs(t time.Time) (b []byte) {
 		bc = true
 	}
 	b = []byte(t.Format(time.RFC3339Nano))
-	if bc {
-		b = append(b, "  BC"...)
-	}
+	// there are more than one `return` statements in this function
+	defer func (){
+		if bc {
+			b = append(b, " BC"...)
+		}
+	}()
 
 	_, offset := t.Zone()
 	offset = offset % 60
