@@ -441,3 +441,173 @@ func BenchmarkAppendEscapedTextNoEscape(b *testing.B) {
 		appendEscapedText(nil, longString)
 	}
 }
+
+func TestScanIntArray(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	row := db.QueryRow("SELECT '{1,2,3}'::int[]")
+
+	var result []int
+	err := row.Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result) != 3 {
+		t.Errorf("Expected result to have 3 elements, got %d.\n#v", len(result), result)
+	}
+
+	if result[0] != 1 {
+		t.Errorf("Expected result[0] to equal 1, got %d", result[0])
+	}
+
+	if result[1] != 2 {
+		t.Errorf("Expected result[1] to equal 2, got %d", result[1])
+	}
+
+	if result[2] != 3 {
+		t.Errorf("Expected result[2] to equal 3, got %d", result[2])
+	}
+}
+
+func TestScanVarcharArray(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	row := db.QueryRow("SELECT '{\"hello\", \"world\"}'::varchar[]")
+
+	var result []string
+	err := row.Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result) != 2 {
+		t.Errorf("Expected result to have 2 elements, got %d.\n#v", len(result), result)
+	}
+
+	if result[0] != "hello" {
+		t.Errorf("Expected result[0] to equal 'hello', got %s", result[0])
+	}
+
+	if result[1] != "world" {
+		t.Errorf("Expected result[1] to equal 'world', got %s", result[1])
+	}
+}
+
+func TestScanTextArray(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	row := db.QueryRow("SELECT '{hello, world}'::text[]")
+
+	var result []string
+	err := row.Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result) != 2 {
+		t.Errorf("Expected result to have 2 elements, got %d.\n#v", len(result), result)
+	}
+
+	if result[0] != "hello" {
+		t.Errorf("Expected result[0] to equal 'hello', got %s", result[0])
+	}
+
+	if result[1] != "world" {
+		t.Errorf("Expected result[1] to equal 'world', got %s", result[1])
+	}
+}
+
+func TestValueArrayStatement(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	stmt, err := db.Prepare("SELECT $1::text[]")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	row := stmt.QueryRow([]string{`h"e"llo`, "wo`rl`d"})
+
+	var result []string
+	err = row.Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result) != 2 {
+		t.Errorf("Expected result to have 2 elements, got %d.\n#v", len(result), result)
+	}
+
+	if result[0] != `h"e"llo` {
+		t.Errorf("Expected result[0] to equal 'hello', got %s", result[0])
+	}
+
+	if result[1] != "wo`rl`d" {
+		t.Errorf("Expected result[1] to equal 'world', got %s", result[1])
+	}
+}
+
+func TestEmptyValueArrayStatement(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	stmt, err := db.Prepare("SELECT $1::text[]")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	row := stmt.QueryRow([]string{})
+
+	var result []string
+	err = row.Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result) != 0 {
+		t.Errorf("Expected result to have 0 elements, got %d.\n#v", len(result), result)
+	}
+}
+
+// Known limitation: slice type cannot be converted if used directly by db.Exec/Query/QueryRow
+func TestValueArrayQuery(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+	_, err := db.Exec("SELECT $1::text[]", []string{`h"e"llo`, "wo`rl`d"})
+
+	expectedErrStr := `sql: converting Exec argument #0's type: unsupported type []string, a slice`
+
+	if err.Error() != expectedErrStr {
+		t.Errorf("Expected error \"%s\", got \"%s\"", expectedErrStr, err)
+	}
+}
+
+// Not supported yet. Can parse it, but can't get it out of the pq.decoder
+// func TestSelectMultidimensionStringArray(t *testing.T) {
+// 	db := openTestConn(t)
+// 	defer db.Close()
+
+// 	row := db.QueryRow("SELECT '{{\"hello\"}, {\"world\"}}'::varchar[]")
+
+// 	var result [][]string
+// 	err := row.Scan(&result)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+
+// 	if len(result) != 2 {
+// 		t.Errorf("Expected result to have 2 elements, got %d.\n#v", len(result), result)
+// 	}
+
+// 	if result[0][0] != "hello" {
+// 		t.Errorf("Expected result[0] to equal 'hello', got %s", result[0])
+// 	}
+
+// 	if result[1][0] != "world" {
+// 		t.Errorf("Expected result[1] to equal 'world', got %s", result[1])
+// 	}
+// }
