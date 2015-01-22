@@ -1,12 +1,12 @@
 package pq
 
 import (
-	"github.com/lib/pq/oid"
-
 	"bytes"
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/lib/pq/oid"
 )
 
 func TestScanTimestamp(t *testing.T) {
