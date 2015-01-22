@@ -43,6 +43,7 @@ func expectEvent(t *testing.T, eventch <-chan ListenerEventType, et ListenerEven
 		}
 		return nil
 	case <-time.After(1500 * time.Millisecond):
+		panic("expectEvent timeout")
 		return fmt.Errorf("timeout")
 	}
 }
