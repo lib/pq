@@ -496,6 +496,23 @@ func TestScanVarcharArray(t *testing.T) {
 	}
 }
 
+func TestValueArrayNullArray(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+	stmt, err := db.Prepare("SELECT $1::text[] IS NULL")
+	var nilSlice []string
+	row := stmt.QueryRow(nilSlice)
+	var isNull bool
+	err = row.Scan(&isNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if isNull != true {
+		t.Errorf("Expected isNull to be true")
+	}
+}
+
 func TestScanTextArray(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()

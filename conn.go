@@ -1050,7 +1050,9 @@ func (cn *conn) auth(r *readBuf, o values) {
 // (https://github.com/lib/pq/issues/49)
 // Other types are an error.
 type defaultConverter struct{}
+
 var DefaultParameterConverter defaultConverter
+
 func (this defaultConverter) ConvertValue(v interface{}) (returnValue driver.Value, err error) {
 	// try to get it from DefaultParameterConverter first
 	returnValue, err = driver.DefaultParameterConverter.ConvertValue(v)
@@ -1063,9 +1065,12 @@ func (this defaultConverter) ConvertValue(v interface{}) (returnValue driver.Val
 	switch rv.Kind() {
 	// if it is indeed of Array or Slice kind, do recursion
 	case reflect.Array, reflect.Slice:
+		if rv.IsNil() {
+			return nil, nil
+		}
 		var len = rv.Len()
 		var mySlice []string
-		for i:=0; i<len; i++ {
+		for i := 0; i < len; i++ {
 			var elemValue driver.Value
 			elemValue, err = this.ConvertValue(rv.Index(i).Interface())
 			if err != nil {
