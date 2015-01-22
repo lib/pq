@@ -846,6 +846,26 @@ func TestIssue282(t *testing.T) {
 	}
 }
 
+func TestNoTimezone(t *testing.T) {
+	// types without timezone information should not be unmarshled
+	// a time.Time with timezone information.
+	db := openTestConn(t)
+	defer db.Close()
+
+	var (
+		actual   time.Time
+		expected = time.Date(2015, 2, 13, 0, 0, 0, 0, &time.Location{})
+	)
+
+	if err := db.QueryRow(`SELECT '2015-02-13'::date;`).Scan(&actual); err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(actual, expected) {
+		t.Fatalf("expected %#v, got %#v\n", expected, actual)
+	}
+}
+
 func TestReadFloatPrecision(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
