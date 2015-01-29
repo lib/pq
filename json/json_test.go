@@ -37,10 +37,15 @@ func TestScan(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
+	_, err := db.Exec("SELECT null::json")
+	if err != nil {
+		t.Skipf("Skipping JSON tests: %s", err.Error())
+	}
+
 	jsonValue := JSON{}
 
 	// Test null values
-	err := db.QueryRow("SELECT null::json").Scan(&jsonValue)
+	err = db.QueryRow("SELECT null::json").Scan(&jsonValue)
 	if err != nil {
 		t.Fatal(err)
 	}
