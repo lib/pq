@@ -95,5 +95,6 @@ code still exists in here.
 * Ryan Smith (ryandotsmith)
 * Samuel Stauffer (samuel)
 * Timothée Peignier (cyberdelia)
+* Travis Cline (tmc)
 * TruongSinh Tran-Nguyen (truongsinh)
 * notedit (notedit)
