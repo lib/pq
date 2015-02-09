@@ -437,6 +437,9 @@ func (cn *conn) Commit() (err error) {
 
 	_, commandTag, err := cn.simpleExec("COMMIT")
 	if err != nil {
+		if cn.isInTransaction() {
+			cn.bad = true
+		}
 		return err
 	}
 	if commandTag != "COMMIT" {
@@ -456,6 +459,9 @@ func (cn *conn) Rollback() (err error) {
 	cn.checkIsInTransaction(true)
 	_, commandTag, err := cn.simpleExec("ROLLBACK")
 	if err != nil {
+		if cn.isInTransaction() {
+			cn.bad = true
+		}
 		return err
 	}
 	if commandTag != "ROLLBACK" {
