@@ -211,6 +211,9 @@ func (c *locationCache) getLocation(offset int) *time.Location {
 func decodeTimestamptzISO(src []byte, sessionLocation *time.Location) time.Time {
 	atoi := func(s []byte) (result int) {
 		for i := 0; i < len(s); i++ {
+			if s[i] < '0' || s[i] > '9' {
+				errorf("unable to parse timestamptz; expected number at %q", s)
+			}
 			result = result*10 + int(s[i]-'0')
 		}
 		return
@@ -220,18 +223,21 @@ func decodeTimestamptzISO(src []byte, sessionLocation *time.Location) time.Time 
 	year := atoi(src[:sepYearMonth])
 	src = src[sepYearMonth:]
 
-	// Skips a separator and converts two digits
-	nextTwoDigits := func() (result int) {
+	// Asserts a separator then converts the two following digits
+	nextTwoDigits := func(sep byte) (result int) {
+		if src[0] != sep {
+			errorf("unable to parse timestamptz; expected '%v' at %q", sep, src)
+		}
 		result = atoi(src[1:3])
 		src = src[3:]
 		return
 	}
 
-	month := nextTwoDigits()
-	day := nextTwoDigits()
-	hour := nextTwoDigits()
-	minute := nextTwoDigits()
-	second := nextTwoDigits()
+	month := nextTwoDigits('-')
+	day := nextTwoDigits('-')
+	hour := nextTwoDigits(' ')
+	minute := nextTwoDigits(':')
+	second := nextTwoDigits(':')
 	nanosecond, offset := 0, 0
 
 	// Time before current era is suffixed with BC
@@ -266,9 +272,16 @@ func decodeTimestamptzISO(src []byte, sessionLocation *time.Location) time.Time 
 
 	// Fractional seconds
 	if len(src) > 1 {
+		if src[0] != '.' {
+			errorf("unable to parse timestamptz; expected '.' at %q", src)
+		}
+
 		// Skip fraction separator
 		i := 1
 		for ; i < len(src); i++ {
+			if src[i] < '0' || src[i] > '9' {
+				errorf("unable to parse timestamptz; expected number at %q", src[i:])
+			}
 			nanosecond = nanosecond*10 + int(src[i]-'0')
 		}
 		// Scale to nanosecnds
