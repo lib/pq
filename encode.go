@@ -207,11 +207,68 @@ func (c *locationCache) getLocation(offset int) *time.Location {
 	return location
 }
 
+var infinityTsEnabled = false
+var infinityTsNegative time.Time
+var infinityTsPositive time.Time
+
+const (
+	negativeInfinityString          = "-infinity"
+	positiveInfinityString          = "infinity"
+	infinityTsEnabledAlready        = "pq: infinity timestamp enabled already"
+	infinityTsNegativeMustBeSmaller = "pq: infinity timestamp: negative value must be smaller (before) than positive"
+)
+
+/**
+ * If EnableInfinityTs is not called, "-infinity" and "infinity" will return
+ * []byte("-infinity") and []byte("infinity") respectively, and potentially
+ * cause error "sql: Scan error on column index 0: unsupported driver -> Scan pair: []uint8 -> *time.Time",
+ * unless the input param is `*interface{}` instead of `*time.Time`
+ *
+ * If EnableInfinityTs is called with negative >= positive, it will panic
+ *
+ * If EnableInfinityTs is called once correctly, it enables this driver to decode
+ * Postgres' "-infinity" and "infinity" to predefined boundary minimum and maximum time.
+ * When encoding, any time that equals or exceeds predefined minimum or maximum time
+ * will be encoded to "-infinity" and "infinity" respectively.
+ *
+ * If EnableInfinityTs is called more than once, it will panic.
+ */
+func EnableInfinityTs(negative time.Time, positive time.Time) {
+	if infinityTsEnabled {
+		panic(infinityTsEnabledAlready)
+	}
+	if !negative.Before(positive) {
+		panic(infinityTsNegativeMustBeSmaller)
+	}
+	infinityTsEnabled = true
+	infinityTsNegative = negative
+	infinityTsPositive = positive
+}
+
+/**
+ * Testing might want to toggle infinityTsEnabled
+ */
+func disableInfinityTs() {
+	infinityTsEnabled = false
+}
+
 // This is a time function specific to the Postgres default DateStyle
 // setting ("ISO, MDY"), the only one we currently support. This
 // accounts for the discrepancies between the parsing available with
 // time.Parse and the Postgres date formatting quirks.
-func parseTs(currentLocation *time.Location, str string) (result time.Time) {
+func parseTs(currentLocation *time.Location, str string) interface{} {
+	switch str {
+	case negativeInfinityString:
+		if infinityTsEnabled {
+			return infinityTsNegative
+		}
+		return []byte(negativeInfinityString)
+	case positiveInfinityString:
+		if infinityTsEnabled {
+			return infinityTsPositive
+		}
+		return []byte(positiveInfinityString)
+	}
 	monSep := strings.IndexRune(str, '-')
 	// this is Gregorian year, not ISO Year
 	// In Gregorian system, the year 1 BC is followed by AD 1
@@ -307,6 +364,16 @@ func parseTs(currentLocation *time.Location, str string) (result time.Time) {
 
 // formatTs formats t into a format postgres understands.
 func formatTs(t time.Time) (b []byte) {
+	if infinityTsEnabled {
+		// t <= -infinity : ! (t > -infinity)
+		if !t.After(infinityTsNegative) {
+			return []byte(negativeInfinityString)
+		}
+		// t >= infinity : ! (!t < infinity)
+		if !t.Before(infinityTsPositive) {
+			return []byte(positiveInfinityString)
+		}
+	}
 	// Need to send dates before 0001 A.D. with " BC" suffix, instead of the
 	// minus sign preferred by Go.
 	// Beware, "0000" in ISO is "1 BC", "-0001" is "2 BC" and so on
