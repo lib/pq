@@ -51,7 +51,7 @@ func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{}
 	case oid.T_bytea:
 		return parseBytea(s)
 	case oid.T_timestamptz:
-		return parseTs(parameterStatus.currentLocation, string(s))
+		return decodeTimestamptzISO(s, parameterStatus.currentLocation)
 	case oid.T_timestamp, oid.T_date:
 		return parseTs(nil, string(s))
 	case oid.T_time:
@@ -205,6 +205,97 @@ func (c *locationCache) getLocation(offset int) *time.Location {
 	}
 
 	return location
+}
+
+// Decode a Time from the "ISO" format.
+func decodeTimestamptzISO(src []byte, sessionLocation *time.Location) time.Time {
+	atoi := func(s []byte) (result int) {
+		for i := 0; i < len(s); i++ {
+			if s[i] < '0' || s[i] > '9' {
+				errorf("unable to parse timestamptz; expected number at %q", s)
+			}
+			result = result*10 + int(s[i]-'0')
+		}
+		return
+	}
+
+	// Asserts a separator then converts the remaining digits.
+	readDigits := func(sep byte, s []byte) int {
+		if s[0] != sep {
+			errorf("unable to parse timestamptz; expected '%v' at %q", sep, s)
+		}
+		return atoi(s[1:])
+	}
+
+	sepYearMonth := bytes.IndexByte(src, '-')
+	year := atoi(src[:sepYearMonth])
+	src = src[sepYearMonth:]
+
+	// Time before current era is suffixed with BC
+	if src[len(src)-1] == 'C' {
+		// Negate the year and add one.
+		// See http://www.postgresql.org/docs/current/static/datetime-input-rules.html
+		year = 1 - year
+
+		// Strip " BC"
+		src = src[:len(src)-3]
+	}
+
+	month := readDigits('-', src[0:3])
+	day := readDigits('-', src[3:6])
+	hour := readDigits(' ', src[6:9])
+	minute := readDigits(':', src[9:12])
+	second := readDigits(':', src[12:15])
+	src = src[15:]
+
+	// Offset from UTC is formatted ±hh[:mm[:ss]]
+	offset := 0
+	switch {
+	case len(src) > 6 && src[len(src)-6] == ':':
+		offset += readDigits(':', src[len(src)-3:])
+		src = src[:len(src)-3]
+		fallthrough
+
+	case len(src) > 3 && src[len(src)-3] == ':':
+		offset += 60 * readDigits(':', src[len(src)-3:])
+		src = src[:len(src)-3]
+	}
+
+	if src[len(src)-3] == '+' {
+		offset += 3600 * readDigits('+', src[len(src)-3:])
+	} else {
+		offset += 3600 * readDigits('-', src[len(src)-3:])
+		offset = -offset
+	}
+	src = src[:len(src)-3]
+
+	// Fractional seconds
+	nanosecond := 0
+	if len(src) > 1 {
+		nanosecond = readDigits('.', src)
+
+		// Scale to nanosecnds
+		for i := len(src); i < 10; i++ {
+			nanosecond *= 10
+		}
+	}
+
+	result := time.Date(
+		year, time.Month(month), day,
+		hour, minute, second, nanosecond,
+		globalLocationCache.getLocation(offset))
+
+	if sessionLocation != nil {
+		// Set the location based on session TimeZone, but only when it reports
+		// the same offset from UTC.
+		sessionTime := result.In(sessionLocation)
+		_, sessionOffset := sessionTime.Zone()
+		if sessionOffset == offset {
+			result = sessionTime
+		}
+	}
+
+	return result
 }
 
 // This is a time function specific to the Postgres default DateStyle
