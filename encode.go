@@ -219,26 +219,17 @@ func decodeTimestamptzISO(src []byte, sessionLocation *time.Location) time.Time 
 		return
 	}
 
+	// Asserts a separator then converts the remaining digits.
+	readDigits := func(sep byte, s []byte) int {
+		if s[0] != sep {
+			errorf("unable to parse timestamptz; expected '%v' at %q", sep, s)
+		}
+		return atoi(s[1:])
+	}
+
 	sepYearMonth := bytes.IndexByte(src, '-')
 	year := atoi(src[:sepYearMonth])
 	src = src[sepYearMonth:]
-
-	// Asserts a separator then converts the two following digits
-	nextTwoDigits := func(sep byte) (result int) {
-		if src[0] != sep {
-			errorf("unable to parse timestamptz; expected '%v' at %q", sep, src)
-		}
-		result = atoi(src[1:3])
-		src = src[3:]
-		return
-	}
-
-	month := nextTwoDigits('-')
-	day := nextTwoDigits('-')
-	hour := nextTwoDigits(' ')
-	minute := nextTwoDigits(':')
-	second := nextTwoDigits(':')
-	nanosecond, offset := 0, 0
 
 	// Time before current era is suffixed with BC
 	if src[len(src)-1] == 'C' {
@@ -250,42 +241,41 @@ func decodeTimestamptzISO(src []byte, sessionLocation *time.Location) time.Time 
 		src = src[:len(src)-3]
 	}
 
+	month := readDigits('-', src[0:3])
+	day := readDigits('-', src[3:6])
+	hour := readDigits(' ', src[6:9])
+	minute := readDigits(':', src[9:12])
+	second := readDigits(':', src[12:15])
+	src = src[15:]
+
 	// Offset from UTC is formatted ±hh[:mm[:ss]]
+	offset := 0
 	switch {
 	case len(src) > 6 && src[len(src)-6] == ':':
-		offset += atoi(src[len(src)-2:])
+		offset += readDigits(':', src[len(src)-3:])
 		src = src[:len(src)-3]
 		fallthrough
 
 	case len(src) > 3 && src[len(src)-3] == ':':
-		offset += 60 * atoi(src[len(src)-2:])
-		src = src[:len(src)-3]
-		fallthrough
-
-	default:
-		offset += 3600 * atoi(src[len(src)-2:])
-		if src[len(src)-3] == '-' {
-			offset = -offset
-		}
+		offset += 60 * readDigits(':', src[len(src)-3:])
 		src = src[:len(src)-3]
 	}
 
-	// Fractional seconds
-	if len(src) > 1 {
-		if src[0] != '.' {
-			errorf("unable to parse timestamptz; expected '.' at %q", src)
-		}
+	if src[len(src)-3] == '+' {
+		offset += 3600 * readDigits('+', src[len(src)-3:])
+	} else {
+		offset += 3600 * readDigits('-', src[len(src)-3:])
+		offset = -offset
+	}
+	src = src[:len(src)-3]
 
-		// Skip fraction separator
-		i := 1
-		for ; i < len(src); i++ {
-			if src[i] < '0' || src[i] > '9' {
-				errorf("unable to parse timestamptz; expected number at %q", src[i:])
-			}
-			nanosecond = nanosecond*10 + int(src[i]-'0')
-		}
+	// Fractional seconds
+	nanosecond := 0
+	if len(src) > 1 {
+		nanosecond = readDigits('.', src)
+
 		// Scale to nanosecnds
-		for ; i < 10; i++ {
+		for i := len(src); i < 10; i++ {
 			nanosecond *= 10
 		}
 	}
