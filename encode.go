@@ -462,7 +462,10 @@ func parseBytea(s []byte) (result []byte) {
 func encodeBytea(serverVersion int, v []byte) (result []byte) {
 	if serverVersion >= 90000 {
 		// Use the hex format if we know that the server supports it
-		result = []byte(fmt.Sprintf("\\x%x", v))
+		result = make([]byte, 2+hex.EncodedLen(len(v)))
+		result[0] = '\\'
+		result[1] = 'x'
+		hex.Encode(result[2:], v)
 	} else {
 		// .. or resort to "escape"
 		for _, b := range v {
