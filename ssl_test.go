@@ -158,6 +158,12 @@ func getCertConninfo(t *testing.T, source string) string {
 // Authenticate over SSL using client certificates
 func TestSSLClientCertificates(t *testing.T) {
 	maybeSkipSSLTests(t)
+
+	// Disabled temporarily on 9.4 due to Go issue #9808
+	if getServerVersion(t, openTestConn(t)) >= 90400 {
+		t.Skip("skipping TestSSLClientCertificates due to #9808")
+	}
+
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
