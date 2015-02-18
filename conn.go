@@ -213,17 +213,17 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	cn.buf = bufio.NewReader(cn.c)
 	cn.startup(o)
 	// reset the deadline, in case one was set (see dial)
-	err = cn.c.SetDeadline(time.Time{})
+	if timeout := o.Get("connect_timeout"); timeout != "" && timeout != "0" {
+		err = cn.c.SetDeadline(time.Time{})
+	}
 	return cn, err
 }
 
 func dial(d Dialer, o values) (net.Conn, error) {
 	ntw, addr := network(o)
 
-	timeout := o.Get("connect_timeout")
-
 	// Zero or not specified means wait indefinitely.
-	if timeout != "" && timeout != "0" {
+	if timeout := o.Get("connect_timeout"); timeout != "" && timeout != "0" {
 		seconds, err := strconv.ParseInt(timeout, 10, 0)
 		if err != nil {
 			return nil, fmt.Errorf("invalid value for parameter connect_timeout: %s", err)
