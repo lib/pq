@@ -61,6 +61,7 @@ code still exists in here.
 * Dan Sosedoff (sosedoff)
 * Daniel Farina (fdr)
 * Eric Chlebek (echlebek)
+* Eric Garrido (minusnine)
 * Eric Urban (hydrogen18)
 * Everyone at The Go Team
 * Evan Shaw (edsrzf)
