@@ -92,3 +92,84 @@ func TestClockValue(t *testing.T) {
 		}
 	}
 }
+
+func TestDateScanUnsupported(t *testing.T) {
+	var date Date
+	err := date.Scan(true)
+
+	if err == nil {
+		t.Fatal("Expected error when scanning from bool")
+	}
+	if !strings.Contains(err.Error(), "bool to Date") {
+		t.Errorf("Expected type to be mentioned when scanning, got %q", err)
+	}
+}
+
+func TestDateScanTime(t *testing.T) {
+	date := Date{9, 9, 9, 9}
+	err := date.Scan(time.Date(2001, time.February, 3, 4, 5, 6, 7, time.UTC))
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if date != (Date{Year: 2001, Month: 2, Day: 3}) {
+		t.Errorf("Expected 2001-02-03, got %v", date)
+	}
+}
+
+func TestDateScanBytes(t *testing.T) {
+	for _, tt := range []struct {
+		bytes []byte
+		date  Date
+	}{
+		{[]byte(`infinity`), Date{Infinity: 1}},
+		{[]byte(`-infinity`), Date{Infinity: -1}},
+		{[]byte(`2001-02-03`), Date{Year: 2001, Month: 2, Day: 3}},
+	} {
+		date := Date{9, 9, 9, 9}
+		err := date.Scan(tt.bytes)
+
+		if err != nil {
+			t.Fatalf("Expected no error for %q, got %v", tt.bytes, err)
+		}
+		if date != tt.date {
+			t.Errorf("Expected %+v, got %+v", tt.date, date)
+		}
+	}
+}
+
+var DateStringTests = []struct {
+	str  string
+	date Date
+}{
+	{`infinity`, Date{Infinity: 1}},
+	{`-infinity`, Date{Infinity: -1}},
+	{`2001-02-03`, Date{Year: 2001, Month: 2, Day: 3}},
+}
+
+func TestDateScanString(t *testing.T) {
+	for _, tt := range DateStringTests {
+		date := Date{9, 9, 9, 9}
+		err := date.Scan(tt.str)
+
+		if err != nil {
+			t.Fatalf("Expected no error for %q, got %v", tt.str, err)
+		}
+		if date != tt.date {
+			t.Errorf("Expected %+v, got %+v", tt.date, date)
+		}
+	}
+}
+
+func TestDateValue(t *testing.T) {
+	for _, tt := range DateStringTests {
+		value, err := tt.date.Value()
+
+		if err != nil {
+			t.Fatalf("Expected no error for %q, got %v", tt.date, err)
+		}
+		if value != tt.str {
+			t.Errorf("Expected %v, got %v", tt.str, value)
+		}
+	}
+}
