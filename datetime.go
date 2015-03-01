@@ -117,3 +117,22 @@ func (d Date) Value() (driver.Value, error) {
 		return fmt.Sprintf("%04d-%02d-%02d", d.Year, d.Month, d.Day), nil
 	}
 }
+
+// Timestamp represents a value of the PostgreSQL `timestamp without time zone`
+// type. It supports the special values "infinity" and "-infinity" and
+// implements the sql.Scanner interface so it can be used as a scan destination.
+type Timestamp struct {
+	Date
+	Clock
+}
+
+// TimestampTZ represents a value of the PostgreSQL `timestamp with time zone`
+// type. It supports the special values "infinity" and "-infinity" and
+// implements the sql.Scanner interface so it can be used as a scan destination.
+//
+// A positive or negative value in Infinity represents the special value
+// "infinity" or "-infinity", respectively.
+type TimestampTZ struct {
+	Infinity int
+	Time     time.Time
+}
