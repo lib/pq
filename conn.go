@@ -152,7 +152,7 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 		o.Set(k, v)
 	}
 
-	if strings.HasPrefix(name, "postgres://") {
+	if strings.HasPrefix(name, "postgres://") || strings.HasPrefix(name, "postgresql://") {
 		name, err = ParseURL(name)
 		if err != nil {
 			return nil, err
