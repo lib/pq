@@ -98,18 +98,22 @@ func TestCommitInFailedTransaction(t *testing.T) {
 }
 
 func TestOpenURL(t *testing.T) {
-	db, err := openTestConnConninfo("postgres://")
-	if err != nil {
-		t.Fatal(err)
+	testURL := func(url string) {
+		db, err := openTestConnConninfo(url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		// database/sql might not call our Open at all unless we do something with
+		// the connection
+		txn, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		txn.Rollback()
 	}
-	defer db.Close()
-	// database/sql might not call our Open at all unless we do something with
-	// the connection
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	txn.Rollback()
+	testURL("postgres://")
+	testURL("postgresql://")
 }
 
 func TestExec(t *testing.T) {
