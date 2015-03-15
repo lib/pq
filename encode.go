@@ -17,11 +17,11 @@ import (
 func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) []byte {
 	switch v := x.(type) {
 	case int64:
-		return []byte(fmt.Sprintf("%d", v))
+		return strconv.AppendInt(nil, v, 10)
 	case float32:
-		return []byte(fmt.Sprintf("%.9f", v))
+		return strconv.AppendFloat(nil, float64(v), 'f', -1, 32)
 	case float64:
-		return []byte(fmt.Sprintf("%.17f", v))
+		return strconv.AppendFloat(nil, v, 'f', -1, 64)
 	case []byte:
 		if pgtypOid == oid.T_bytea {
 			return encodeBytea(parameterStatus.serverVersion, v)
@@ -35,7 +35,7 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 
 		return []byte(v)
 	case bool:
-		return []byte(fmt.Sprintf("%t", v))
+		return strconv.AppendBool(nil, v)
 	case time.Time:
 		return formatTs(v)
 
