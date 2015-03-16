@@ -73,10 +73,12 @@ func arrayValue(v reflect.Value) ([]byte, error) {
 func escapedArrayText(text []byte) []byte {
 	result := []byte{'"'}
 	for _, c := range text {
-		if c == '"' {
-			result = append(result, '\\')
+		switch c {
+		case '"', '\\':
+			result = append(result, '\\', c)
+		default:
+			result = append(result, c)
 		}
-		result = append(result, c)
 	}
 
 	return append(result, '"')

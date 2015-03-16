@@ -17,6 +17,7 @@ var arrayTests = []struct {
 	{[]byte(`{"a","b","c\"","d,e"}`), []string{"a", "b", "c\"", "d,e"}},
 	{[]byte(`{"a","b"}`), [][]byte{{'a'}, {'b'}}},
 	{[]byte(`{{"a","b"},{"c","d"}}`), [][]string{{"a", "b"}, {"c", "d"}}},
+	{[]byte(`{"\\a"}`), []string{"\\a"}},
 	{[]byte(`{12345,23456,34567890}`), []int64{12345, 23456, 34567890}},
 	{[]byte(`{12345,23456,34567890}`), []int{12345, 23456, 34567890}},
 	{[]byte(`{"",NULL}`), []*string{new(string), nil}},
@@ -34,7 +35,7 @@ func TestArrayValuer(t *testing.T) {
 		}
 
 		if !reflect.DeepEqual(test.resp, val) {
-			t.Errorf("%d: expected %q got %q", i, test.resp, val)
+			t.Errorf("%d: expected `%s` got `%s`", i, test.resp, val)
 		}
 	}
 }
