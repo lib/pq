@@ -466,6 +466,7 @@ func (c *conn) errRecover(err *error) {
 		// Do nothing
 	case runtime.Error:
 		c.bad = true
+		c.once.Do(c.decrement)
 		panic(v)
 	case *Error:
 		if v.Fatal() {
@@ -484,6 +485,7 @@ func (c *conn) errRecover(err *error) {
 
 	default:
 		c.bad = true
+		c.once.Do(c.decrement)
 		panic(fmt.Sprintf("unknown error: %#v", e))
 	}
 
@@ -491,5 +493,6 @@ func (c *conn) errRecover(err *error) {
 	// mark the connection bad in database/sql.
 	if *err == driver.ErrBadConn {
 		c.bad = true
+		c.once.Do(c.decrement)
 	}
 }
