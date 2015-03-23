@@ -49,16 +49,9 @@ func arrayValue(v reflect.Value) ([]byte, error) {
 		return append(result, '}'), nil
 	}
 
-	val := v.Interface()
-
-	// encode can handle float32 in addition to drive.Value types
-	// so we don't want to convert it to a float64
-	if _, ok := val.(float32); !ok {
-		var err error
-		val, err = driver.DefaultParameterConverter.ConvertValue(val)
-		if err != nil {
-			return nil, err
-		}
+	val, err := driver.DefaultParameterConverter.ConvertValue(v.Interface())
+	if err != nil {
+		return nil, err
 	}
 
 	if val == nil {
