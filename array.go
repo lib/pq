@@ -19,6 +19,11 @@ func (a Array) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	v := reflect.ValueOf(a.A)
+
+	if v.Kind() != reflect.Slice && v.Kind() != reflect.Array {
+		return nil, ErrInvalidArray
+	}
+
 	return arrayValue(v)
 }
 

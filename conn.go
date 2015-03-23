@@ -32,6 +32,7 @@ var (
 	ErrSSLNotSupported           = errors.New("pq: SSL is not enabled on the server")
 	ErrSSLKeyHasWorldPermissions = errors.New("pq: Private key file has group or world access. Permissions should be u=rw (0600) or less.")
 	ErrCouldNotDetectUsername    = errors.New("pq: Could not detect default username. Please provide one explicitly.")
+	ErrInvalidArray              = errors.New("pq: Array can only be used with slices and arrays.")
 )
 
 type drv struct{}
