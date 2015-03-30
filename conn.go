@@ -106,6 +106,8 @@ type conn struct {
 	// If true, this connection is bad and all public-facing functions should
 	// return ErrBadConn.
 	bad bool
+
+	binary_mode bool
 }
 
 func (c *conn) writeBuf(b byte) *writeBuf {
@@ -217,6 +219,16 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	// reset the deadline, in case one was set (see dial)
 	if timeout := o.Get("connect_timeout"); timeout != "" && timeout != "0" {
 		err = cn.c.SetDeadline(time.Time{})
+	}
+	// set binary_mode
+	if binary_mode := o.Get("binary_mode"); binary_mode != "" {
+		if binary_mode == "on" {
+			cn.binary_mode = true
+		} else if binary_mode == "off" {
+			cn.binary_mode = false
+		} else {
+			return nil, err
+		}
 	}
 	return cn, err
 }
@@ -478,11 +490,91 @@ func (cn *conn) gname() string {
 	return strconv.FormatInt(int64(cn.namei), 10)
 }
 
-func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err error) {
-	b := cn.writeBuf('Q')
-	b.string(q)
-	cn.send(b)
+func (cn *conn) awaitSynchronizationPoint() {
+	t, r := cn.recv1()
+	switch t {
+	case 'Z':
+		cn.processReadyForQuery(r)
+		return
+	default:
+		cn.bad = true
+		errorf("unexpected message %q while waiting for synchronization point")
+	}
+}
 
+func (cn *conn) readParseResponse() {
+	t, r := cn.recv1()
+	switch t {
+	case '1':
+		return
+	case 'E':
+		err := parseError(r)
+		cn.awaitSynchronizationPoint()
+		panic(err)
+	default:
+		cn.bad = true
+		errorf("unexpected Parse response %q", t)
+	}
+}
+
+func (cn *conn) readBindResponse() {
+	t, r := cn.recv1()
+	switch t {
+	case '2':
+		return
+	case 'E':
+		err := parseError(r)
+		cn.awaitSynchronizationPoint()
+		panic(err)
+	default:
+		cn.bad = true
+		errorf("unexpected Bind response %q", t)
+	}
+}
+
+func (cn *conn) readStatementDescribeResponse() (paramTyps []oid.Oid, cols []string, rowTyps []oid.Oid) {
+	t, r := cn.recv1()
+	switch t {
+	case 't':
+		nparams := r.int16()
+		paramTyps = make([]oid.Oid, nparams)
+		for i := range paramTyps {
+			paramTyps[i] = r.oid()
+		}
+	case 'E':
+		err := parseError(r)
+		cn.awaitSynchronizationPoint()
+		panic(err)
+	default:
+		cn.bad = true
+		errorf("unexpected Describe response %q", t)
+	}
+
+	// Cheat a bit since the result should be exactly the same as when
+	// describing a portal.
+	cols, rowTyps = cn.readPortalDescribeResponse()
+	return paramTyps, cols, rowTyps
+}
+
+func (cn *conn) readPortalDescribeResponse() (cols []string, rowTyps []oid.Oid) {
+	t, r := cn.recv1()
+	switch t {
+	case 'T':
+		return parseMeta(r)
+	case 'n':
+		return nil, nil
+	case 'E':
+		err := parseError(r)
+		cn.awaitSynchronizationPoint()
+		panic(err)
+	default:
+		cn.bad = true
+		errorf("unexpected Describe response %q", t)
+	}
+	panic("not reached")
+}
+
+func (cn *conn) readExecuteResponse(protocolState string) (res driver.Result, commandTag string, err error) {
 	for {
 		t, r := cn.recv1()
 		switch t {
@@ -490,23 +582,28 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 			res, commandTag = cn.parseComplete(r.string())
 		case 'Z':
 			cn.processReadyForQuery(r)
-			// done
-			return
+			return res, commandTag, err
 		case 'E':
 			err = parseError(r)
 		case 'T', 'D', 'I':
 			// ignore any results
 		default:
 			cn.bad = true
-			errorf("unknown response for simple query: %q", t)
+			errorf("unknown %s response: %q", protocolState, t)
 		}
 	}
 }
 
+
+func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err error) {
+	b := cn.writeBuf('Q')
+	b.string(q)
+	cn.send(b)
+	return cn.readExecuteResponse("simple query")
+}
+
 func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 	defer cn.errRecover(&err)
-
-	st := &stmt{cn: cn, name: ""}
 
 	b := cn.writeBuf('Q')
 	b.string(q)
@@ -524,12 +621,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 				cn.bad = true
 				errorf("unexpected message %q in simple query execution", t)
 			}
-			res = &rows{
-				cn: cn,
-				cols: st.cols,
-				rowTyps: st.rowTyps,
-				done: true,
-			}
+			res = &rows{cn: cn, done: true}
 		case 'Z':
 			cn.processReadyForQuery(r)
 			// done
@@ -576,25 +668,20 @@ func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
 	b.next('S')
 	cn.send(b)
 
+	cn.readParseResponse()
+	st.paramTyps, st.cols, st.rowTyps = cn.readStatementDescribeResponse()
+
 	for {
 		t, r := cn.recv1()
 		switch t {
-		case '1':
-		case 't':
-			nparams := r.int16()
-			st.paramTyps = make([]oid.Oid, nparams)
-
-			for i := range st.paramTyps {
-				st.paramTyps[i] = r.oid()
-			}
-		case 'T':
-			st.cols, st.rowTyps = parseMeta(r)
-		case 'n':
-			// no data
 		case 'Z':
 			cn.processReadyForQuery(r)
 			return st, err
 		case 'E':
+			if err != nil {
+				cn.bad = true
+				errorf("unexpected ErrorResponse during extended query")
+			}
 			err = parseError(r)
 		default:
 			cn.bad = true
@@ -644,21 +731,121 @@ func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err err
 		return cn.simpleQuery(query)
 	}
 
-	st, err := cn.prepareTo(query, "")
-	if err != nil {
-		panic(err)
+	if cn.binary_mode {
+		cn.sendBinaryModeQuery(query, args)
+
+		cn.readParseResponse()
+		cn.readBindResponse()
+		rows := &rows{cn: cn}
+		rows.cols, rows.rowTyps = cn.readPortalDescribeResponse()
+		cn.postExecute()
+		return rows, nil
+	} else {
+		st, err := cn.prepareTo(query, "")
+		if err != nil {
+			panic(err)
+		}
+
+		st.exec(args)
+		return &rows{
+			cn: cn,
+			cols: st.cols,
+			rowTyps: st.rowTyps,
+		}, nil
+	}
+	panic("not reached")
+}
+
+func (cn *conn) postExecute() {
+	// Work around a bug in sql.DB.QueryRow: in Go 1.2 and earlier it ignores
+	// any errors from rows.Next, which masks errors that happened during the
+	// execution of the query.  To avoid the problem in common cases, we wait
+	// here for one more message from the database.  If it's not an error the
+	// query will likely succeed (or perhaps has already, if it's a
+	// CommandComplete), so we push the message into the conn struct; recv1
+	// will return it as the next message for rows.Next or rows.Close.
+	// However, if it's an error, we wait until ReadyForQuery and then return
+	// the error to our caller.
+	var err error
+	for {
+		t, r := cn.recv1()
+		switch t {
+		case 'E':
+			err = parseError(r)
+			cn.awaitSynchronizationPoint()
+			panic(err)
+		case 'C', 'D', 'I':
+			// the query didn't fail, but we can't process this message
+			cn.saveMessage(t, r)
+			return
+		default:
+			cn.bad = true
+			errorf("unexpected message during extended query execution: %q", t)
+		}
+	}
+}
+
+func (cn *conn) sendBinaryModeQuery(query string, args []driver.Value) {
+	if len(args) >= 65536 {
+		errorf("got %d parameters but PostgreSQL only supports 65535 parameters", len(args))
 	}
 
-	st.exec(args)
-	return &rows{
-		cn: cn,
-		cols: st.cols,
-		rowTyps: st.rowTyps,
-	}, nil
+	b := cn.writeBuf('P')
+	b.byte(0) // unnamed statement
+	b.string(query)
+	b.int16(0)
+
+	b.next('B')
+	b.int16(0) // unnamed portal and statement
+
+	// Do one pass over the parameters to see if we're going to send any of
+	// them over in binary.  If we are, create a paramFormats array at the
+	// same time.
+	var paramFormats []int
+	for i, x := range args {
+		_, ok := x.([]byte)
+		if ok {
+			if paramFormats == nil {
+				paramFormats = make([]int, len(args))
+			}
+			paramFormats[i] = 1
+		}
+	}
+	if paramFormats == nil {
+		b.int16(0)
+	} else {
+		b.int16(len(paramFormats))
+		for _, x := range paramFormats {
+			b.int16(x)
+		}
+	}
+
+	b.int16(len(args))
+	for _, x := range args {
+		if x == nil {
+			b.int32(-1)
+		} else {
+			datum := binaryEncode(&cn.parameterStatus, x)
+			b.int32(len(datum))
+			b.bytes(datum)
+		}
+	}
+	b.int16(0)
+
+	b.next('D')
+	b.byte('P')
+	b.byte(0) // unnamed statement
+
+	b.next('E')
+	b.byte(0)
+	b.int32(0)
+
+	b.next('S')
+	cn.send(b)
 }
 
 // Implement the optional "Execer" interface for one-shot queries
-func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err error) {
+func (cn *conn) Exec(query string, args []driver.Value) (res driver.Result, err error) {
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
@@ -668,24 +855,31 @@ func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err er
 	// *much* faster than going through prepare/exec
 	if len(args) == 0 {
 		// ignore commandTag, our caller doesn't care
-		r, _, err := cn.simpleExec(query)
-		return r, err
+		res, _, err = cn.simpleExec(query)
+		return res, err
 	}
 
-	// Use the unnamed statement to defer planning until bind
-	// time, or else value-based selectivity estimates cannot be
-	// used.
-	st, err := cn.prepareTo(query, "")
-	if err != nil {
-		panic(err)
-	}
+	if cn.binary_mode {
+		cn.sendBinaryModeQuery(query, args)
 
-	r, err := st.Exec(args)
-	if err != nil {
-		panic(err)
+		cn.readParseResponse()
+		cn.readBindResponse()
+		cn.readPortalDescribeResponse()
+		cn.postExecute()
+		res, _, err = cn.readExecuteResponse("Execute")
+		return res, err
+	} else {
+		// Not in binary mode; we need to do a full prepare/describe round-trip
+		// to the server to know the types of the parameter.  We can still use
+		// the unnamed statement to defer planning until bind time so that
+		// value-based selectivity estimates can be used.
+		st, err := cn.prepareTo(query, "")
+		if err != nil {
+			panic(err)
+		}
+		return st.Exec(args)
 	}
-
-	return r, err
+	panic("not reached")
 }
 
 func (cn *conn) send(m *writeBuf) {
@@ -978,6 +1172,8 @@ func isDriverSetting(key string) bool {
 		return true
 	case "connect_timeout":
 		return true
+	case "binary_mode":
+		return true
 
 	default:
 		return false
@@ -1123,25 +1319,8 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 	defer st.cn.errRecover(&err)
 
 	st.exec(v)
-
-	for {
-		t, r := st.cn.recv1()
-		switch t {
-		case 'E':
-			err = parseError(r)
-		case 'C':
-			res, _ = st.cn.parseComplete(r.string())
-		case 'Z':
-			st.cn.processReadyForQuery(r)
-			// done
-			return
-		case 'T', 'D', 'I':
-			// ignore any results
-		default:
-			st.cn.bad = true
-			errorf("unknown exec response: %q", t)
-		}
-	}
+	res, _, err = st.cn.readExecuteResponse("simple query")
+	return res, err
 }
 
 func (st *stmt) exec(v []driver.Value) {
@@ -1153,7 +1332,7 @@ func (st *stmt) exec(v []driver.Value) {
 	}
 
 	w := st.cn.writeBuf('B')
-	w.byte(0)
+	w.byte(0) // unnamed portal
 	w.string(st.name)
 	w.int16(0)
 	w.int16(len(v))
@@ -1175,60 +1354,8 @@ func (st *stmt) exec(v []driver.Value) {
 	w.next('S')
 	st.cn.send(w)
 
-	var err error
-	for {
-		t, r := st.cn.recv1()
-		switch t {
-		case 'E':
-			err = parseError(r)
-		case '2':
-			if err != nil {
-				panic(err)
-			}
-			goto workaround
-		case 'Z':
-			st.cn.processReadyForQuery(r)
-			if err != nil {
-				panic(err)
-			}
-			return
-		default:
-			st.cn.bad = true
-			errorf("unexpected bind response: %q", t)
-		}
-	}
-
-	// Work around a bug in sql.DB.QueryRow: in Go 1.2 and earlier it ignores
-	// any errors from rows.Next, which masks errors that happened during the
-	// execution of the query.  To avoid the problem in common cases, we wait
-	// here for one more message from the database.  If it's not an error the
-	// query will likely succeed (or perhaps has already, if it's a
-	// CommandComplete), so we push the message into the conn struct; recv1
-	// will return it as the next message for rows.Next or rows.Close.
-	// However, if it's an error, we wait until ReadyForQuery and then return
-	// the error to our caller.
-workaround:
-	for {
-		t, r := st.cn.recv1()
-		switch t {
-		case 'E':
-			err = parseError(r)
-		case 'C', 'D', 'I':
-			// the query didn't fail, but we can't process this message
-			st.cn.saveMessage(t, r)
-			return
-		case 'Z':
-			if err == nil {
-				st.cn.bad = true
-				errorf("unexpected ReadyForQuery during extended query execution")
-			}
-			st.cn.processReadyForQuery(r)
-			panic(err)
-		default:
-			st.cn.bad = true
-			errorf("unexpected message during query execution: %q", t)
-		}
-	}
+	st.cn.readBindResponse()
+	st.cn.postExecute()
 }
 
 func (st *stmt) NumInput() int {
