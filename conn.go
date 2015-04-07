@@ -546,7 +546,7 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 			// res might be non-nil here if we received a previous
 			// CommandComplete, but that's fine; just overwrite it
 			res = &rows{st: st}
-			st.cols, st.rowTyps = parseMeta(r)
+			st.cols, st.rowFmts, st.rowTyps = parseMeta(r)
 
 			// To work around a bug in QueryRow in Go 1.2 and earlier, wait
 			// until the first DataRow has been received.
@@ -585,7 +585,7 @@ func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
 				st.paramTyps[i] = r.oid()
 			}
 		case 'T':
-			st.cols, st.rowTyps = parseMeta(r)
+			st.cols, st.rowFmts, st.rowTyps = parseMeta(r)
 		case 'n':
 			// no data
 		case 'Z':
@@ -1049,10 +1049,16 @@ func (cn *conn) auth(r *readBuf, o values) {
 	}
 }
 
+type format int
+
+const formatText format = 0
+const formatBinary format = 1
+
 type stmt struct {
 	cn        *conn
 	name      string
 	cols      []string
+	rowFmts   []format
 	rowTyps   []oid.Oid
 	paramTyps []oid.Oid
 	closed    bool
@@ -1151,7 +1157,24 @@ func (st *stmt) exec(v []driver.Value) {
 			w.bytes(b)
 		}
 	}
-	w.int16(0)
+
+	// result-column format codes
+	var binary bool
+	for i, o := range st.rowTyps {
+		if o == oid.T_bytea {
+			binary = true
+			st.rowFmts[i] = formatBinary
+		}
+	}
+	if binary {
+		w.int16(len(st.rowFmts))
+		for _, f := range st.rowFmts {
+			w.int16(int(f))
+		}
+	} else {
+		w.int16(0)
+	}
+
 	st.cn.send(w)
 
 	w = st.cn.writeBuf('E')
@@ -1330,7 +1353,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 					dest[i] = nil
 					continue
 				}
-				dest[i] = decode(&conn.parameterStatus, rs.rb.next(l), rs.st.rowTyps[i])
+				dest[i] = decode(&conn.parameterStatus, rs.rb.next(l), rs.st.rowTyps[i], rs.st.rowFmts[i])
 			}
 			return
 		default:
@@ -1392,15 +1415,17 @@ func (c *conn) processReadyForQuery(r *readBuf) {
 	c.txnStatus = transactionStatus(r.byte())
 }
 
-func parseMeta(r *readBuf) (cols []string, rowTyps []oid.Oid) {
+func parseMeta(r *readBuf) (cols []string, rowFmts []format, rowTyps []oid.Oid) {
 	n := r.int16()
 	cols = make([]string, n)
+	rowFmts = make([]format, n)
 	rowTyps = make([]oid.Oid, n)
 	for i := range cols {
 		cols[i] = r.string()
 		r.next(6)
 		rowTyps[i] = r.oid()
-		r.next(8)
+		r.next(6)
+		rowFmts[i] = format(r.int16())
 	}
 	return
 }

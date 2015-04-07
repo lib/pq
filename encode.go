@@ -46,9 +46,12 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 	panic("not reached")
 }
 
-func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{} {
+func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid, f format) interface{} {
 	switch typ {
 	case oid.T_bytea:
+		if f == formatBinary {
+			return s
+		}
 		return parseBytea(s)
 	case oid.T_timestamptz:
 		return parseTs(parameterStatus.currentLocation, string(s))
