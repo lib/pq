@@ -586,6 +586,12 @@ func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
 			}
 		case 'T':
 			st.cols, st.rowFmts, st.rowTyps = parseMeta(r)
+
+			for i, o := range st.rowTyps {
+				if o == oid.T_bytea {
+					st.rowFmts[i] = formatBinary
+				}
+			}
 		case 'n':
 			// no data
 		case 'Z':
@@ -1157,24 +1163,10 @@ func (st *stmt) exec(v []driver.Value) {
 			w.bytes(b)
 		}
 	}
-
-	// result-column format codes
-	var binary bool
-	for i, o := range st.rowTyps {
-		if o == oid.T_bytea {
-			binary = true
-			st.rowFmts[i] = formatBinary
-		}
+	w.int16(len(st.rowFmts))
+	for _, f := range st.rowFmts {
+		w.int16(int(f))
 	}
-	if binary {
-		w.int16(len(st.rowFmts))
-		for _, f := range st.rowFmts {
-			w.int16(int(f))
-		}
-	} else {
-		w.int16(0)
-	}
-
 	st.cn.send(w)
 
 	w = st.cn.writeBuf('E')
