@@ -150,6 +150,8 @@ func (ci *copyin) resploop() {
 		switch t {
 		case 'C':
 			// complete
+		case 'N':
+			// NoticeResponse
 		case 'Z':
 			ci.cn.processReadyForQuery(&r)
 			ci.done <- true
