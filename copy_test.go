@@ -115,9 +115,8 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 			$BODY$ begin
 				raise notice 'Hello world';
 				return new;
-			end; $BODY$ 
-			LANGUAGE plpgsql
-		`)
+			end $BODY$
+			LANGUAGE plpgsql`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,9 +126,7 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 			BEFORE INSERT
 			ON temp 
 			FOR EACH ROW
-			EXECUTE PROCEDURE pg_temp.temptest()
-		`)
-
+			EXECUTE PROCEDURE pg_temp.temptest()`)
 	if err != nil {
 		t.Fatal(err)
 	}
