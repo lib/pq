@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -93,6 +94,7 @@ func (d defaultDialer) DialTimeout(ntw, addr string, timeout time.Duration) (net
 
 type conn struct {
 	c         net.Conn
+	name      string // the URL or connection string given to Open
 	buf       *bufio.Reader
 	namei     int
 	scratch   [512]byte
@@ -106,6 +108,9 @@ type conn struct {
 	// If true, this connection is bad and all public-facing functions should
 	// return ErrBadConn.
 	bad bool
+
+	// Used to decrement counter once we close the connection
+	once sync.Once
 }
 
 func (c *conn) writeBuf(b byte) *writeBuf {
@@ -152,6 +157,7 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 		o.Set(k, v)
 	}
 
+	cName := name // store user supplied name for counters
 	if strings.HasPrefix(name, "postgres://") {
 		name, err = ParseURL(name)
 		if err != nil {
@@ -208,7 +214,8 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 		return nil, err
 	}
 
-	cn := &conn{c: c}
+	incrCount(cName)
+	cn := &conn{c: c, name: cName}
 	cn.ssl(o)
 	cn.buf = bufio.NewReader(cn.c)
 	cn.startup(o)
@@ -613,6 +620,7 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 }
 
 func (cn *conn) Close() (err error) {
+	cn.once.Do(cn.decrement)
 	if cn.bad {
 		return driver.ErrBadConn
 	}
