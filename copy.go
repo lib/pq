@@ -148,8 +148,9 @@ func (ci *copyin) resploop() {
 			return
 		}
 		switch t {
-		case 'C','N':
+		case 'C':
 			// complete
+		case 'N':
 		case 'Z':
 			ci.cn.processReadyForQuery(&r)
 			ci.done <- true

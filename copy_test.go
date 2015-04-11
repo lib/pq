@@ -94,17 +94,6 @@ func TestCopyInMultipleValues(t *testing.T) {
 	}
 }
 
-/* Create this function in your DB to test the COPY statement with triggers that use RAISE
-statement to report messages
-
-CREATE OR REPLACE FUNCTION temptest()
-  RETURNS trigger AS
-$BODY$ begin
-  raise notice 'hello world';  
-  return new;
-end; $BODY$
-LANGUAGE plpgsql
-*/
 func TestCopyInRaiseStmtTrigger(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
@@ -120,25 +109,29 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	//Check if test function exists 
-	var num int
-	err = txn.QueryRow(`SELECT COUNT(*) FROM pg_proc where proname = 'temptest'`).Scan(&num)
+	_, err = txn.Exec(`
+			CREATE OR REPLACE FUNCTION pg_temp.temptest()
+			RETURNS trigger AS 
+			$BODY$ begin
+				raise notice 'Hello world';
+				return new;
+			end; $BODY$ 
+			LANGUAGE plpgsql
+		`)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if num == 1 {
-		_, err = txn.Exec(`
+	_, err = txn.Exec(`
 			CREATE TRIGGER temptest_trigger
 			BEFORE INSERT
 			ON temp 
 			FOR EACH ROW
-			EXECUTE PROCEDURE temptest()
+			EXECUTE PROCEDURE pg_temp.temptest()
 		`)
 
-		if err != nil {
-			t.Fatal(err)
-		}
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	stmt, err := txn.Prepare(CopyIn("temp", "a", "b"))
@@ -163,6 +156,7 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var num int
 	err = txn.QueryRow("SELECT COUNT(*) FROM temp").Scan(&num)
 	if err != nil {
 		t.Fatal(err)
