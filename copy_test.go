@@ -94,6 +94,76 @@ func TestCopyInMultipleValues(t *testing.T) {
 	}
 }
 
+func TestCopyInRaiseStmtTrigger(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer txn.Rollback()
+
+	_, err = txn.Exec("CREATE TEMP TABLE temp (a int, b varchar)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = txn.Exec(`
+			CREATE OR REPLACE FUNCTION pg_temp.temptest()
+			RETURNS trigger AS 
+			$BODY$ begin
+				raise notice 'Hello world';
+				return new;
+			end $BODY$
+			LANGUAGE plpgsql`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = txn.Exec(`
+			CREATE TRIGGER temptest_trigger
+			BEFORE INSERT
+			ON temp 
+			FOR EACH ROW
+			EXECUTE PROCEDURE pg_temp.temptest()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stmt, err := txn.Prepare(CopyIn("temp", "a", "b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	longString := strings.Repeat("#", 500)
+
+	_, err = stmt.Exec(int64(1), longString)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = stmt.Exec()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = stmt.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var num int
+	err = txn.QueryRow("SELECT COUNT(*) FROM temp").Scan(&num)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if num != 1 {
+		t.Fatalf("expected 1 items, not %d", num)
+	}
+}
+
 func TestCopyInTypes(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
