@@ -98,4 +98,5 @@ code still exists in here.
 * Timothée Peignier (cyberdelia)
 * Travis Cline (tmc)
 * TruongSinh Tran-Nguyen (truongsinh)
+* Yaismel Miranda (ympons)
 * notedit (notedit)
