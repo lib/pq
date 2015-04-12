@@ -16,22 +16,14 @@ type Fatalistic interface {
 }
 
 func openTestConnConninfo(conninfo string) (*sql.DB, error) {
-	datname := os.Getenv("PGDATABASE")
-	sslmode := os.Getenv("PGSSLMODE")
-	timeout := os.Getenv("PGCONNECT_TIMEOUT")
-
-	if datname == "" {
-		os.Setenv("PGDATABASE", "pqgotest")
+	defaultTo := func(envvar string, value string) {
+		if os.Getenv(envvar) == "" {
+			os.Setenv(envvar, value)
+		}
 	}
-
-	if sslmode == "" {
-		os.Setenv("PGSSLMODE", "disable")
-	}
-
-	if timeout == "" {
-		os.Setenv("PGCONNECT_TIMEOUT", "20")
-	}
-
+	defaultTo("PGDATABASE", "pqgotest")
+	defaultTo("PGSSLMODE", "disable")
+	defaultTo("PGCONNECT_TIMEOUT", "20")
 	return sql.Open("postgres", conninfo)
 }
 
