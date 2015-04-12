@@ -44,6 +44,7 @@ env:
     - PGUSER=postgres
     - PQGOSSLTESTS=1
     - PQSSLCERTTEST_PATH=$PWD/certs
+    - PGHOST=127.0.0.1
   matrix:
     - PGVERSION=9.4
     - PGVERSION=9.3
