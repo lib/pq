@@ -18,8 +18,6 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 	switch v := x.(type) {
 	case int64:
 		return []byte(fmt.Sprintf("%d", v))
-	case float32:
-		return []byte(fmt.Sprintf("%.9f", v))
 	case float64:
 		return []byte(fmt.Sprintf("%.17f", v))
 	case []byte:
@@ -87,8 +85,6 @@ func appendEncodedText(parameterStatus *parameterStatus, buf []byte, x interface
 	switch v := x.(type) {
 	case int64:
 		return strconv.AppendInt(buf, v, 10)
-	case float32:
-		return strconv.AppendFloat(buf, float64(v), 'f', -1, 32)
 	case float64:
 		return strconv.AppendFloat(buf, v, 'f', -1, 64)
 	case []byte:

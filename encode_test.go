@@ -510,15 +510,13 @@ func TestAppendEncodedText(t *testing.T) {
 
 	buf = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, int64(10))
 	buf = append(buf, '\t')
-	buf = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, float32(42.0000000001))
-	buf = append(buf, '\t')
 	buf = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, 42.0000000001)
 	buf = append(buf, '\t')
 	buf = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, "hello\tworld")
 	buf = append(buf, '\t')
 	buf = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, []byte{0, 128, 255})
 
-	if string(buf) != "10\t42\t42.0000000001\thello\\tworld\t\\\\x0080ff" {
+	if string(buf) != "10\t42.0000000001\thello\\tworld\t\\\\x0080ff" {
 		t.Fatal(string(buf))
 	}
 }
