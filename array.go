@@ -37,22 +37,21 @@ func (a Array) Value() (driver.Value, error) {
 		return nil, fmt.Errorf("pq: Unable to convert %T to array", a.A)
 	}
 
-	b, _, err := appendArray(nil, rv)
-	return b, err
+	if n := rv.Len(); n > 0 {
+		// TODO b = make([]byte, 0, /* best guess */)
+
+		b, _, err := appendArray(nil, rv, n)
+		return b, err
+	}
+
+	return []byte{'{', '}'}, nil
 }
 
 // appendArray appends rv to the buffer, returning the extended buffer and
 // the delimiter used between elements.
 //
-// It panics if rv's Kind is not reflect.Array nor reflect.Slice.
-func appendArray(b []byte, rv reflect.Value) ([]byte, string, error) {
-	n := rv.Len()
-	if n == 0 {
-		return append(b, "{}"...), "", nil
-	}
-
-	// TODO if b == nil { b = make([]byte, 0, /* best guess */) }
-
+// It panics when n <= 0 or rv's Kind is not reflect.Array nor reflect.Slice.
+func appendArray(b []byte, rv reflect.Value, n int) ([]byte, string, error) {
 	b = append(b, '{')
 
 	var del string
@@ -82,7 +81,11 @@ func appendArray(b []byte, rv reflect.Value) ([]byte, string, error) {
 func appendArrayElement(b []byte, rv reflect.Value) ([]byte, string, error) {
 	if k := rv.Kind(); k == reflect.Array ||
 		(k == reflect.Slice && rv.Type() != reflect.TypeOf([]byte{})) {
-		return appendArray(b, rv)
+		if n := rv.Len(); n > 0 {
+			return appendArray(b, rv, n)
+		}
+
+		return b, "", nil
 	}
 
 	var del string = ","

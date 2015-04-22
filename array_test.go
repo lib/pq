@@ -53,8 +53,8 @@ func TestArrayValue(t *testing.T) {
 		{`{true,false}`, []bool{true, false}},
 		{`{true,false}`, [2]bool{true, false}},
 
-		// TODO define expectations for n-dimensional empty slices
-		//{`{}`, [][]int{{}}},
+		{`{}`, [][]int{{}}},
+		{`{}`, [][]int{{}, {}}},
 		{`{{1}}`, [][]int{{1}}},
 		{`{{1},{2}}`, [][]int{{1}, {2}}},
 		{`{{1,2},{3,4}}`, [][]int{{1, 2}, {3, 4}}},
