@@ -14,6 +14,17 @@ import (
 //  db.Query("SELECT * FROM t WHERE id = ANY($1)", pq.Array{[]int{235, 401}})
 type Array struct{ A interface{} }
 
+// ArrayValuer is an interface used by Array.
+type ArrayValuer interface {
+
+	// ArrayDelimiter returns the delimiter character(s) for this element's type.
+	ArrayDelimiter() string
+
+	// ArrayValue returns the value of this array element. []byte and string
+	// values are double-quoted by Array.
+	ArrayValue() (interface{}, error)
+}
+
 // Value implements the driver.Valuer interface.
 func (a Array) Value() (driver.Value, error) {
 	if a.A == nil {
@@ -77,6 +88,13 @@ func appendArrayElement(b []byte, rv reflect.Value) ([]byte, string, error) {
 	var del string = ","
 	var err error
 	var iv interface{} = rv.Interface()
+
+	if av, ok := iv.(ArrayValuer); ok {
+		del = av.ArrayDelimiter()
+		if iv, err = av.ArrayValue(); err != nil {
+			return b, del, err
+		}
+	}
 
 	if iv, err = driver.DefaultParameterConverter.ConvertValue(iv); err != nil {
 		return b, del, err
