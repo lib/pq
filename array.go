@@ -9,6 +9,13 @@ import (
 
 var typeByteSlice = reflect.TypeOf([]byte{})
 
+// ArrayDelimiter may be optionally implemented by driver.Valuer to override the
+// array delimiter used by GenericArray.
+type ArrayDelimiter interface {
+	// ArrayDelimiter returns the delimiter character(s) for this element's type.
+	ArrayDelimiter() string
+}
+
 // GenericArray implements the driver.Valuer interface for an array or slice
 // of any dimension.
 type GenericArray struct{ A interface{} }
@@ -81,6 +88,10 @@ func appendArrayElement(b []byte, rv reflect.Value) ([]byte, string, error) {
 	var del string = ","
 	var err error
 	var iv interface{} = rv.Interface()
+
+	if ad, ok := iv.(ArrayDelimiter); ok {
+		del = ad.ArrayDelimiter()
+	}
 
 	if iv, err = driver.DefaultParameterConverter.ConvertValue(iv); err != nil {
 		return b, del, err

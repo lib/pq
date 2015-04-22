@@ -3,6 +3,7 @@ package pq
 import (
 	"bytes"
 	"database/sql"
+	"database/sql/driver"
 	"math/rand"
 	"reflect"
 	"strings"
@@ -20,6 +21,14 @@ func TestGenericArrayValueUnsupported(t *testing.T) {
 	}
 }
 
+type FuncArrayValuer struct {
+	delimiter func() string
+	value     func() (driver.Value, error)
+}
+
+func (f FuncArrayValuer) ArrayDelimiter() string       { return f.delimiter() }
+func (f FuncArrayValuer) Value() (driver.Value, error) { return f.value() }
+
 func TestGenericArrayValue(t *testing.T) {
 	result, err := GenericArray{nil}.Value()
 
@@ -28,6 +37,12 @@ func TestGenericArrayValue(t *testing.T) {
 	}
 	if result != nil {
 		t.Errorf("Expected nil, got %q", result)
+	}
+
+	Tilde := func(v driver.Value) FuncArrayValuer {
+		return FuncArrayValuer{
+			func() string { return "~" },
+			func() (driver.Value, error) { return v, nil }}
 	}
 
 	for _, tt := range []struct {
@@ -54,6 +69,9 @@ func TestGenericArrayValue(t *testing.T) {
 
 		{`{NULL}`, []sql.NullString{{}}},
 		{`{"\"",NULL}`, []sql.NullString{{String: `"`, Valid: true}, {}}},
+
+		{`{1~2}`, []FuncArrayValuer{Tilde(int64(1)), Tilde(int64(2))}},
+		{`{{1~2}~{3~4}}`, [][]FuncArrayValuer{{Tilde(int64(1)), Tilde(int64(2))}, {Tilde(int64(3)), Tilde(int64(4))}}},
 	} {
 		result, err := GenericArray{tt.input}.Value()
 
