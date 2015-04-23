@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+var typeByteSlice = reflect.TypeOf([]byte{})
+
 // Array implements the driver.Valuer interface for an array or slice.
 //
 // For example:
@@ -38,9 +40,11 @@ func (a Array) Value() (driver.Value, error) {
 	}
 
 	if n := rv.Len(); n > 0 {
-		// TODO b = make([]byte, 0, /* best guess */)
+		// There will be at least two curly brackets, N bytes of values,
+		// and N-1 bytes of delimiters.
+		b := make([]byte, 0, 1+2*n)
 
-		b, _, err := appendArray(nil, rv, n)
+		b, _, err := appendArray(b, rv, n)
 		return b, err
 	}
 
@@ -52,10 +56,11 @@ func (a Array) Value() (driver.Value, error) {
 //
 // It panics when n <= 0 or rv's Kind is not reflect.Array nor reflect.Slice.
 func appendArray(b []byte, rv reflect.Value, n int) ([]byte, string, error) {
-	b = append(b, '{')
-
 	var del string
 	var err error
+
+	b = append(b, '{')
+
 	if b, del, err = appendArrayElement(b, rv.Index(0)); err != nil {
 		return b, del, err
 	}
@@ -79,8 +84,7 @@ func appendArray(b []byte, rv reflect.Value, n int) ([]byte, string, error) {
 //
 // See http://www.postgresql.org/docs/current/static/arrays.html#ARRAYS-IO
 func appendArrayElement(b []byte, rv reflect.Value) ([]byte, string, error) {
-	if k := rv.Kind(); k == reflect.Array ||
-		(k == reflect.Slice && rv.Type() != reflect.TypeOf([]byte{})) {
+	if k := rv.Kind(); k == reflect.Array || (k == reflect.Slice && rv.Type() != typeByteSlice) {
 		if n := rv.Len(); n > 0 {
 			return appendArray(b, rv, n)
 		}
@@ -106,38 +110,48 @@ func appendArrayElement(b []byte, rv reflect.Value) ([]byte, string, error) {
 	switch v := iv.(type) {
 	case nil:
 		return append(b, "NULL"...), del, nil
-
 	case []byte:
-		b = append(b, '"')
-		for {
-			i := bytes.IndexAny(v, `"\`)
-			if i < 0 {
-				b = append(b, v...)
-				break
-			}
-			b = append(b, v[:i]...)
-			b = append(b, '\\', v[i])
-			v = v[i+1:]
-		}
-		return append(b, '"'), del, nil
-
+		return appendArrayQuotedBytes(b, v), del, nil
 	case string:
-		b = append(b, '"')
-		for {
-			i := strings.IndexAny(v, `"\`)
-			if i < 0 {
-				b = append(b, v...)
-				break
-			}
-			b = append(b, v[:i]...)
-			b = append(b, '\\', v[i])
-			v = v[i+1:]
-		}
-		return append(b, '"'), del, nil
+		return appendArrayQuotedString(b, v), del, nil
 	}
 
 	b, err = appendValue(b, iv)
 	return b, del, err
+}
+
+func appendArrayQuotedBytes(b, v []byte) []byte {
+	b = append(b, '"')
+	for {
+		i := bytes.IndexAny(v, `"\`)
+		if i < 0 {
+			b = append(b, v...)
+			break
+		}
+		if i > 0 {
+			b = append(b, v[:i]...)
+		}
+		b = append(b, '\\', v[i])
+		v = v[i+1:]
+	}
+	return append(b, '"')
+}
+
+func appendArrayQuotedString(b []byte, v string) []byte {
+	b = append(b, '"')
+	for {
+		i := strings.IndexAny(v, `"\`)
+		if i < 0 {
+			b = append(b, v...)
+			break
+		}
+		if i > 0 {
+			b = append(b, v[:i]...)
+		}
+		b = append(b, '\\', v[i])
+		v = v[i+1:]
+	}
+	return append(b, '"')
 }
 
 func appendValue(b []byte, v driver.Value) ([]byte, error) {
