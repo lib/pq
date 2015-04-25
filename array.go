@@ -21,10 +21,6 @@ type ArrayValuer interface {
 
 	// ArrayDelimiter returns the delimiter character(s) for this element's type.
 	ArrayDelimiter() string
-
-	// ArrayValue returns the value of this array element. []byte and string
-	// values are double-quoted by Array.
-	ArrayValue() (interface{}, error)
 }
 
 // Value implements the driver.Valuer interface.
@@ -98,9 +94,6 @@ func appendArrayElement(b []byte, rv reflect.Value) ([]byte, string, error) {
 
 	if av, ok := iv.(ArrayValuer); ok {
 		del = av.ArrayDelimiter()
-		if iv, err = av.ArrayValue(); err != nil {
-			return b, del, err
-		}
 	}
 
 	if iv, err = driver.DefaultParameterConverter.ConvertValue(iv); err != nil {

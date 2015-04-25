@@ -3,6 +3,7 @@ package pq
 import (
 	"bytes"
 	"database/sql"
+	"database/sql/driver"
 	"math/rand"
 	"reflect"
 	"strings"
@@ -22,11 +23,11 @@ func TestArrayUnsupported(t *testing.T) {
 
 type FuncArrayValuer struct {
 	delimiter func() string
-	value     func() (interface{}, error)
+	value     func() (driver.Value, error)
 }
 
-func (f FuncArrayValuer) ArrayDelimiter() string           { return f.delimiter() }
-func (f FuncArrayValuer) ArrayValue() (interface{}, error) { return f.value() }
+func (f FuncArrayValuer) ArrayDelimiter() string       { return f.delimiter() }
+func (f FuncArrayValuer) Value() (driver.Value, error) { return f.value() }
 
 func TestArrayValue(t *testing.T) {
 	result, err := Array{nil}.Value()
@@ -38,10 +39,10 @@ func TestArrayValue(t *testing.T) {
 		t.Errorf("Expected nil, got %q", result)
 	}
 
-	Tilde := func(v interface{}) FuncArrayValuer {
+	Tilde := func(v driver.Value) FuncArrayValuer {
 		return FuncArrayValuer{
 			func() string { return "~" },
-			func() (interface{}, error) { return v, nil }}
+			func() (driver.Value, error) { return v, nil }}
 	}
 
 	for _, tt := range []struct {
@@ -69,8 +70,8 @@ func TestArrayValue(t *testing.T) {
 		{`{NULL}`, []sql.NullString{{}}},
 		{`{"\"",NULL}`, []sql.NullString{{`"`, true}, {}}},
 
-		{`{1~2}`, []FuncArrayValuer{Tilde(1), Tilde(2)}},
-		{`{{1~2}~{3~4}}`, [][]FuncArrayValuer{{Tilde(1), Tilde(2)}, {Tilde(3), Tilde(4)}}},
+		{`{1~2}`, []FuncArrayValuer{Tilde(int64(1)), Tilde(int64(2))}},
+		{`{{1~2}~{3~4}}`, [][]FuncArrayValuer{{Tilde(int64(1)), Tilde(int64(2))}, {Tilde(int64(3)), Tilde(int64(4))}}},
 	} {
 		result, err := Array{tt.input}.Value()
 
