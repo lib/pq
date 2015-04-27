@@ -11,6 +11,33 @@ import (
 
 var typeByteSlice = reflect.TypeOf([]byte{})
 
+// Array returns the optimal driver.Valuer for an array or slice of any
+// dimension.
+//
+// For example:
+//  db.Query(`SELECT * FROM t WHERE id = ANY($1)`, pq.Array([]int{235, 401}))
+func Array(a interface{}) driver.Valuer {
+	switch a := a.(type) {
+	case []bool:
+		return BoolArray(a)
+	case []float64:
+		return Float64Array(a)
+	case []int64:
+		return Int64Array(a)
+	case []string:
+		return StringArray(a)
+	}
+
+	return GenericArray{a}
+}
+
+// ArrayValuer is used by GenericArray.
+type ArrayValuer interface {
+
+	// ArrayDelimiter returns the delimiter character(s) for this element's type.
+	ArrayDelimiter() string
+}
+
 type BoolArray []bool
 
 // Value implements the driver.Valuer interface.
@@ -68,21 +95,12 @@ func (a Float64Array) Value() (driver.Value, error) {
 	return []byte{'{', '}'}, nil
 }
 
-// Array implements the driver.Valuer interface for an array or slice.
-//
-// For example:
-//  db.Query("SELECT * FROM t WHERE id = ANY($1)", pq.Array{[]int{235, 401}})
-type Array struct{ A interface{} }
-
-// ArrayValuer is an interface used by Array.
-type ArrayValuer interface {
-
-	// ArrayDelimiter returns the delimiter character(s) for this element's type.
-	ArrayDelimiter() string
-}
+// GenericArray implements the driver.Valuer interface for an array or slice
+// of any dimension.
+type GenericArray struct{ A interface{} }
 
 // Value implements the driver.Valuer interface.
-func (a Array) Value() (driver.Value, error) {
+func (a GenericArray) Value() (driver.Value, error) {
 	if a.A == nil {
 		return nil, nil
 	}

@@ -10,6 +10,44 @@ import (
 	"testing"
 )
 
+func TestArray(t *testing.T) {
+	var result driver.Valuer
+
+	result = Array([]bool{})
+	if _, ok := result.(BoolArray); !ok {
+		t.Errorf("Expected BoolArray, got %T", result)
+	}
+
+	result = Array([]float64{})
+	if _, ok := result.(Float64Array); !ok {
+		t.Errorf("Expected Float64Array, got %T", result)
+	}
+
+	result = Array([]int64{})
+	if _, ok := result.(Int64Array); !ok {
+		t.Errorf("Expected Int64Array, got %T", result)
+	}
+
+	result = Array([]string{})
+	if _, ok := result.(StringArray); !ok {
+		t.Errorf("Expected StringArray, got %T", result)
+	}
+
+	for _, tt := range []interface{}{
+		nil,
+		[]driver.Value{},
+		[][]bool{},
+		[][]float64{},
+		[][]int64{},
+		[][]string{},
+	} {
+		result = Array(tt)
+		if _, ok := result.(GenericArray); !ok {
+			t.Errorf("Expected GenericArray for %T, got %T", tt, result)
+		}
+	}
+}
+
 func TestBoolArrayValue(t *testing.T) {
 	result, err := BoolArray(nil).Value()
 
@@ -177,8 +215,8 @@ func BenchmarkStringArrayValue(b *testing.B) {
 	}
 }
 
-func TestArrayUnsupported(t *testing.T) {
-	_, err := Array{true}.Value()
+func TestGenericArrayUnsupported(t *testing.T) {
+	_, err := GenericArray{true}.Value()
 
 	if err == nil {
 		t.Fatal("Expected error for bool")
@@ -196,8 +234,8 @@ type FuncArrayValuer struct {
 func (f FuncArrayValuer) ArrayDelimiter() string       { return f.delimiter() }
 func (f FuncArrayValuer) Value() (driver.Value, error) { return f.value() }
 
-func TestArrayValue(t *testing.T) {
-	result, err := Array{nil}.Value()
+func TestGenericArrayValue(t *testing.T) {
+	result, err := GenericArray{nil}.Value()
 
 	if err != nil {
 		t.Fatalf("Expected no error for nil, got %v", err)
@@ -240,7 +278,7 @@ func TestArrayValue(t *testing.T) {
 		{`{1~2}`, []FuncArrayValuer{Tilde(int64(1)), Tilde(int64(2))}},
 		{`{{1~2}~{3~4}}`, [][]FuncArrayValuer{{Tilde(int64(1)), Tilde(int64(2))}, {Tilde(int64(3)), Tilde(int64(4))}}},
 	} {
-		result, err := Array{tt.input}.Value()
+		result, err := GenericArray{tt.input}.Value()
 
 		if err != nil {
 			t.Fatalf("Expected no error for %q, got %v", tt.input, err)
@@ -251,77 +289,77 @@ func TestArrayValue(t *testing.T) {
 	}
 }
 
-func TestArrayValueErrors(t *testing.T) {
+func TestGenericArrayValueErrors(t *testing.T) {
 	var v []interface{}
 
 	v = []interface{}{func() {}}
-	if _, err := (Array{v}).Value(); err == nil {
+	if _, err := (GenericArray{v}).Value(); err == nil {
 		t.Errorf("Expected error for %q, got nil", v)
 	}
 
 	v = []interface{}{nil, func() {}}
-	if _, err := (Array{v}).Value(); err == nil {
+	if _, err := (GenericArray{v}).Value(); err == nil {
 		t.Errorf("Expected error for %q, got nil", v)
 	}
 }
 
-func BenchmarkArrayValueBools(b *testing.B) {
+func BenchmarkGenericArrayValueBools(b *testing.B) {
 	rand.Seed(1)
 	x := make([]bool, 10)
 	for i := 0; i < len(x); i++ {
 		x[i] = rand.Intn(2) == 0
 	}
-	a := Array{x}
+	a := GenericArray{x}
 
 	for i := 0; i < b.N; i++ {
 		a.Value()
 	}
 }
 
-func BenchmarkArrayValueFloat64s(b *testing.B) {
+func BenchmarkGenericArrayValueFloat64s(b *testing.B) {
 	rand.Seed(1)
 	x := make([]float64, 10)
 	for i := 0; i < len(x); i++ {
 		x[i] = rand.NormFloat64()
 	}
-	a := Array{x}
+	a := GenericArray{x}
 
 	for i := 0; i < b.N; i++ {
 		a.Value()
 	}
 }
 
-func BenchmarkArrayValueInt64s(b *testing.B) {
+func BenchmarkGenericArrayValueInt64s(b *testing.B) {
 	rand.Seed(1)
 	x := make([]int64, 10)
 	for i := 0; i < len(x); i++ {
 		x[i] = rand.Int63()
 	}
-	a := Array{x}
+	a := GenericArray{x}
 
 	for i := 0; i < b.N; i++ {
 		a.Value()
 	}
 }
 
-func BenchmarkArrayValueBytes(b *testing.B) {
+func BenchmarkGenericArrayValueByteSlices(b *testing.B) {
 	x := make([][]byte, 10)
 	for i := 0; i < len(x); i++ {
 		x[i] = bytes.Repeat([]byte(`abc"def\ghi`), 5)
 	}
-	a := Array{x}
+	a := GenericArray{x}
 
 	for i := 0; i < b.N; i++ {
 		a.Value()
 	}
 }
 
-func BenchmarkArrayValueStrings(b *testing.B) {
+func BenchmarkGenericArrayValueStrings(b *testing.B) {
 	x := make([]string, 10)
 	for i := 0; i < len(x); i++ {
 		x[i] = strings.Repeat(`abc"def\ghi`, 5)
 	}
-	a := Array{x}
+	a := GenericArray{x}
 
 	for i := 0; i < b.N; i++ {
 		a.Value()
