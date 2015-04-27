@@ -5,10 +5,68 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 )
 
 var typeByteSlice = reflect.TypeOf([]byte{})
+
+type BoolArray []bool
+
+// Value implements the driver.Valuer interface.
+func (a BoolArray) Value() (driver.Value, error) {
+	if a == nil {
+		return nil, nil
+	}
+
+	if n := len(a); n > 0 {
+		// There will be exactly two curly brackets, N bytes of values,
+		// and N-1 bytes of delimiters.
+		b := make([]byte, 1+2*n)
+
+		for i := 0; i < n; i++ {
+			b[2*i] = ','
+			if a[i] {
+				b[1+2*i] = 't'
+			} else {
+				b[1+2*i] = 'f'
+			}
+		}
+
+		b[0] = '{'
+		b[2*n] = '}'
+
+		return b, nil
+	}
+
+	return []byte{'{', '}'}, nil
+}
+
+type Float64Array []float64
+
+// Value implements the driver.Valuer interface.
+func (a Float64Array) Value() (driver.Value, error) {
+	if a == nil {
+		return nil, nil
+	}
+
+	if n := len(a); n > 0 {
+		// There will be at least two curly brackets, N bytes of values,
+		// and N-1 bytes of delimiters.
+		b := make([]byte, 1, 1+2*n)
+		b[0] = '{'
+
+		b = strconv.AppendFloat(b, a[0], 'f', -1, 64)
+		for i := 1; i < n; i++ {
+			b = append(b, ',')
+			b = strconv.AppendFloat(b, a[i], 'f', -1, 64)
+		}
+
+		return append(b, '}'), nil
+	}
+
+	return []byte{'{', '}'}, nil
+}
 
 // Array implements the driver.Valuer interface for an array or slice.
 //
@@ -42,6 +100,58 @@ func (a Array) Value() (driver.Value, error) {
 
 		b, _, err := appendArray(b, rv, n)
 		return b, err
+	}
+
+	return []byte{'{', '}'}, nil
+}
+
+type Int64Array []int64
+
+// Value implements the driver.Valuer interface.
+func (a Int64Array) Value() (driver.Value, error) {
+	if a == nil {
+		return nil, nil
+	}
+
+	if n := len(a); n > 0 {
+		// There will be at least two curly brackets, N bytes of values,
+		// and N-1 bytes of delimiters.
+		b := make([]byte, 1, 1+2*n)
+		b[0] = '{'
+
+		b = strconv.AppendInt(b, a[0], 10)
+		for i := 1; i < n; i++ {
+			b = append(b, ',')
+			b = strconv.AppendInt(b, a[i], 10)
+		}
+
+		return append(b, '}'), nil
+	}
+
+	return []byte{'{', '}'}, nil
+}
+
+type StringArray []string
+
+// Value implements the driver.Valuer interface.
+func (a StringArray) Value() (driver.Value, error) {
+	if a == nil {
+		return nil, nil
+	}
+
+	if n := len(a); n > 0 {
+		// There will be at least two curly brackets, 2*N bytes of values,
+		// and N-1 bytes of delimiters.
+		b := make([]byte, 1, 1+3*n)
+		b[0] = '{'
+
+		b = appendArrayQuotedString(b, a[0])
+		for i := 1; i < n; i++ {
+			b = append(b, ',')
+			b = appendArrayQuotedString(b, a[i])
+		}
+
+		return append(b, '}'), nil
 	}
 
 	return []byte{'{', '}'}, nil
