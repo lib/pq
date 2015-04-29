@@ -239,6 +239,7 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	cn.ssl(o)
 	cn.buf = bufio.NewReader(cn.c)
 	cn.startup(o)
+	cn.prepared = make(map[string]*stmt)
 	// reset the deadline, in case one was set (see dial)
 	if timeout := o.Get("connect_timeout"); timeout != "" && timeout != "0" {
 		err = cn.c.SetDeadline(time.Time{})
@@ -717,7 +718,7 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 		return prepared0, nil
 	}
 	prepared, err := cn.prepareTo(q, name)
-	if err != nil {
+	if err == nil {
 		cn.prepared[name] = prepared
 	}
 	return prepared, err
