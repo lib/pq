@@ -90,6 +90,51 @@ func BenchmarkBoolArrayValue(b *testing.B) {
 	}
 }
 
+func TestByteaArrayValue(t *testing.T) {
+	result, err := ByteaArray(nil).Value()
+
+	if err != nil {
+		t.Fatalf("Expected no error for nil, got %v", err)
+	}
+	if result != nil {
+		t.Errorf("Expected nil, got %q", result)
+	}
+
+	result, err = ByteaArray([][]byte{}).Value()
+
+	if err != nil {
+		t.Fatalf("Expected no error for empty, got %v", err)
+	}
+	if expected := `{}`; !reflect.DeepEqual(result, []byte(expected)) {
+		t.Errorf("Expected empty, got %q", result)
+	}
+
+	result, err = ByteaArray([][]byte{{'\xDE', '\xAD', '\xBE', '\xEF'}, {'\xFE', '\xFF'}, {}}).Value()
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if expected := `{"\\xdeadbeef","\\xfeff","\\x"}`; !reflect.DeepEqual(result, []byte(expected)) {
+		t.Errorf("Expected %q, got %q", expected, result)
+	}
+}
+
+func BenchmarkByteaArrayValue(b *testing.B) {
+	rand.Seed(1)
+	x := make([][]byte, 10)
+	for i := 0; i < len(x); i++ {
+		x[i] = make([]byte, len(x))
+		for j := 0; j < len(x); j++ {
+			x[i][j] = byte(rand.Int())
+		}
+	}
+	a := ByteaArray(x)
+
+	for i := 0; i < b.N; i++ {
+		a.Value()
+	}
+}
+
 func TestFloat64ArrayValue(t *testing.T) {
 	result, err := Float64Array(nil).Value()
 
