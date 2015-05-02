@@ -283,13 +283,13 @@ func (l *ListenerConn) ExecSimpleQuery(q string) (executed bool, err error) {
 		// We can't know what state the protocol is in, so we need to abandon
 		// this connection.
 		l.connectionLock.Lock()
-		defer l.connectionLock.Unlock()
 		// Set the error pointer if it hasn't been set already; see
 		// listenerConnMain.
 		if l.err == nil {
 			l.err = err
 		}
-		l.cn.Close()
+		l.connectionLock.Unlock()
+		l.cn.c.Close()
 		return false, err
 	}
 
@@ -329,12 +329,15 @@ func (l *ListenerConn) ExecSimpleQuery(q string) (executed bool, err error) {
 
 func (l *ListenerConn) Close() error {
 	l.connectionLock.Lock()
-	defer l.connectionLock.Unlock()
 	if l.err != nil {
+		l.connectionLock.Unlock()
 		return errListenerConnClosed
 	}
 	l.err = errListenerConnClosed
-	return l.cn.Close()
+	l.connectionLock.Unlock()
+	// We can't send anything on the connection without holding senderLock.
+	// Simply close the net.Conn to wake up everyone operating on it.
+	return l.cn.c.Close()
 }
 
 // Err() returns the reason the connection was closed.  It is not safe to call
