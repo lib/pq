@@ -466,9 +466,9 @@ func errRecoverNoErrBadConn(err *error) {
 		return
 	}
 	var ok bool
-	err, ok = e.(error)
+	*err, ok = e.(error)
 	if !ok {
-		err = fmt.Errorf("pq: unexpected error: %#v", e)
+		*err = fmt.Errorf("pq: unexpected error: %#v", e)
 	}
 }
 
