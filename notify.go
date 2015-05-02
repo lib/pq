@@ -6,7 +6,6 @@ package pq
 import (
 	"errors"
 	"fmt"
-	"io"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -143,6 +142,9 @@ func (l *ListenerConn) listenerConnLoop() (err error) {
 			// recvNotification copies all the data so we don't need to worry
 			// about the scratch buffer being overwritten.
 			l.notificationChan <- recvNotification(r)
+
+		case 'T', 'D':
+			// only used by tests; ignore
 
 		case 'E':
 			// We might receive an ErrorResponse even when not in a query; it
@@ -296,8 +298,11 @@ func (l *ListenerConn) ExecSimpleQuery(q string) (executed bool, err error) {
 		m, ok := <-l.replyChan
 		if !ok {
 			// We lost the connection to server, don't bother waiting for a
-			// a response.
-			return false, io.EOF
+			// a response.  err should have been set already.
+			l.connectionLock.Lock()
+			err := l.err
+			l.connectionLock.Unlock()
+			return false, err
 		}
 		switch m.typ {
 		case 'Z':
