@@ -119,22 +119,11 @@ func Open(name string) (_ driver.Conn, err error) {
 }
 
 func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
-	defer func() {
-		// Handle any panics during connection initialization.  Note that we
-		// specifically do *not* want to use errRecover(), as that would turn
-		// any connection errors into ErrBadConns, hiding the real error
-		// message from the user.
-		e := recover()
-		if e == nil {
-			// Do nothing
-			return
-		}
-		var ok bool
-		err, ok = e.(error)
-		if !ok {
-			err = fmt.Errorf("pq: unexpected error: %#v", e)
-		}
-	}()
+	// Handle any panics during connection initialization.  Note that we
+	// specifically do *not* want to use errRecover(), as that would turn any
+	// connection errors into ErrBadConns, hiding the real error message from
+	// the user.
+	defer errRecoverNoErrBadConn(&err)
 
 	o := make(values)
 
