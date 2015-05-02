@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -208,6 +211,38 @@ func TestConnPing(t *testing.T) {
 	if err != errListenerConnClosed {
 		t.Fatalf("expected errListenerConnClosed; got %v", err)
 	}
+}
+
+// Test for deadlock where a query fails while another one is queued
+func TestConnExecDeadlock(t *testing.T) {
+	l, _ := newTestListenerConn(t)
+	defer l.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		l.ExecSimpleQuery("SELECT pg_sleep(60)")
+		wg.Done()
+	}()
+	go func() {
+		l.ExecSimpleQuery("SELECT 1")
+		wg.Done()
+	}()
+	// give the two goroutines some time to get into position
+	runtime.Gosched()
+	// simulate network connection failure
+	l.cn.c.Close()
+
+	var done int32 = 0
+	go func() {
+		time.Sleep(10 * time.Second)
+		if atomic.LoadInt32(&done) != 1 {
+			panic("timed out")
+		}
+	}()
+	wg.Wait()
+	atomic.StoreInt32(&done, 1)
 }
 
 func TestNotifyExtra(t *testing.T) {

@@ -87,12 +87,16 @@ func NewListenerConn(name string, notificationChan chan<- *Notification) (*Liste
 // Returns an error if an unrecoverable error has occurred and the ListenerConn
 // should be abandoned.
 func (l *ListenerConn) acquireSenderLock() error {
-	l.connectionLock.Lock()
-	defer l.connectionLock.Unlock()
-	if l.err != nil {
-		return l.err
-	}
+	// we must acquire senderLock first to avoid deadlocks; see ExecSimpleQuery
 	l.senderLock.Lock()
+
+	l.connectionLock.Lock()
+	err := l.err
+	l.connectionLock.Unlock()
+	if err != nil {
+		l.senderLock.Unlock()
+		return err
+	}
 	return nil
 }
 
