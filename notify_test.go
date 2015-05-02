@@ -225,6 +225,7 @@ func TestConnExecDeadlock(t *testing.T) {
 		l.ExecSimpleQuery("SELECT pg_sleep(60)")
 		wg.Done()
 	}()
+	runtime.Gosched()
 	go func() {
 		l.ExecSimpleQuery("SELECT 1")
 		wg.Done()
