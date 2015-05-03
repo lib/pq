@@ -253,8 +253,10 @@ func (l *ListenerConn) sendSimpleQuery(q string) (err error) {
 
 	// Can't use l.cn.writeBuf here because it uses the scratch buffer which
 	// might get overwritten by listenerConnLoop.
-	data := writeBuf([]byte("Q\x00\x00\x00\x00"))
-	b := &data
+	b := &writeBuf{
+		buf: []byte("Q\x00\x00\x00\x00"),
+		pos: 1,
+	}
 	b.string(q)
 	l.cn.send(b)
 
