@@ -706,16 +706,7 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 	}
 	name := cn.hashedName(q)
 	if prepared, ok := cn.prepared[name]; ok {
-		prepared0 := &stmt{
-			parent:    prepared,
-			cn:        prepared.cn,
-			name:      prepared.name,
-			cols:      prepared.cols,
-			rowTyps:   prepared.rowTyps,
-			paramTyps: prepared.paramTyps,
-			closed:    prepared.closed,
-		}
-		return prepared0, nil
+		return prepared, nil
 	}
 	prepared, err := cn.prepareTo(q, name)
 	if err == nil {
@@ -1184,7 +1175,6 @@ var rowFmtDataAllBinary []byte = []byte{0, 1, 0, 1}
 var rowFmtDataAllText []byte = []byte{0, 0}
 
 type stmt struct {
-	parent     *stmt
 	cn         *conn
 	name       string
 	cols       []string
@@ -1196,9 +1186,6 @@ type stmt struct {
 }
 
 func (st *stmt) Close() (err error) {
-	if st.parent != nil {
-		return nil
-	}
 	if st.closed {
 		return nil
 	}
