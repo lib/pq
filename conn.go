@@ -110,8 +110,10 @@ type conn struct {
 
 func (c *conn) writeBuf(b byte) *writeBuf {
 	c.scratch[0] = b
-	w := writeBuf(c.scratch[:5])
-	return &w
+	return &writeBuf{
+		buf: c.scratch[:5],
+		pos: 1,
+	}
 }
 
 func Open(name string) (_ driver.Conn, err error) {
@@ -553,14 +555,13 @@ func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
 	b.string(st.name)
 	b.string(q)
 	b.int16(0)
-	cn.send(b)
 
-	b = cn.writeBuf('D')
+	b.next('D')
 	b.byte('S')
 	b.string(st.name)
-	cn.send(b)
 
-	cn.send(cn.writeBuf('S'))
+	b.next('S')
+	cn.send(b)
 
 	for {
 		t, r := cn.recv1()
@@ -670,16 +671,20 @@ func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err er
 	return r, err
 }
 
-// Assumes len(*m) is > 5
 func (cn *conn) send(m *writeBuf) {
-	b := (*m)[1:]
-	binary.BigEndian.PutUint32(b, uint32(len(b)))
+	_, err := cn.c.Write(m.wrap())
+	if err != nil {
+		panic(err)
+	}
+}
 
-	if (*m)[0] == 0 {
-		*m = b
+func (cn *conn) sendStartupPacket(m *writeBuf) {
+	// sanity check
+	if m.buf[0] != 0 {
+		panic("oops")
 	}
 
-	_, err := cn.c.Write(*m)
+	_, err := cn.c.Write((m.wrap())[1:])
 	if err != nil {
 		panic(err)
 	}
@@ -819,7 +824,7 @@ func (cn *conn) ssl(o values) {
 
 	w := cn.writeBuf(0)
 	w.int32(80877103)
-	cn.send(w)
+	cn.sendStartupPacket(w)
 
 	b := cn.scratch[:1]
 	_, err := io.ReadFull(cn.c, b)
@@ -983,7 +988,7 @@ func (cn *conn) startup(o values) {
 		w.string(v)
 	}
 	w.string("")
-	cn.send(w)
+	cn.sendStartupPacket(w)
 
 	for {
 		t, r := cn.recv()
@@ -1127,7 +1132,7 @@ func (st *stmt) exec(v []driver.Value) {
 	}
 
 	w := st.cn.writeBuf('B')
-	w.string("")
+	w.byte(0)
 	w.string(st.name)
 	w.int16(0)
 	w.int16(len(v))
@@ -1141,14 +1146,13 @@ func (st *stmt) exec(v []driver.Value) {
 		}
 	}
 	w.int16(0)
-	st.cn.send(w)
 
-	w = st.cn.writeBuf('E')
-	w.string("")
+	w.next('E')
+	w.byte(0)
 	w.int32(0)
-	st.cn.send(w)
 
-	st.cn.send(st.cn.writeBuf('S'))
+	w.next('S')
+	st.cn.send(w)
 
 	var err error
 	for {
