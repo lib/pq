@@ -517,7 +517,12 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 				cn.bad = true
 				errorf("unexpected message %q in simple query execution", t)
 			}
-			res = &rows{st: st, done: true}
+			res = &rows{
+				cn: cn,
+				cols: st.cols,
+				rowTyps: st.rowTyps,
+				done: true,
+			}
 		case 'Z':
 			cn.processReadyForQuery(r)
 			// done
@@ -536,8 +541,9 @@ func (cn *conn) simpleQuery(q string) (res driver.Rows, err error) {
 		case 'T':
 			// res might be non-nil here if we received a previous
 			// CommandComplete, but that's fine; just overwrite it
-			res = &rows{st: st}
-			st.cols, st.rowTyps = parseMeta(r)
+			rs := &rows{cn: cn}
+			rs.cols, rs.rowTyps = parseMeta(r)
+			res = rs
 
 			// To work around a bug in QueryRow in Go 1.2 and earlier, wait
 			// until the first DataRow has been received.
@@ -637,7 +643,11 @@ func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err err
 	}
 
 	st.exec(args)
-	return &rows{st: st}, nil
+	return &rows{
+		cn: cn,
+		cols: st.cols,
+		rowTyps: st.rowTyps,
+	}, nil
 }
 
 // Implement the optional "Execer" interface for one-shot queries
@@ -1092,7 +1102,11 @@ func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) {
 	defer st.cn.errRecover(&err)
 
 	st.exec(v)
-	return &rows{st: st}, nil
+	return &rows{
+		cn: st.cn,
+		cols: st.cols,
+		rowTyps: st.rowTyps,
+	}, nil
 }
 
 func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
@@ -1264,7 +1278,9 @@ func (cn *conn) parseComplete(commandTag string) (driver.Result, string) {
 }
 
 type rows struct {
-	st   *stmt
+	cn *conn
+	cols []string
+	rowTyps []oid.Oid
 	done bool
 	rb   readBuf
 }
@@ -1284,7 +1300,7 @@ func (rs *rows) Close() error {
 }
 
 func (rs *rows) Columns() []string {
-	return rs.st.cols
+	return rs.cols
 }
 
 func (rs *rows) Next(dest []driver.Value) (err error) {
@@ -1292,7 +1308,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 		return io.EOF
 	}
 
-	conn := rs.st.cn
+	conn := rs.cn
 	if conn.bad {
 		return driver.ErrBadConn
 	}
@@ -1323,7 +1339,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 					dest[i] = nil
 					continue
 				}
-				dest[i] = decode(&conn.parameterStatus, rs.rb.next(l), rs.st.rowTyps[i])
+				dest[i] = decode(&conn.parameterStatus, rs.rb.next(l), rs.rowTyps[i])
 			}
 			return
 		default:
