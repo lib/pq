@@ -588,6 +588,10 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 // Decides which column formats to use for a prepared statement.  The input is
 // an array of type oids, one element per result column.
 func decideColumnFormats(rowTyps []oid.Oid, forceText bool) (rowFmts []format, rowFmtData []byte) {
+	if len(rowTyps) == 0 {
+		return nil, rowFmtDataAllText
+	}
+
 	rowFmts = make([]format, len(rowTyps))
 	if forceText {
 		return rowFmts, rowFmtDataAllText
