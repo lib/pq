@@ -186,6 +186,7 @@ func mustParse(f string, typ oid.Oid, s []byte) time.Time {
 }
 
 func expect(str, char string, pos int) {
+
 	if c := str[pos : pos+1]; c != char {
 		errorf("expected '%v' at position %v; got '%v'", char, pos, c)
 	}
@@ -307,7 +308,9 @@ func parseTs(currentLocation *time.Location, str string) interface{} {
 	day := mustAtoi(str[daySep+1 : timeSep])
 
 	var hour, minute, second int
-	if len(str) > monSep+len("01-01")+1 {
+
+	remainderIdx := monSep + len("01-01") + 1
+	if len(str) > monSep+len("01-01")+len(" 00:00:00") {
 		expect(str, " ", timeSep)
 		minSep := timeSep + 3
 		expect(str, ":", minSep)
@@ -317,8 +320,10 @@ func parseTs(currentLocation *time.Location, str string) interface{} {
 		minute = mustAtoi(str[minSep+1 : secSep])
 		secEnd := secSep + 3
 		second = mustAtoi(str[secSep+1 : secEnd])
+
+		remainderIdx += len(" 00:00:00")
 	}
-	remainderIdx := monSep + len("01-01 00:00:00") + 1
+
 	// Three optional (but ordered) sections follow: the
 	// fractional seconds, the time zone offset, and the BC
 	// designation. We set them up here and adjust the other

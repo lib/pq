@@ -71,6 +71,24 @@ var timeTests = []struct {
 	{"123456-02-03 04:05:06.1", time.Date(123456, time.February, 3, 4, 5, 6, 100000000, time.FixedZone("", 0))},
 }
 
+var dateTests = []struct {
+	str     string
+	timeval time.Time
+}{
+	{"22001-02-03", time.Date(22001, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0))},
+	{"2001-02-03", time.Date(2001, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0))},
+	{"2001-02-03 00:00:00", time.Date(2001, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0))},
+	{"0011-02-03 00:00:00 BC", time.Date(-10, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0))},
+	{"0011-02-03 00:00:00.000 BC", time.Date(-10, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0))},
+	{"0001-02-03 00:00:00.000", time.Date(1, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0))},
+	{"0001-02-03 00:00:00.000 BC", time.Date(1, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0)).AddDate(-1, 0, 0)},
+	{"12345-02-03 00:00:00.0", time.Date(12345, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0))},
+	{"123456-02-03 00:00:00.0", time.Date(123456, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0))},
+
+	{"2001-02-03 BC", time.Date(-2000, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0))},
+	{"0011-02-03 BC", time.Date(-10, time.February, 3, 0, 0, 0, 0, time.FixedZone("", 0))},
+}
+
 // Helper function for the two tests below
 func tryParse(str string) (t time.Time, err error) {
 	defer func() {
@@ -100,6 +118,19 @@ func TestParseTs(t *testing.T) {
 	}
 }
 
+// Test that parsing the string results in the expected value.
+func TestParseDateTs(t *testing.T) {
+	for i, tt := range dateTests {
+		val, err := tryParse(tt.str)
+		if err != nil {
+			t.Errorf("%d: got error: %v", i, err)
+		} else if val.String() != tt.timeval.String() {
+			t.Errorf("%d: expected to parse %q into %q; got %q",
+				i, tt.str, tt.timeval, val)
+		}
+	}
+}
+
 // Now test that sending the value into the database and parsing it back
 // returns the same time.Time value.
 func TestEncodeAndParseTs(t *testing.T) {
@@ -112,6 +143,35 @@ func TestEncodeAndParseTs(t *testing.T) {
 	for i, tt := range timeTests {
 		var dbstr string
 		err = db.QueryRow("SELECT ($1::timestamptz)::text", tt.timeval).Scan(&dbstr)
+		if err != nil {
+			t.Errorf("%d: could not send value %q to the database: %s", i, tt.timeval, err)
+			continue
+		}
+
+		val, err := tryParse(dbstr)
+		if err != nil {
+			t.Errorf("%d: could not parse value %q: %s", i, dbstr, err)
+			continue
+		}
+		val = val.In(tt.timeval.Location())
+		if val.String() != tt.timeval.String() {
+			t.Errorf("%d: expected to parse %q into %q; got %q", i, dbstr, tt.timeval, val)
+		}
+	}
+}
+
+// Now test that sending the value into the database and parsing it back
+// returns the same time.Time value.
+func TestEncodeAndParseDateTs(t *testing.T) {
+	db, err := openTestConnConninfo("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	for i, tt := range dateTests {
+		var dbstr string
+		err = db.QueryRow("SELECT ($1::date)::text", tt.timeval).Scan(&dbstr)
 		if err != nil {
 			t.Errorf("%d: could not send value %q to the database: %s", i, tt.timeval, err)
 			continue
