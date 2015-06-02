@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/base32"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"unicode"
 
 	"github.com/lib/pq/oid"
+	"github.com/spaolacci/murmur3"
 )
 
 // Common error types
@@ -102,6 +104,9 @@ type conn struct {
 
 	saveMessageType   byte
 	saveMessageBuffer []byte
+
+	// Prepared Query Cache
+	prepared map[string]*stmt
 
 	// If true, this connection is bad and all public-facing functions should
 	// return ErrBadConn.
@@ -234,6 +239,7 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	cn.ssl(o)
 	cn.buf = bufio.NewReader(cn.c)
 	cn.startup(o)
+	cn.prepared = make(map[string]*stmt)
 	// reset the deadline, in case one was set (see dial)
 	if timeout := o.Get("connect_timeout"); timeout != "" && timeout != "0" {
 		err = cn.c.SetDeadline(time.Time{})
@@ -497,6 +503,18 @@ func (cn *conn) Rollback() (err error) {
 	return nil
 }
 
+// hashedName takes a query string thats being prepared
+// and generates a unique hashed name for the query to be used
+// when executing later
+func (cn *conn) hashedName(query string) string {
+	hashedBytes := make([]byte, 8)
+	hashed := murmur3.Sum64([]byte(query))
+	binary.LittleEndian.PutUint64(hashedBytes, hashed)
+	name := base32.StdEncoding.EncodeToString(hashedBytes)
+	return "pq_" + strings.TrimRight(name, "=")
+
+}
+
 func (cn *conn) gname() string {
 	cn.namei++
 	return strconv.FormatInt(int64(cn.namei), 10)
@@ -686,7 +704,15 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 	if len(q) >= 4 && strings.EqualFold(q[:4], "COPY") {
 		return cn.prepareCopyIn(q)
 	}
-	return cn.prepareTo(q, cn.gname())
+	name := cn.hashedName(q)
+	if prepared, ok := cn.prepared[name]; ok {
+		return prepared, nil
+	}
+	prepared, err := cn.prepareTo(q, name)
+	if err == nil {
+		cn.prepared[name] = prepared
+	}
+	return prepared, err
 }
 
 func (cn *conn) Close() (err error) {
@@ -1188,7 +1214,9 @@ func (st *stmt) Close() (err error) {
 		errorf("expected ready for query, but got: %q", t)
 	}
 	st.cn.processReadyForQuery(r)
-
+	if _, ok := st.cn.prepared[st.name]; ok {
+		delete(st.cn.prepared, st.name)
+	}
 	return nil
 }
 
