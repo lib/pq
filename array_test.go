@@ -410,3 +410,29 @@ func BenchmarkGenericArrayValueStrings(b *testing.B) {
 		a.Value()
 	}
 }
+
+func TestArrayValueBackend(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	for _, tt := range []struct {
+		s string
+		v driver.Valuer
+	}{
+		{`ARRAY[true, false]`, Array([]bool{true, false})},
+		{`ARRAY[1, 2, 3]`, Array([]int{1, 2, 3})},
+		{`ARRAY['a', '\b', 'c"', 'd,e']`, Array([]string{`a`, `\b`, `c"`, `d,e`})},
+
+		{`ARRAY[true, false]`, BoolArray([]bool{true, false})},
+		{`ARRAY['\xdead', '\xbeef']`, ByteaArray([][]byte{{'\xDE', '\xAD'}, {'\xBE', '\xEF'}})},
+		{`ARRAY[1.2, 3.4]`, Float64Array([]float64{1.2, 3.4})},
+		{`ARRAY[1, 2, 3]`, Int64Array([]int64{1, 2, 3})},
+		{`ARRAY['a', '\b', 'c"', 'd,e']`, StringArray([]string{`a`, `\b`, `c"`, `d,e`})},
+	} {
+		var x int
+		err := db.QueryRow(`SELECT 1 WHERE `+tt.s+` <> $1`, tt.v).Scan(&x)
+		if err != sql.ErrNoRows {
+			t.Errorf("Expected %v to equal %q, got %q", tt.v, tt.s, err)
+		}
+	}
+}
