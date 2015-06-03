@@ -372,3 +372,25 @@ func BenchmarkGenericArrayValueStrings(b *testing.B) {
 		a.Value()
 	}
 }
+
+func TestArrayValueBackend(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	for _, tt := range []struct {
+		s string
+		v driver.Valuer
+	}{
+		{`ARRAY[true, false]`, BoolArray{true, false}},
+		{`ARRAY[E'\\xdead', E'\\xbeef']`, ByteaArray{{'\xDE', '\xAD'}, {'\xBE', '\xEF'}}},
+		{`ARRAY[1.2, 3.4]`, Float64Array{1.2, 3.4}},
+		{`ARRAY[1, 2, 3]`, Int64Array{1, 2, 3}},
+		{`ARRAY['a', E'\\b', 'c"', 'd,e']`, StringArray{`a`, `\b`, `c"`, `d,e`}},
+	} {
+		var x int
+		err := db.QueryRow(`SELECT 1 WHERE `+tt.s+` <> $1`, tt.v).Scan(&x)
+		if err != sql.ErrNoRows {
+			t.Errorf("Expected %v to equal %s, got %v", tt.v, tt.s, err)
+		}
+	}
+}
