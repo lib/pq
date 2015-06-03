@@ -421,13 +421,13 @@ func TestArrayValueBackend(t *testing.T) {
 	}{
 		{`ARRAY[true, false]`, Array([]bool{true, false})},
 		{`ARRAY[1, 2, 3]`, Array([]int{1, 2, 3})},
-		{`ARRAY['a', '\b', 'c"', 'd,e']`, Array([]string{`a`, `\b`, `c"`, `d,e`})},
+		{`ARRAY['a', E'\\b', 'c"', 'd,e']`, Array([]string{`a`, `\b`, `c"`, `d,e`})},
 
 		{`ARRAY[true, false]`, BoolArray([]bool{true, false})},
-		{`ARRAY['\xdead', '\xbeef']`, ByteaArray([][]byte{{'\xDE', '\xAD'}, {'\xBE', '\xEF'}})},
+		{`ARRAY[E'\\xdead', E'\\xbeef']`, ByteaArray([][]byte{{'\xDE', '\xAD'}, {'\xBE', '\xEF'}})},
 		{`ARRAY[1.2, 3.4]`, Float64Array([]float64{1.2, 3.4})},
 		{`ARRAY[1, 2, 3]`, Int64Array([]int64{1, 2, 3})},
-		{`ARRAY['a', '\b', 'c"', 'd,e']`, StringArray([]string{`a`, `\b`, `c"`, `d,e`})},
+		{`ARRAY['a', E'\\b', 'c"', 'd,e']`, StringArray([]string{`a`, `\b`, `c"`, `d,e`})},
 	} {
 		var x int
 		err := db.QueryRow(`SELECT 1 WHERE `+tt.s+` <> $1`, tt.v).Scan(&x)
