@@ -32,13 +32,14 @@ func Array(a interface{}) driver.Valuer {
 	return GenericArray{a}
 }
 
-// ArrayValuer is used by GenericArray.
+// ArrayValuer may be optionally implemented by driver.Valuer to override the
+// array delimiter used by GenericArray.
 type ArrayValuer interface {
-
 	// ArrayDelimiter returns the delimiter character(s) for this element's type.
 	ArrayDelimiter() string
 }
 
+// BoolArray represents a one-dimensional array of the PostgreSQL boolean type.
 type BoolArray []bool
 
 // Value implements the driver.Valuer interface.
@@ -70,6 +71,7 @@ func (a BoolArray) Value() (driver.Value, error) {
 	return []byte{'{', '}'}, nil
 }
 
+// ByteaArray represents a one-dimensional array of the PostgreSQL bytea type.
 type ByteaArray [][]byte
 
 // Value implements the driver.Valuer interface. It uses the "hex" format which
@@ -105,6 +107,8 @@ func (a ByteaArray) Value() (driver.Value, error) {
 	return []byte{'{', '}'}, nil
 }
 
+// Float64Array represents a one-dimensional array of the PostgreSQL double
+// precision type.
 type Float64Array []float64
 
 // Value implements the driver.Valuer interface.
@@ -159,6 +163,7 @@ func (a GenericArray) Value() (driver.Value, error) {
 	return []byte{'{', '}'}, nil
 }
 
+// Int64Array represents a one-dimensional array of the PostgreSQL integer types.
 type Int64Array []int64
 
 // Value implements the driver.Valuer interface.
@@ -185,6 +190,7 @@ func (a Int64Array) Value() (driver.Value, error) {
 	return []byte{'{', '}'}, nil
 }
 
+// StringArray represents a one-dimensional array of the PostgreSQL character types.
 type StringArray []string
 
 // Value implements the driver.Valuer interface.
