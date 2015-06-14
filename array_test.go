@@ -10,44 +10,6 @@ import (
 	"testing"
 )
 
-func TestArray(t *testing.T) {
-	var result driver.Valuer
-
-	result = Array([]bool{})
-	if _, ok := result.(BoolArray); !ok {
-		t.Errorf("Expected BoolArray, got %T", result)
-	}
-
-	result = Array([]float64{})
-	if _, ok := result.(Float64Array); !ok {
-		t.Errorf("Expected Float64Array, got %T", result)
-	}
-
-	result = Array([]int64{})
-	if _, ok := result.(Int64Array); !ok {
-		t.Errorf("Expected Int64Array, got %T", result)
-	}
-
-	result = Array([]string{})
-	if _, ok := result.(StringArray); !ok {
-		t.Errorf("Expected StringArray, got %T", result)
-	}
-
-	for _, tt := range []interface{}{
-		nil,
-		[]driver.Value{},
-		[][]bool{},
-		[][]float64{},
-		[][]int64{},
-		[][]string{},
-	} {
-		result = Array(tt)
-		if _, ok := result.(GenericArray); !ok {
-			t.Errorf("Expected GenericArray for %T, got %T", tt, result)
-		}
-	}
-}
-
 func TestBoolArrayValue(t *testing.T) {
 	result, err := BoolArray(nil).Value()
 
@@ -419,10 +381,6 @@ func TestArrayValueBackend(t *testing.T) {
 		s string
 		v driver.Valuer
 	}{
-		{`ARRAY[true, false]`, Array([]bool{true, false})},
-		{`ARRAY[1, 2, 3]`, Array([]int{1, 2, 3})},
-		{`ARRAY['a', E'\\b', 'c"', 'd,e']`, Array([]string{`a`, `\b`, `c"`, `d,e`})},
-
 		{`ARRAY[true, false]`, BoolArray([]bool{true, false})},
 		{`ARRAY[E'\\xdead', E'\\xbeef']`, ByteaArray([][]byte{{'\xDE', '\xAD'}, {'\xBE', '\xEF'}})},
 		{`ARRAY[1.2, 3.4]`, Float64Array([]float64{1.2, 3.4})},

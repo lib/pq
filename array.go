@@ -12,26 +12,6 @@ import (
 
 var typeByteSlice = reflect.TypeOf([]byte{})
 
-// Array returns the optimal driver.Valuer for an array or slice of any
-// dimension.
-//
-// For example:
-//  db.Query(`SELECT * FROM t WHERE id = ANY($1)`, pq.Array([]int{235, 401}))
-func Array(a interface{}) driver.Valuer {
-	switch a := a.(type) {
-	case []bool:
-		return BoolArray(a)
-	case []float64:
-		return Float64Array(a)
-	case []int64:
-		return Int64Array(a)
-	case []string:
-		return StringArray(a)
-	}
-
-	return GenericArray{a}
-}
-
 // ArrayValuer may be optionally implemented by driver.Valuer to override the
 // array delimiter used by GenericArray.
 type ArrayValuer interface {
