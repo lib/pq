@@ -233,11 +233,15 @@ func TestGenericArrayUnsupported(t *testing.T) {
 	}
 }
 
+type ByteArrayValuer [1]byte
+type ByteSliceValuer []byte
 type FuncArrayValuer struct {
 	delimiter func() string
 	value     func() (driver.Value, error)
 }
 
+func (a ByteArrayValuer) Value() (driver.Value, error) { return a[:], nil }
+func (b ByteSliceValuer) Value() (driver.Value, error) { return []byte(b), nil }
 func (f FuncArrayValuer) ArrayDelimiter() string       { return f.delimiter() }
 func (f FuncArrayValuer) Value() (driver.Value, error) { return f.value() }
 
@@ -281,6 +285,12 @@ func TestGenericArrayValue(t *testing.T) {
 
 		{`{NULL}`, []sql.NullString{{}}},
 		{`{"\"",NULL}`, []sql.NullString{{`"`, true}, {}}},
+
+		{`{"a","b"}`, []ByteArrayValuer{{'a'}, {'b'}}},
+		{`{{"a","b"},{"c","d"}}`, [][]ByteArrayValuer{{{'a'}, {'b'}}, {{'c'}, {'d'}}}},
+
+		{`{"e","f"}`, []ByteSliceValuer{{'e'}, {'f'}}},
+		{`{{"e","f"},{"g","h"}}`, [][]ByteSliceValuer{{{'e'}, {'f'}}, {{'g'}, {'h'}}}},
 
 		{`{1~2}`, []FuncArrayValuer{Tilde(int64(1)), Tilde(int64(2))}},
 		{`{{1~2}~{3~4}}`, [][]FuncArrayValuer{{Tilde(int64(1)), Tilde(int64(2))}, {Tilde(int64(3)), Tilde(int64(4))}}},
