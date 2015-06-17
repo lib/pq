@@ -46,10 +46,10 @@ func (a BoolArray) Value() (driver.Value, error) {
 		b[0] = '{'
 		b[2*n] = '}'
 
-		return b, nil
+		return string(b), nil
 	}
 
-	return []byte{'{', '}'}, nil
+	return "{}", nil
 }
 
 // ByteaArray represents a one-dimensional array of the PostgreSQL bytea type.
@@ -82,10 +82,10 @@ func (a ByteaArray) Value() (driver.Value, error) {
 		b[0] = '{'
 		b[size-1] = '}'
 
-		return b, nil
+		return string(b), nil
 	}
 
-	return []byte{'{', '}'}, nil
+	return "{}", nil
 }
 
 // Float64Array represents a one-dimensional array of the PostgreSQL double
@@ -110,10 +110,10 @@ func (a Float64Array) Value() (driver.Value, error) {
 			b = strconv.AppendFloat(b, a[i], 'f', -1, 64)
 		}
 
-		return append(b, '}'), nil
+		return string(append(b, '}')), nil
 	}
 
-	return []byte{'{', '}'}, nil
+	return "{}", nil
 }
 
 // GenericArray implements the driver.Valuer interface for an array or slice
@@ -138,10 +138,10 @@ func (a GenericArray) Value() (driver.Value, error) {
 		b := make([]byte, 0, 1+2*n)
 
 		b, _, err := appendArray(b, rv, n)
-		return b, err
+		return string(b), err
 	}
 
-	return []byte{'{', '}'}, nil
+	return "{}", nil
 }
 
 // Int64Array represents a one-dimensional array of the PostgreSQL integer types.
@@ -165,10 +165,10 @@ func (a Int64Array) Value() (driver.Value, error) {
 			b = strconv.AppendInt(b, a[i], 10)
 		}
 
-		return append(b, '}'), nil
+		return string(append(b, '}')), nil
 	}
 
-	return []byte{'{', '}'}, nil
+	return "{}", nil
 }
 
 // StringArray represents a one-dimensional array of the PostgreSQL character types.
@@ -192,10 +192,10 @@ func (a StringArray) Value() (driver.Value, error) {
 			b = appendArrayQuotedString(b, a[i])
 		}
 
-		return append(b, '}'), nil
+		return string(append(b, '}')), nil
 	}
 
-	return []byte{'{', '}'}, nil
+	return "{}", nil
 }
 
 // appendArray appends rv to the buffer, returning the extended buffer and

@@ -25,7 +25,7 @@ func TestBoolArrayValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error for empty, got %v", err)
 	}
-	if expected := `{}`; !reflect.DeepEqual(result, []byte(expected)) {
+	if expected := `{}`; !reflect.DeepEqual(result, expected) {
 		t.Errorf("Expected empty, got %q", result)
 	}
 
@@ -34,7 +34,7 @@ func TestBoolArrayValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
-	if expected := `{f,t,f}`; !reflect.DeepEqual(result, []byte(expected)) {
+	if expected := `{f,t,f}`; !reflect.DeepEqual(result, expected) {
 		t.Errorf("Expected %q, got %q", expected, result)
 	}
 }
@@ -67,7 +67,7 @@ func TestByteaArrayValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error for empty, got %v", err)
 	}
-	if expected := `{}`; !reflect.DeepEqual(result, []byte(expected)) {
+	if expected := `{}`; !reflect.DeepEqual(result, expected) {
 		t.Errorf("Expected empty, got %q", result)
 	}
 
@@ -76,7 +76,7 @@ func TestByteaArrayValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
-	if expected := `{"\\xdeadbeef","\\xfeff","\\x"}`; !reflect.DeepEqual(result, []byte(expected)) {
+	if expected := `{"\\xdeadbeef","\\xfeff","\\x"}`; !reflect.DeepEqual(result, expected) {
 		t.Errorf("Expected %q, got %q", expected, result)
 	}
 }
@@ -112,7 +112,7 @@ func TestFloat64ArrayValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error for empty, got %v", err)
 	}
-	if expected := `{}`; !reflect.DeepEqual(result, []byte(expected)) {
+	if expected := `{}`; !reflect.DeepEqual(result, expected) {
 		t.Errorf("Expected empty, got %q", result)
 	}
 
@@ -121,7 +121,7 @@ func TestFloat64ArrayValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
-	if expected := `{1.2,3.4,5.6}`; !reflect.DeepEqual(result, []byte(expected)) {
+	if expected := `{1.2,3.4,5.6}`; !reflect.DeepEqual(result, expected) {
 		t.Errorf("Expected %q, got %q", expected, result)
 	}
 }
@@ -154,7 +154,7 @@ func TestInt64ArrayValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error for empty, got %v", err)
 	}
-	if expected := `{}`; !reflect.DeepEqual(result, []byte(expected)) {
+	if expected := `{}`; !reflect.DeepEqual(result, expected) {
 		t.Errorf("Expected empty, got %q", result)
 	}
 
@@ -163,7 +163,7 @@ func TestInt64ArrayValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
-	if expected := `{1,2,3}`; !reflect.DeepEqual(result, []byte(expected)) {
+	if expected := `{1,2,3}`; !reflect.DeepEqual(result, expected) {
 		t.Errorf("Expected %q, got %q", expected, result)
 	}
 }
@@ -196,7 +196,7 @@ func TestStringArrayValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error for empty, got %v", err)
 	}
-	if expected := `{}`; !reflect.DeepEqual(result, []byte(expected)) {
+	if expected := `{}`; !reflect.DeepEqual(result, expected) {
 		t.Errorf("Expected empty, got %q", result)
 	}
 
@@ -205,7 +205,7 @@ func TestStringArrayValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
-	if expected := `{"a","\\b","c\"","d,e"}`; !reflect.DeepEqual(result, []byte(expected)) {
+	if expected := `{"a","\\b","c\"","d,e"}`; !reflect.DeepEqual(result, expected) {
 		t.Errorf("Expected %q, got %q", expected, result)
 	}
 }
@@ -300,7 +300,7 @@ func TestGenericArrayValue(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Expected no error for %q, got %v", tt.input, err)
 		}
-		if !reflect.DeepEqual(result, []byte(tt.result)) {
+		if !reflect.DeepEqual(result, tt.result) {
 			t.Errorf("Expected %q for %q, got %q", tt.result, tt.input, result)
 		}
 	}
