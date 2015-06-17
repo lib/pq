@@ -10,6 +10,7 @@ import (
 )
 
 var typeByteSlice = reflect.TypeOf([]byte{})
+var typeDriverValuer = reflect.TypeOf((*driver.Valuer)(nil)).Elem()
 
 // ArrayDelimiter may be optionally implemented by driver.Valuer to override the
 // array delimiter used by GenericArray.
@@ -229,12 +230,14 @@ func appendArray(b []byte, rv reflect.Value, n int) ([]byte, string, error) {
 //
 // See http://www.postgresql.org/docs/current/static/arrays.html#ARRAYS-IO
 func appendArrayElement(b []byte, rv reflect.Value) ([]byte, string, error) {
-	if k := rv.Kind(); k == reflect.Array || (k == reflect.Slice && rv.Type() != typeByteSlice) {
-		if n := rv.Len(); n > 0 {
-			return appendArray(b, rv, n)
-		}
+	if k := rv.Kind(); k == reflect.Array || k == reflect.Slice {
+		if t := rv.Type(); t != typeByteSlice && !t.Implements(typeDriverValuer) {
+			if n := rv.Len(); n > 0 {
+				return appendArray(b, rv, n)
+			}
 
-		return b, "", nil
+			return b, "", nil
+		}
 	}
 
 	var del string = ","
