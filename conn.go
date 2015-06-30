@@ -633,7 +633,7 @@ func decideColumnFormats(colTyps []oid.Oid, forceText bool) (colFmts []format, c
 	}
 }
 
-func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
+func (cn *conn) prepareTo(q, stmtName string) *stmt {
 	st := &stmt{cn: cn, name: stmtName}
 
 	b := cn.writeBuf('P')
@@ -648,33 +648,11 @@ func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
 	b.next('S')
 	cn.send(b)
 
-	for {
-		t, r := cn.recv1()
-		switch t {
-		case '1':
-		case 't':
-			nparams := r.int16()
-			st.paramTyps = make([]oid.Oid, nparams)
-
-			for i := range st.paramTyps {
-				st.paramTyps[i] = r.oid()
-			}
-		case 'T':
-			st.colNames, st.colTyps = parseStatementRowDescribe(r)
-			st.colFmts, st.colFmtData = decideColumnFormats(st.colTyps, cn.disablePreparedBinaryResult)
-		case 'n':
-			// no data
-			st.colFmtData = colFmtDataAllText
-		case 'Z':
-			cn.processReadyForQuery(r)
-			return st, err
-		case 'E':
-			err = parseError(r)
-		default:
-			cn.bad = true
-			errorf("unexpected describe rows response: %q", t)
-		}
-	}
+	cn.readParseResponse()
+	st.paramTyps, st.colNames, st.colTyps = cn.readStatementDescribeResponse()
+	st.colFmts, st.colFmtData = decideColumnFormats(st.colTyps, cn.disablePreparedBinaryResult)
+	cn.readReadyForQuery()
+	return st
 }
 
 func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
@@ -686,7 +664,7 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 	if len(q) >= 4 && strings.EqualFold(q[:4], "COPY") {
 		return cn.prepareCopyIn(q)
 	}
-	return cn.prepareTo(q, cn.gname())
+	return cn.prepareTo(q, cn.gname()), nil
 }
 
 func (cn *conn) Close() (err error) {
@@ -718,11 +696,7 @@ func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err err
 		return cn.simpleQuery(query)
 	}
 
-	st, err := cn.prepareTo(query, "")
-	if err != nil {
-		panic(err)
-	}
-
+	st := cn.prepareTo(query, "")
 	st.exec(args)
 	return &rows{
 		cn:       cn,
@@ -750,10 +724,7 @@ func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err er
 	// Use the unnamed statement to defer planning until bind
 	// time, or else value-based selectivity estimates cannot be
 	// used.
-	st, err := cn.prepareTo(query, "")
-	if err != nil {
-		panic(err)
-	}
+	st := cn.prepareTo(query, "")
 
 	r, err := st.Exec(args)
 	if err != nil {
@@ -1214,25 +1185,8 @@ func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 	defer st.cn.errRecover(&err)
 
 	st.exec(v)
-
-	for {
-		t, r := st.cn.recv1()
-		switch t {
-		case 'E':
-			err = parseError(r)
-		case 'C':
-			res, _ = st.cn.parseComplete(r.string())
-		case 'Z':
-			st.cn.processReadyForQuery(r)
-			// done
-			return
-		case 'T', 'D', 'I':
-			// ignore any results
-		default:
-			st.cn.bad = true
-			errorf("unknown exec response: %q", t)
-		}
-	}
+	res, _, err = st.cn.readExecuteResponse("simple query")
+	return res, err
 }
 
 func (st *stmt) exec(v []driver.Value) {
@@ -1243,8 +1197,9 @@ func (st *stmt) exec(v []driver.Value) {
 		errorf("got %d parameters but the statement requires %d", len(v), len(st.paramTyps))
 	}
 
-	w := st.cn.writeBuf('B')
-	w.byte(0)
+	cn := st.cn
+	w := cn.writeBuf('B')
+	w.byte(0) // unnamed portal
 	w.string(st.name)
 	w.int16(0)
 	w.int16(len(v))
@@ -1252,7 +1207,7 @@ func (st *stmt) exec(v []driver.Value) {
 		if x == nil {
 			w.int32(-1)
 		} else {
-			b := encode(&st.cn.parameterStatus, x, st.paramTyps[i])
+			b := encode(&cn.parameterStatus, x, st.paramTyps[i])
 			w.int32(len(b))
 			w.bytes(b)
 		}
@@ -1264,62 +1219,11 @@ func (st *stmt) exec(v []driver.Value) {
 	w.int32(0)
 
 	w.next('S')
-	st.cn.send(w)
+	cn.send(w)
 
-	var err error
-	for {
-		t, r := st.cn.recv1()
-		switch t {
-		case 'E':
-			err = parseError(r)
-		case '2':
-			if err != nil {
-				panic(err)
-			}
-			goto workaround
-		case 'Z':
-			st.cn.processReadyForQuery(r)
-			if err != nil {
-				panic(err)
-			}
-			return
-		default:
-			st.cn.bad = true
-			errorf("unexpected bind response: %q", t)
-		}
-	}
+	cn.readBindResponse()
+	cn.postExecuteWorkaround()
 
-	// Work around a bug in sql.DB.QueryRow: in Go 1.2 and earlier it ignores
-	// any errors from rows.Next, which masks errors that happened during the
-	// execution of the query.  To avoid the problem in common cases, we wait
-	// here for one more message from the database.  If it's not an error the
-	// query will likely succeed (or perhaps has already, if it's a
-	// CommandComplete), so we push the message into the conn struct; recv1
-	// will return it as the next message for rows.Next or rows.Close.
-	// However, if it's an error, we wait until ReadyForQuery and then return
-	// the error to our caller.
-workaround:
-	for {
-		t, r := st.cn.recv1()
-		switch t {
-		case 'E':
-			err = parseError(r)
-		case 'C', 'D', 'I':
-			// the query didn't fail, but we can't process this message
-			st.cn.saveMessage(t, r)
-			return
-		case 'Z':
-			if err == nil {
-				st.cn.bad = true
-				errorf("unexpected ReadyForQuery during extended query execution")
-			}
-			st.cn.processReadyForQuery(r)
-			panic(err)
-		default:
-			st.cn.bad = true
-			errorf("unexpected message during query execution: %q", t)
-		}
-	}
 }
 
 func (st *stmt) NumInput() int {
@@ -1498,6 +1402,123 @@ func (c *conn) processParameterStatus(r *readBuf) {
 
 func (c *conn) processReadyForQuery(r *readBuf) {
 	c.txnStatus = transactionStatus(r.byte())
+}
+
+func (cn *conn) readReadyForQuery() {
+	t, r := cn.recv1()
+	switch t {
+	case 'Z':
+		cn.processReadyForQuery(r)
+		return
+	default:
+		cn.bad = true
+		errorf("unexpected message %q; expected ReadyForQuery", t)
+	}
+}
+
+func (cn *conn) readParseResponse() {
+	t, r := cn.recv1()
+	switch t {
+	case '1':
+		return
+	case 'E':
+		err := parseError(r)
+		cn.readReadyForQuery()
+		panic(err)
+	default:
+		cn.bad = true
+		errorf("unexpected Parse response %q", t)
+	}
+}
+
+func (cn *conn) readStatementDescribeResponse() (paramTyps []oid.Oid, colNames []string, colTyps []oid.Oid) {
+	for {
+		t, r := cn.recv1()
+		switch t {
+		case 't':
+			nparams := r.int16()
+			paramTyps = make([]oid.Oid, nparams)
+			for i := range paramTyps {
+				paramTyps[i] = r.oid()
+			}
+		case 'n':
+			return paramTyps, nil, nil
+		case 'T':
+			colNames, colTyps = parseStatementRowDescribe(r)
+			return paramTyps, colNames, colTyps
+		case 'E':
+			err := parseError(r)
+			cn.readReadyForQuery()
+			panic(err)
+		default:
+			cn.bad = true
+			errorf("unexpected Describe statement response %q", t)
+		}
+	}
+}
+
+func (cn *conn) readBindResponse() {
+	t, r := cn.recv1()
+	switch t {
+	case '2':
+		return
+	case 'E':
+		err := parseError(r)
+		cn.readReadyForQuery()
+		panic(err)
+	default:
+		cn.bad = true
+		errorf("unexpected Bind response %q", t)
+	}
+}
+
+func (cn *conn) postExecuteWorkaround() {
+	// Work around a bug in sql.DB.QueryRow: in Go 1.2 and earlier it ignores
+	// any errors from rows.Next, which masks errors that happened during the
+	// execution of the query.  To avoid the problem in common cases, we wait
+	// here for one more message from the database.  If it's not an error the
+	// query will likely succeed (or perhaps has already, if it's a
+	// CommandComplete), so we push the message into the conn struct; recv1
+	// will return it as the next message for rows.Next or rows.Close.
+	// However, if it's an error, we wait until ReadyForQuery and then return
+	// the error to our caller.
+	for {
+		t, r := cn.recv1()
+		switch t {
+		case 'E':
+			err := parseError(r)
+			cn.readReadyForQuery()
+			panic(err)
+		case 'C', 'D', 'I':
+			// the query didn't fail, but we can't process this message
+			cn.saveMessage(t, r)
+			return
+		default:
+			cn.bad = true
+			errorf("unexpected message during extended query execution: %q", t)
+		}
+	}
+}
+
+// Only for Exec(), since we ignore the returned data
+func (cn *conn) readExecuteResponse(protocolState string) (res driver.Result, commandTag string, err error) {
+	for {
+		t, r := cn.recv1()
+		switch t {
+		case 'C':
+			res, commandTag = cn.parseComplete(r.string())
+		case 'Z':
+			cn.processReadyForQuery(r)
+			return res, commandTag, err
+		case 'E':
+			err = parseError(r)
+		case 'T', 'D', 'I':
+			// ignore any results
+		default:
+			cn.bad = true
+			errorf("unknown %s response: %q", protocolState, t)
+		}
+	}
 }
 
 func parseStatementRowDescribe(r *readBuf) (colNames []string, colTyps []oid.Oid) {
