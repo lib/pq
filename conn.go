@@ -549,11 +549,11 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 				errorf("unexpected message %q in simple query execution", t)
 			}
 			res = &rows{
-				cn:      cn,
-				cols:    st.cols,
-				rowTyps: st.rowTyps,
-				rowFmts: st.rowFmts,
-				done:    true,
+				cn:       cn,
+				colNames: st.colNames,
+				colTyps:  st.colTyps,
+				colFmts:  st.colFmts,
+				done:     true,
 			}
 		case 'Z':
 			cn.processReadyForQuery(r)
@@ -574,7 +574,7 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 			// res might be non-nil here if we received a previous
 			// CommandComplete, but that's fine; just overwrite it
 			res = &rows{cn: cn}
-			res.cols, res.rowFmts, res.rowTyps = parseMeta(r)
+			res.colNames, res.colFmts, res.colTyps = parsePortalRowDescribe(r)
 
 			// To work around a bug in QueryRow in Go 1.2 and earlier, wait
 			// until the first DataRow has been received.
@@ -587,19 +587,19 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 
 // Decides which column formats to use for a prepared statement.  The input is
 // an array of type oids, one element per result column.
-func decideColumnFormats(rowTyps []oid.Oid, forceText bool) (rowFmts []format, rowFmtData []byte) {
-	if len(rowTyps) == 0 {
-		return nil, rowFmtDataAllText
+func decideColumnFormats(colTyps []oid.Oid, forceText bool) (colFmts []format, colFmtData []byte) {
+	if len(colTyps) == 0 {
+		return nil, colFmtDataAllText
 	}
 
-	rowFmts = make([]format, len(rowTyps))
+	colFmts = make([]format, len(colTyps))
 	if forceText {
-		return rowFmts, rowFmtDataAllText
+		return colFmts, colFmtDataAllText
 	}
 
 	allBinary := true
 	allText := true
-	for i, o := range rowTyps {
+	for i, o := range colTyps {
 		switch o {
 		// This is the list of types to use binary mode for when receiving them
 		// through a prepared statement.  If a type appears in this list, it
@@ -611,7 +611,7 @@ func decideColumnFormats(rowTyps []oid.Oid, forceText bool) (rowFmts []format, r
 		case oid.T_int4:
 			fallthrough
 		case oid.T_int2:
-			rowFmts[i] = formatBinary
+			colFmts[i] = formatBinary
 			allText = false
 
 		default:
@@ -620,16 +620,16 @@ func decideColumnFormats(rowTyps []oid.Oid, forceText bool) (rowFmts []format, r
 	}
 
 	if allBinary {
-		return rowFmts, rowFmtDataAllBinary
+		return colFmts, colFmtDataAllBinary
 	} else if allText {
-		return rowFmts, rowFmtDataAllText
+		return colFmts, colFmtDataAllText
 	} else {
-		rowFmtData = make([]byte, 2+len(rowFmts)*2)
-		binary.BigEndian.PutUint16(rowFmtData, uint16(len(rowFmts)))
-		for i, v := range rowFmts {
-			binary.BigEndian.PutUint16(rowFmtData[2+i*2:], uint16(v))
+		colFmtData = make([]byte, 2+len(colFmts)*2)
+		binary.BigEndian.PutUint16(colFmtData, uint16(len(colFmts)))
+		for i, v := range colFmts {
+			binary.BigEndian.PutUint16(colFmtData[2+i*2:], uint16(v))
 		}
-		return rowFmts, rowFmtData
+		return colFmts, colFmtData
 	}
 }
 
@@ -660,11 +660,11 @@ func (cn *conn) prepareTo(q, stmtName string) (_ *stmt, err error) {
 				st.paramTyps[i] = r.oid()
 			}
 		case 'T':
-			st.cols, st.rowTyps = parseStatementRowDescribe(r)
-			st.rowFmts, st.rowFmtData = decideColumnFormats(st.rowTyps, cn.disablePreparedBinaryResult)
+			st.colNames, st.colTyps = parseStatementRowDescribe(r)
+			st.colFmts, st.colFmtData = decideColumnFormats(st.colTyps, cn.disablePreparedBinaryResult)
 		case 'n':
 			// no data
-			st.rowFmtData = rowFmtDataAllText
+			st.colFmtData = colFmtDataAllText
 		case 'Z':
 			cn.processReadyForQuery(r)
 			return st, err
@@ -725,10 +725,10 @@ func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err err
 
 	st.exec(args)
 	return &rows{
-		cn:      cn,
-		cols:    st.cols,
-		rowTyps: st.rowTyps,
-		rowFmts: st.rowFmts,
+		cn:       cn,
+		colNames: st.colNames,
+		colTyps:  st.colTyps,
+		colFmts:  st.colFmts,
 	}, nil
 }
 
@@ -1143,18 +1143,18 @@ const formatText format = 0
 const formatBinary format = 1
 
 // One result-column format code with the value 1 (i.e. all binary).
-var rowFmtDataAllBinary []byte = []byte{0, 1, 0, 1}
+var colFmtDataAllBinary []byte = []byte{0, 1, 0, 1}
 
 // No result-column format codes (i.e. all text).
-var rowFmtDataAllText []byte = []byte{0, 0}
+var colFmtDataAllText []byte = []byte{0, 0}
 
 type stmt struct {
 	cn         *conn
 	name       string
-	cols       []string
-	rowFmts    []format
-	rowFmtData []byte
-	rowTyps    []oid.Oid
+	colNames   []string
+	colFmts    []format
+	colFmtData []byte
+	colTyps    []oid.Oid
 	paramTyps  []oid.Oid
 	closed     bool
 }
@@ -1200,10 +1200,10 @@ func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) {
 
 	st.exec(v)
 	return &rows{
-		cn:      st.cn,
-		cols:    st.cols,
-		rowTyps: st.rowTyps,
-		rowFmts: st.rowFmts,
+		cn:       st.cn,
+		colNames: st.colNames,
+		colTyps:  st.colTyps,
+		colFmts:  st.colFmts,
 	}, nil
 }
 
@@ -1257,7 +1257,7 @@ func (st *stmt) exec(v []driver.Value) {
 			w.bytes(b)
 		}
 	}
-	w.bytes(st.rowFmtData)
+	w.bytes(st.colFmtData)
 
 	w.next('E')
 	w.byte(0)
@@ -1376,12 +1376,12 @@ func (cn *conn) parseComplete(commandTag string) (driver.Result, string) {
 }
 
 type rows struct {
-	cn      *conn
-	cols    []string
-	rowTyps []oid.Oid
-	rowFmts []format
-	done    bool
-	rb      readBuf
+	cn       *conn
+	colNames []string
+	colTyps  []oid.Oid
+	colFmts  []format
+	done     bool
+	rb       readBuf
 }
 
 func (rs *rows) Close() error {
@@ -1399,7 +1399,7 @@ func (rs *rows) Close() error {
 }
 
 func (rs *rows) Columns() []string {
-	return rs.cols
+	return rs.colNames
 }
 
 func (rs *rows) Next(dest []driver.Value) (err error) {
@@ -1438,7 +1438,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 					dest[i] = nil
 					continue
 				}
-				dest[i] = decode(&conn.parameterStatus, rs.rb.next(l), rs.rowTyps[i], rs.rowFmts[i])
+				dest[i] = decode(&conn.parameterStatus, rs.rb.next(l), rs.colTyps[i], rs.colFmts[i])
 			}
 			return
 		default:
@@ -1500,32 +1500,32 @@ func (c *conn) processReadyForQuery(r *readBuf) {
 	c.txnStatus = transactionStatus(r.byte())
 }
 
-func parseStatementRowDescribe(r *readBuf) (cols []string, rowTyps []oid.Oid) {
+func parseStatementRowDescribe(r *readBuf) (colNames []string, colTyps []oid.Oid) {
 	n := r.int16()
-	cols = make([]string, n)
-	rowTyps = make([]oid.Oid, n)
-	for i := range cols {
-		cols[i] = r.string()
+	colNames = make([]string, n)
+	colTyps = make([]oid.Oid, n)
+	for i := range colNames {
+		colNames[i] = r.string()
 		r.next(6)
-		rowTyps[i] = r.oid()
+		colTyps[i] = r.oid()
 		r.next(6)
-		// format code not known; always 0
+		// format code not known when describing a statement; always 0
 		r.next(2)
 	}
 	return
 }
 
-func parseMeta(r *readBuf) (cols []string, rowFmts []format, rowTyps []oid.Oid) {
+func parsePortalRowDescribe(r *readBuf) (colNames []string, colFmts []format, colTyps []oid.Oid) {
 	n := r.int16()
-	cols = make([]string, n)
-	rowFmts = make([]format, n)
-	rowTyps = make([]oid.Oid, n)
-	for i := range cols {
-		cols[i] = r.string()
+	colNames = make([]string, n)
+	colFmts = make([]format, n)
+	colTyps = make([]oid.Oid, n)
+	for i := range colNames {
+		colNames[i] = r.string()
 		r.next(6)
-		rowTyps[i] = r.oid()
+		colTyps[i] = r.oid()
 		r.next(6)
-		rowFmts[i] = format(r.int16())
+		colFmts[i] = format(r.int16())
 	}
 	return
 }
