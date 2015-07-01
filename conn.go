@@ -1232,15 +1232,20 @@ func (st *stmt) exec(v []driver.Value) {
 	w := cn.writeBuf('B')
 	w.byte(0) // unnamed portal
 	w.string(st.name)
-	w.int16(0)
-	w.int16(len(v))
-	for i, x := range v {
-		if x == nil {
-			w.int32(-1)
-		} else {
-			b := encode(&cn.parameterStatus, x, st.paramTyps[i])
-			w.int32(len(b))
-			w.bytes(b)
+
+	if cn.binaryParameters {
+		cn.sendBinaryParameters(w, v)
+	} else {
+		w.int16(0)
+		w.int16(len(v))
+		for i, x := range v {
+			if x == nil {
+				w.int32(-1)
+			} else {
+				b := encode(&cn.parameterStatus, x, st.paramTyps[i])
+				w.int32(len(b))
+				w.bytes(b)
+			}
 		}
 	}
 	w.bytes(st.colFmtData)
@@ -1406,19 +1411,7 @@ func md5s(s string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-func (cn *conn) sendBinaryModeQuery(query string, args []driver.Value) {
-	if len(args) >= 65536 {
-		errorf("got %d parameters but PostgreSQL only supports 65535 parameters", len(args))
-	}
-
-	b := cn.writeBuf('P')
-	b.byte(0) // unnamed statement
-	b.string(query)
-	b.int16(0)
-
-	b.next('B')
-	b.int16(0) // unnamed portal and statement
-
+func (cn *conn) sendBinaryParameters(b *writeBuf, args []driver.Value) {
 	// Do one pass over the parameters to see if we're going to send any of
 	// them over in binary.  If we are, create a paramFormats array at the
 	// same time.
@@ -1451,7 +1444,22 @@ func (cn *conn) sendBinaryModeQuery(query string, args []driver.Value) {
 			b.bytes(datum)
 		}
 	}
+}
+
+func (cn *conn) sendBinaryModeQuery(query string, args []driver.Value) {
+	if len(args) >= 65536 {
+		errorf("got %d parameters but PostgreSQL only supports 65535 parameters", len(args))
+	}
+
+	b := cn.writeBuf('P')
+	b.byte(0) // unnamed statement
+	b.string(query)
 	b.int16(0)
+
+	b.next('B')
+	b.int16(0) // unnamed portal and statement
+	cn.sendBinaryParameters(b, args)
+	b.bytes(colFmtDataAllText)
 
 	b.next('D')
 	b.byte('P')
