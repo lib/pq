@@ -111,6 +111,10 @@ type conn struct {
 	// receiving query results from prepared statements.  Only provided for
 	// debugging.
 	disablePreparedBinaryResult bool
+
+	// Whether to always send []byte parameters over as binary.  Enables single
+	// round-trip mode for non-prepared Query calls.
+	binaryParameters bool
 }
 
 // Handle driver-side settings in parsed connection string.
@@ -122,13 +126,17 @@ func (c *conn) handleDriverSettings(o values) (err error) {
 			} else if value == "no" {
 				*val = false
 			} else {
-				return fmt.Errorf("unrecognized value %q for disable_prepared_binary_result", value)
+				return fmt.Errorf("unrecognized value %q for %s", value, key)
 			}
 		}
 		return nil
 	}
 
 	err = boolSetting("disable_prepared_binary_result", &c.disablePreparedBinaryResult)
+	if err != nil {
+		return err
+	}
+	err = boolSetting("binary_parameters", &c.binaryParameters)
 	if err != nil {
 		return err
 	}
@@ -234,6 +242,7 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	cn.ssl(o)
 	cn.buf = bufio.NewReader(cn.c)
 	cn.startup(o)
+
 	// reset the deadline, in case one was set (see dial)
 	if timeout := o.Get("connect_timeout"); timeout != "" && timeout != "0" {
 		err = cn.c.SetDeadline(time.Time{})
@@ -696,18 +705,29 @@ func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err err
 		return cn.simpleQuery(query)
 	}
 
-	st := cn.prepareTo(query, "")
-	st.exec(args)
-	return &rows{
-		cn:       cn,
-		colNames: st.colNames,
-		colTyps:  st.colTyps,
-		colFmts:  st.colFmts,
-	}, nil
+	if cn.binaryParameters {
+		cn.sendBinaryModeQuery(query, args)
+
+		cn.readParseResponse()
+		cn.readBindResponse()
+		rows := &rows{cn: cn}
+		rows.colNames, rows.colFmts, rows.colTyps = cn.readPortalDescribeResponse()
+		cn.postExecuteWorkaround()
+		return rows, nil
+	} else {
+		st := cn.prepareTo(query, "")
+		st.exec(args)
+		return &rows{
+			cn:       cn,
+			colNames: st.colNames,
+			colTyps:  st.colTyps,
+			colFmts:  st.colFmts,
+		}, nil
+	}
 }
 
 // Implement the optional "Execer" interface for one-shot queries
-func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err error) {
+func (cn *conn) Exec(query string, args []driver.Value) (res driver.Result, err error) {
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
@@ -721,17 +741,26 @@ func (cn *conn) Exec(query string, args []driver.Value) (_ driver.Result, err er
 		return r, err
 	}
 
-	// Use the unnamed statement to defer planning until bind
-	// time, or else value-based selectivity estimates cannot be
-	// used.
-	st := cn.prepareTo(query, "")
+	if cn.binaryParameters {
+		cn.sendBinaryModeQuery(query, args)
 
-	r, err := st.Exec(args)
-	if err != nil {
-		panic(err)
+		cn.readParseResponse()
+		cn.readBindResponse()
+		cn.readPortalDescribeResponse()
+		cn.postExecuteWorkaround()
+		res, _, err = cn.readExecuteResponse("Execute")
+		return res, err
+	} else {
+		// Use the unnamed statement to defer planning until bind
+		// time, or else value-based selectivity estimates cannot be
+		// used.
+		st := cn.prepareTo(query, "")
+		r, err := st.Exec(args)
+		if err != nil {
+			panic(err)
+		}
+		return r, err
 	}
-
-	return r, err
 }
 
 func (cn *conn) send(m *writeBuf) {
@@ -1025,6 +1054,8 @@ func isDriverSetting(key string) bool {
 	case "connect_timeout":
 		return true
 	case "disable_prepared_binary_result":
+		return true
+	case "binary_parameters":
 		return true
 
 	default:
@@ -1375,6 +1406,65 @@ func md5s(s string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
+func (cn *conn) sendBinaryModeQuery(query string, args []driver.Value) {
+	if len(args) >= 65536 {
+		errorf("got %d parameters but PostgreSQL only supports 65535 parameters", len(args))
+	}
+
+	b := cn.writeBuf('P')
+	b.byte(0) // unnamed statement
+	b.string(query)
+	b.int16(0)
+
+	b.next('B')
+	b.int16(0) // unnamed portal and statement
+
+	// Do one pass over the parameters to see if we're going to send any of
+	// them over in binary.  If we are, create a paramFormats array at the
+	// same time.
+	var paramFormats []int
+	for i, x := range args {
+		_, ok := x.([]byte)
+		if ok {
+			if paramFormats == nil {
+				paramFormats = make([]int, len(args))
+			}
+			paramFormats[i] = 1
+		}
+	}
+	if paramFormats == nil {
+		b.int16(0)
+	} else {
+		b.int16(len(paramFormats))
+		for _, x := range paramFormats {
+			b.int16(x)
+		}
+	}
+
+	b.int16(len(args))
+	for _, x := range args {
+		if x == nil {
+			b.int32(-1)
+		} else {
+			datum := binaryEncode(&cn.parameterStatus, x)
+			b.int32(len(datum))
+			b.bytes(datum)
+		}
+	}
+	b.int16(0)
+
+	b.next('D')
+	b.byte('P')
+	b.byte(0) // unnamed portal
+
+	b.next('E')
+	b.byte(0)
+	b.int32(0)
+
+	b.next('S')
+	cn.send(b)
+}
+
 func (c *conn) processParameterStatus(r *readBuf) {
 	var err error
 
@@ -1455,6 +1545,24 @@ func (cn *conn) readStatementDescribeResponse() (paramTyps []oid.Oid, colNames [
 			errorf("unexpected Describe statement response %q", t)
 		}
 	}
+}
+
+func (cn *conn) readPortalDescribeResponse() (colNames []string, colFmts []format, colTyps []oid.Oid) {
+	t, r := cn.recv1()
+	switch t {
+	case 'T':
+		return parsePortalRowDescribe(r)
+	case 'n':
+		return nil, nil, nil
+	case 'E':
+		err := parseError(r)
+		cn.readReadyForQuery()
+		panic(err)
+	default:
+		cn.bad = true
+		errorf("unexpected Describe response %q", t)
+	}
+	panic("not reached")
 }
 
 func (cn *conn) readBindResponse() {
