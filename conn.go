@@ -118,7 +118,7 @@ type conn struct {
 }
 
 // Handle driver-side settings in parsed connection string.
-func (c *conn) handleDriverSettings(o values) (err error) {
+func (c *conn) handleDriverSettings(o ConninfoOptions) (err error) {
 	boolSetting := func(key string, val *bool) error {
 		if value := o.Get(key); value != "" {
 			if value == "yes" {
@@ -162,7 +162,7 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	// the user.
 	defer errRecoverNoErrBadConn(&err)
 
-	o := make(values)
+	o := make(ConninfoOptions)
 
 	// A number of defaults are applied here, in this order:
 	//
@@ -185,7 +185,7 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 		}
 	}
 
-	if err := parseOpts(name, o); err != nil {
+	if err := ParseConninfo(name, o); err != nil {
 		return nil, err
 	}
 
@@ -250,7 +250,7 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	return cn, err
 }
 
-func dial(d Dialer, o values) (net.Conn, error) {
+func dial(d Dialer, o ConninfoOptions) (net.Conn, error) {
 	ntw, addr := network(o)
 	// SSL is not necessary or supported over UNIX domain sockets
 	if ntw == "unix" {
@@ -279,7 +279,7 @@ func dial(d Dialer, o values) (net.Conn, error) {
 	return d.Dial(ntw, addr)
 }
 
-func network(o values) (string, string) {
+func network(o ConninfoOptions) (string, string) {
 	host := o.Get("host")
 
 	if strings.HasPrefix(host, "/") {
@@ -290,17 +290,17 @@ func network(o values) (string, string) {
 	return "tcp", host + ":" + o.Get("port")
 }
 
-type values map[string]string
+type ConninfoOptions map[string]string
 
-func (vs values) Set(k, v string) {
+func (vs ConninfoOptions) Set(k, v string) {
 	vs[k] = v
 }
 
-func (vs values) Get(k string) (v string) {
+func (vs ConninfoOptions) Get(k string) (v string) {
 	return vs[k]
 }
 
-func (vs values) Isset(k string) bool {
+func (vs ConninfoOptions) Isset(k string) bool {
 	_, ok := vs[k]
 	return ok
 }
@@ -337,10 +337,10 @@ func (s *scanner) SkipSpaces() (rune, bool) {
 	return r, ok
 }
 
-// parseOpts parses the options from name and adds them to the values.
+// ParseConninfo parses the options from name and adds them to the ConninfoOptions.
 //
 // The parsing code is based on conninfo_parse from libpq's fe-connect.c
-func parseOpts(name string, o values) error {
+func ParseConninfo(name string, o ConninfoOptions) error {
 	s := newScanner(name)
 
 	for {
@@ -892,7 +892,7 @@ func (cn *conn) recv1() (t byte, r *readBuf) {
 	return t, r
 }
 
-func (cn *conn) ssl(o values) {
+func (cn *conn) ssl(o ConninfoOptions) {
 	verifyCaOnly := false
 	tlsConf := tls.Config{}
 	switch mode := o.Get("sslmode"); mode {
@@ -968,7 +968,7 @@ func (cn *conn) verifyCA(client *tls.Conn, tlsConf *tls.Config) {
 // explicitly, the files must exist.  The key file must also not be
 // world-readable, or this function will panic with
 // ErrSSLKeyHasWorldPermissions.
-func (cn *conn) setupSSLClientCertificates(tlsConf *tls.Config, o values) {
+func (cn *conn) setupSSLClientCertificates(tlsConf *tls.Config, o ConninfoOptions) {
 	var missingOk bool
 
 	sslkey := o.Get("sslkey")
@@ -1022,7 +1022,7 @@ func (cn *conn) setupSSLClientCertificates(tlsConf *tls.Config, o values) {
 }
 
 // Sets up RootCAs in the TLS configuration if sslrootcert is set.
-func (cn *conn) setupSSLCA(tlsConf *tls.Config, o values) {
+func (cn *conn) setupSSLCA(tlsConf *tls.Config, o ConninfoOptions) {
 	if sslrootcert := o.Get("sslrootcert"); sslrootcert != "" {
 		tlsConf.RootCAs = x509.NewCertPool()
 
@@ -1063,7 +1063,7 @@ func isDriverSetting(key string) bool {
 	}
 }
 
-func (cn *conn) startup(o values) {
+func (cn *conn) startup(o ConninfoOptions) {
 	w := cn.writeBuf(0)
 	w.int32(196608)
 	// Send the backend the name of the database we want to connect to, and the
@@ -1103,7 +1103,7 @@ func (cn *conn) startup(o values) {
 	}
 }
 
-func (cn *conn) auth(r *readBuf, o values) {
+func (cn *conn) auth(r *readBuf, o ConninfoOptions) {
 	switch code := r.int32(); code {
 	case 0:
 		// OK

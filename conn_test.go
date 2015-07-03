@@ -608,7 +608,7 @@ func TestQueryRowBugWorkaround(t *testing.T) {
 	}
 
 	var a string
-	err = db.QueryRow("INSERT INTO notnulltemp(a) values($1) RETURNING a", nil).Scan(&a)
+	err = db.QueryRow("INSERT INTO notnulltemp(a) VALUES ($1) RETURNING a", nil).Scan(&a)
 	if err == sql.ErrNoRows {
 		t.Fatalf("expected constraint violation error; got: %v", err)
 	}
@@ -1141,44 +1141,44 @@ func TestErrorClass(t *testing.T) {
 func TestParseOpts(t *testing.T) {
 	tests := []struct {
 		in       string
-		expected values
+		expected ConninfoOptions
 		valid    bool
 	}{
-		{"dbname=hello user=goodbye", values{"dbname": "hello", "user": "goodbye"}, true},
-		{"dbname=hello user=goodbye  ", values{"dbname": "hello", "user": "goodbye"}, true},
-		{"dbname = hello user=goodbye", values{"dbname": "hello", "user": "goodbye"}, true},
-		{"dbname=hello user =goodbye", values{"dbname": "hello", "user": "goodbye"}, true},
-		{"dbname=hello user= goodbye", values{"dbname": "hello", "user": "goodbye"}, true},
-		{"host=localhost password='correct horse battery staple'", values{"host": "localhost", "password": "correct horse battery staple"}, true},
-		{"dbname=データベース password=パスワード", values{"dbname": "データベース", "password": "パスワード"}, true},
-		{"dbname=hello user=''", values{"dbname": "hello", "user": ""}, true},
-		{"user='' dbname=hello", values{"dbname": "hello", "user": ""}, true},
+		{"dbname=hello user=goodbye", ConninfoOptions{"dbname": "hello", "user": "goodbye"}, true},
+		{"dbname=hello user=goodbye  ", ConninfoOptions{"dbname": "hello", "user": "goodbye"}, true},
+		{"dbname = hello user=goodbye", ConninfoOptions{"dbname": "hello", "user": "goodbye"}, true},
+		{"dbname=hello user =goodbye", ConninfoOptions{"dbname": "hello", "user": "goodbye"}, true},
+		{"dbname=hello user= goodbye", ConninfoOptions{"dbname": "hello", "user": "goodbye"}, true},
+		{"host=localhost password='correct horse battery staple'", ConninfoOptions{"host": "localhost", "password": "correct horse battery staple"}, true},
+		{"dbname=データベース password=パスワード", ConninfoOptions{"dbname": "データベース", "password": "パスワード"}, true},
+		{"dbname=hello user=''", ConninfoOptions{"dbname": "hello", "user": ""}, true},
+		{"user='' dbname=hello", ConninfoOptions{"dbname": "hello", "user": ""}, true},
 		// The last option value is an empty string if there's no non-whitespace after its =
-		{"dbname=hello user=   ", values{"dbname": "hello", "user": ""}, true},
+		{"dbname=hello user=   ", ConninfoOptions{"dbname": "hello", "user": ""}, true},
 
 		// The parser ignores spaces after = and interprets the next set of non-whitespace characters as the value.
-		{"user= password=foo", values{"user": "password=foo"}, true},
+		{"user= password=foo", ConninfoOptions{"user": "password=foo"}, true},
 
 		// Backslash escapes next char
-		{`user=a\ \'\\b`, values{"user": `a '\b`}, true},
-		{`user='a \'b'`, values{"user": `a 'b`}, true},
+		{`user=a\ \'\\b`, ConninfoOptions{"user": `a '\b`}, true},
+		{`user='a \'b'`, ConninfoOptions{"user": `a 'b`}, true},
 
 		// Incomplete escape
-		{`user=x\`, values{}, false},
+		{`user=x\`, ConninfoOptions{}, false},
 
 		// No '=' after the key
-		{"postgre://marko@internet", values{}, false},
-		{"dbname user=goodbye", values{}, false},
-		{"user=foo blah", values{}, false},
-		{"user=foo blah   ", values{}, false},
+		{"postgre://marko@internet", ConninfoOptions{}, false},
+		{"dbname user=goodbye", ConninfoOptions{}, false},
+		{"user=foo blah", ConninfoOptions{}, false},
+		{"user=foo blah   ", ConninfoOptions{}, false},
 
 		// Unterminated quoted value
-		{"dbname=hello user='unterminated", values{}, false},
+		{"dbname=hello user='unterminated", ConninfoOptions{}, false},
 	}
 
 	for _, test := range tests {
-		o := make(values)
-		err := parseOpts(test.in, o)
+		o := make(ConninfoOptions)
+		err := ParseConninfo(test.in, o)
 
 		switch {
 		case err != nil && test.valid:
