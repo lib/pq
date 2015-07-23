@@ -1369,6 +1369,10 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 			return io.EOF
 		case 'D':
 			n := rs.rb.int16()
+			if err != nil {
+				conn.bad = true
+				errorf("unexpected DataRow after error %s", err)
+			}
 			if n < len(dest) {
 				dest = dest[:n]
 			}
