@@ -285,3 +285,123 @@ func appendArrayQuotedBytes(b, v []byte) []byte {
 func appendValue(b []byte, v driver.Value) ([]byte, error) {
 	return append(b, encode(nil, v, 0)...), nil
 }
+
+// parseArray extracts the dimensions and elements of an array represented in
+// text format. Only representations emitted by the backend are supported.
+// Notably, whitespace around brackets and delimiters is significant, and NULL
+// is case-sensitive.
+//
+// See http://www.postgresql.org/docs/current/static/arrays.html#ARRAYS-IO
+func parseArray(src, del []byte) (dims []int, elems [][]byte, err error) {
+	var depth, i int
+
+	if len(src) < 1 || src[0] != '{' {
+		err = fmt.Errorf("pq: unable to parse array; expected %q at offset %d", '{', 0)
+		return
+	}
+
+Open:
+	for i < len(src) {
+		switch src[i] {
+		case '{':
+			depth++
+			i++
+		case '}':
+			elems = make([][]byte, 0)
+			goto Close
+		default:
+			break Open
+		}
+	}
+	dims = make([]int, i)
+
+Element:
+	for i < len(src) {
+		switch src[i] {
+		case '{':
+			depth++
+			dims[depth-1] = 0
+			i++
+		case '"':
+			var elem = []byte{}
+			var escape bool
+			for i++; i < len(src); i++ {
+				if escape {
+					elem = append(elem, src[i])
+					escape = false
+				} else {
+					switch src[i] {
+					default:
+						elem = append(elem, src[i])
+					case '\\':
+						escape = true
+					case '"':
+						elems = append(elems, elem)
+						i++
+						break Element
+					}
+				}
+			}
+		default:
+			for start := i; i < len(src); i++ {
+				switch {
+				case bytes.HasPrefix(src[i:], del):
+					fallthrough
+				case src[i] == '}':
+					elem := src[start:i]
+					switch len(elem) {
+					case 0:
+						goto Unexpected
+					case 4:
+						if bytes.Equal(elem, []byte{'N', 'U', 'L', 'L'}) {
+							elem = nil
+						}
+					}
+					elems = append(elems, elem)
+					break Element
+				}
+			}
+		}
+	}
+
+	for i < len(src) {
+		switch {
+		case bytes.HasPrefix(src[i:], del):
+			dims[depth-1]++
+			i += len(del)
+			goto Element
+		case src[i] == '}':
+			dims[depth-1]++
+			depth--
+			i++
+		default:
+			goto Unexpected
+		}
+	}
+
+Close:
+	for i < len(src) {
+		switch {
+		case src[i] == '}' && depth > 0:
+			depth--
+			i++
+		default:
+			goto Unexpected
+		}
+	}
+	if depth > 0 {
+		err = fmt.Errorf("pq: unable to parse array; expected %q at offset %d", '}', i)
+	}
+	if err == nil {
+		for _, d := range dims {
+			if len(elems)%d != 0 {
+				err = fmt.Errorf("pq: multidimensional arrays must have elements with matching dimensions")
+			}
+		}
+	}
+	return
+
+Unexpected:
+	err = fmt.Errorf("pq: unable to parse array; unexpected %q at offset %d", src[i], i)
+	return
+}
