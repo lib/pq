@@ -1038,7 +1038,7 @@ func (cn *conn) setupSSLCA(tlsConf *tls.Config, o values) {
 	}
 }
 
-// isDriverSetting returns true iff a setting is purely for configuring the
+// isDriverSetting returns true if a setting is purely for configuring the
 // driver's options and should not be sent to the server in the connection
 // startup packet.
 func isDriverSetting(key string) bool {
