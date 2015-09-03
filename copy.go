@@ -18,28 +18,36 @@ var (
 // CopyIn creates a COPY FROM statement which can be prepared with
 // Tx.Prepare().  The target table should be visible in search_path.
 func CopyIn(table string, columns ...string) string {
-	stmt := "COPY " + QuoteIdentifier(table) + " ("
-	for i, col := range columns {
-		if i != 0 {
-			stmt += ", "
+	stmt := "COPY " + QuoteIdentifier(table)
+	if len(columns) > 0 {
+		stmt += " ("
+		for i, col := range columns {
+			if i != 0 {
+				stmt += ", "
+			}
+			stmt += QuoteIdentifier(col)
 		}
-		stmt += QuoteIdentifier(col)
+		stmt += ")"
 	}
-	stmt += ") FROM STDIN"
+	stmt += " FROM STDIN"
 	return stmt
 }
 
 // CopyInSchema creates a COPY FROM statement which can be prepared with
 // Tx.Prepare().
 func CopyInSchema(schema, table string, columns ...string) string {
-	stmt := "COPY " + QuoteIdentifier(schema) + "." + QuoteIdentifier(table) + " ("
-	for i, col := range columns {
-		if i != 0 {
-			stmt += ", "
+	stmt := "COPY " + QuoteIdentifier(schema) + "." + QuoteIdentifier(table)
+	if len(columns) > 0 {
+		stmt += " ("
+		for i, col := range columns {
+			if i != 0 {
+				stmt += ", "
+			}
+			stmt += QuoteIdentifier(col)
 		}
-		stmt += QuoteIdentifier(col)
+		stmt += ")"
 	}
-	stmt += ") FROM STDIN"
+	stmt += " FROM STDIN"
 	return stmt
 }
 

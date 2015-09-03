@@ -10,7 +10,7 @@ import (
 func TestCopyInStmt(t *testing.T) {
 	var stmt string
 	stmt = CopyIn("table name")
-	if stmt != `COPY "table name" () FROM STDIN` {
+	if stmt != `COPY "table name" FROM STDIN` {
 		t.Fatal(stmt)
 	}
 
@@ -28,7 +28,7 @@ func TestCopyInStmt(t *testing.T) {
 func TestCopyInSchemaStmt(t *testing.T) {
 	var stmt string
 	stmt = CopyInSchema("schema name", "table name")
-	if stmt != `COPY "schema name"."table name" () FROM STDIN` {
+	if stmt != `COPY "schema name"."table name" FROM STDIN` {
 		t.Fatal(stmt)
 	}
 
