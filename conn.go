@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -1038,6 +1039,11 @@ func (cn *conn) verifyCA(client *tls.Conn, tlsConf *tls.Config) {
 	}
 }
 
+var (
+	clientCertMu sync.Mutex // protects the following
+	clientCerts  = map[struct{ key, cert string }][]tls.Certificate{}
+)
+
 // This function sets up SSL client certificates based on either the "sslkey"
 // and "sslcert" settings (possibly set via the environment variables PGSSLKEY
 // and PGSSLCERT, respectively), or if they aren't set, from the .postgresql
@@ -1050,6 +1056,19 @@ func setupSSLClientCertificates(tlsConf *tls.Config, o values) {
 
 	sslkey := o.Get("sslkey")
 	sslcert := o.Get("sslcert")
+	cacheKey := struct{ key, cert string }{sslkey, sslcert}
+	clientCertMu.Lock()
+	certs, cached := clientCerts[cacheKey]
+	clientCertMu.Unlock()
+	if cached {
+		tlsConf.Certificates = certs
+		return
+	}
+
+	// Certs are not in the cache, so try to load from disk.
+	// It's possible that multiple goroutines have concurrent
+	// cache misses and are doing duplicate work here, but ok.
+
 	if sslkey != "" && sslcert != "" {
 		// If the user has set an sslkey and sslcert, they *must* exist.
 		missingOk = false
@@ -1068,18 +1087,25 @@ func setupSSLClientCertificates(tlsConf *tls.Config, o values) {
 		missingOk = true
 	}
 
+
 	// Check that both files exist, and report the error or stop, depending on
 	// which behaviour we want.  Note that we don't do any more extensive
 	// checks than this (such as checking that the paths aren't directories);
 	// LoadX509KeyPair() will take care of the rest.
 	keyfinfo, err := os.Stat(sslkey)
 	if err != nil && missingOk {
+		clientCertMu.Lock()
+		clientCerts[cacheKey] = nil
+		clientCertMu.Unlock()
 		return
 	} else if err != nil {
 		panic(err)
 	}
 	_, err = os.Stat(sslcert)
 	if err != nil && missingOk {
+		clientCertMu.Lock()
+		clientCerts[cacheKey] = nil
+		clientCertMu.Unlock()
 		return
 	} else if err != nil {
 		panic(err)
@@ -1096,6 +1122,9 @@ func setupSSLClientCertificates(tlsConf *tls.Config, o values) {
 		panic(err)
 	}
 	tlsConf.Certificates = []tls.Certificate{cert}
+	clientCertMu.Lock()
+	clientCerts[cacheKey] = tlsConf.Certificates
+	clientCertMu.Unlock()
 }
 
 // Sets up RootCAs in the TLS configuration if sslrootcert is set.
