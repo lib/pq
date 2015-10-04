@@ -988,7 +988,7 @@ func (cn *conn) ssl(o values) {
 		errorf(`unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`, mode)
 	}
 
-	cn.setupSSLClientCertificates(&tlsConf, o)
+	setupSSLClientCertificates(&tlsConf, o)
 	cn.setupSSLCA(&tlsConf, o)
 
 	w := cn.writeBuf(0)
@@ -1045,7 +1045,7 @@ func (cn *conn) verifyCA(client *tls.Conn, tlsConf *tls.Config) {
 // explicitly, the files must exist.  The key file must also not be
 // world-readable, or this function will panic with
 // ErrSSLKeyHasWorldPermissions.
-func (cn *conn) setupSSLClientCertificates(tlsConf *tls.Config, o values) {
+func setupSSLClientCertificates(tlsConf *tls.Config, o values) {
 	var missingOk bool
 
 	sslkey := o.Get("sslkey")
