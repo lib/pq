@@ -9,6 +9,8 @@ import (
 	"os/user"
 )
 
+var homeDir = os.Getenv("HOME")
+
 func userCurrent() (string, error) {
 	u, err := user.Current()
 	if err == nil {
