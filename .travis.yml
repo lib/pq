@@ -8,6 +8,10 @@ go:
   - 1.5
   - tip
 
+matrix:
+  allow_failures:
+    - go: tip
+
 before_install:
   - psql --version
   - sudo /etc/init.d/postgresql stop
