@@ -143,6 +143,57 @@ func (c *conn) handleDriverSettings(o values) (err error) {
 	return nil
 }
 
+func (c *conn) handlePgpass(o values) {
+	// if a password was supplied, do not process .pgpass
+	_, ok := o["password"]
+	if ok {
+		return
+	}
+	filename := os.Getenv("PGPASSFILE")
+	if filename == "" {
+		// XXX this code doesn't work on Windows where the default filename is
+		// XXX %APPDATA%\postgresql\pgpass.conf
+		user, err := user.Current()
+		if err != nil {
+			return
+		}
+		filename = filepath.Join(user.HomeDir, ".pgpass")
+	}
+	fileinfo, err := os.Stat(filename)
+	if err != nil {
+		return
+	}
+	mode := fileinfo.Mode()
+	if mode & (0x77) != 0 {
+		// XXX should warn about incorrect .pgpass permissions as psql does
+		return
+	}
+	file, err := os.Open(filename)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(io.Reader(file))
+	hostname := o.Get("host")
+	port := o.Get("port")
+	db := o.Get("dbname")
+	username := o.Get("user")
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(line) == 0 || line[0] == '#' {
+			continue
+		}
+		split := strings.SplitN(line, ":", 5)
+		if len(split) < 5 {
+			continue
+		}
+		if (split[0] == "*" || split[0] == hostname) && (split[1] == "*" || split[1] == port) && (split[2] == "*" || split[2] == db)  && (split[3] == "*" || split[3] == username)  {
+			o["password"] = split[4]
+			return
+		}
+	}
+}
+
 func (c *conn) writeBuf(b byte) *writeBuf {
 	c.scratch[0] = b
 	return &writeBuf{
@@ -234,6 +285,7 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	if err != nil {
 		return nil, err
 	}
+	cn.handlePgpass(o)
 
 	cn.c, err = dial(d, o)
 	if err != nil {
@@ -1719,7 +1771,7 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("user")
 		case "PGPASSWORD":
 			accrue("password")
-		case "PGPASSFILE", "PGSERVICE", "PGSERVICEFILE", "PGREALM":
+		case "PGSERVICE", "PGSERVICEFILE", "PGREALM":
 			unsupported()
 		case "PGOPTIONS":
 			accrue("options")
