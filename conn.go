@@ -175,6 +175,7 @@ func (c *conn) handlePgpass(o values) {
 	defer file.Close()
 	scanner := bufio.NewScanner(io.Reader(file))
 	hostname := o.Get("host")
+	ntw, _ := network(o)
 	port := o.Get("port")
 	db := o.Get("dbname")
 	username := o.Get("user")
@@ -206,10 +207,10 @@ func (c *conn) handlePgpass(o values) {
 			continue
 		}
 		split := getFields(line)
-		if len(split) < 5 {
+		if len(split) != 5 {
 			continue
 		}
-		if (split[0] == "*" || split[0] == hostname) && (split[1] == "*" || split[1] == port) && (split[2] == "*" || split[2] == db)  && (split[3] == "*" || split[3] == username)  {
+		if (split[0] == "*" || split[0] == hostname || (split[0] == "localhost" && (hostname == "" || ntw == "unix"))) && (split[1] == "*" || split[1] == port) && (split[2] == "*" || split[2] == db)  && (split[3] == "*" || split[3] == username)  {
 			o["password"] = split[4]
 			return
 		}
