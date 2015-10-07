@@ -178,12 +178,34 @@ func (c *conn) handlePgpass(o values) {
 	port := o.Get("port")
 	db := o.Get("dbname")
 	username := o.Get("user")
+	// From: https://github.com/tg/pgpass/blob/master/reader.go
+	getFields := func (s string) []string {
+		fs := make([]string, 0, 5)
+		f := make([]rune, 0, len(s))
+
+		var esc bool
+		for _, c := range s {
+			switch {
+			case esc:
+				f = append(f, c)
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == ':':
+				fs = append(fs, string(f))
+				f = f[:0]
+			default:
+				f = append(f, c)
+			}
+		}
+		return append(fs, string(f))
+	}	
 	for scanner.Scan() {
 		line := scanner.Text()
 		if len(line) == 0 || line[0] == '#' {
 			continue
 		}
-		split := strings.SplitN(line, ":", 5)
+		split := getFields(line)
 		if len(split) < 5 {
 			continue
 		}
