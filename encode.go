@@ -70,9 +70,9 @@ func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) inter
 	case oid.T_int8:
 		return int64(binary.BigEndian.Uint64(s))
 	case oid.T_int4:
-		return int64(int32(binary.BigEndian.Uint32(s)))
+		return int32(binary.BigEndian.Uint32(s))
 	case oid.T_int2:
-		return int64(int16(binary.BigEndian.Uint16(s)))
+		return int16(binary.BigEndian.Uint16(s))
 
 	default:
 		errorf("don't know how to decode binary parameter of type %u", uint32(typ))
@@ -111,6 +111,8 @@ func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interfa
 			errorf("%s", err)
 		}
 		return f
+	case oid.T_text:
+		return string(s)
 	}
 
 	return s

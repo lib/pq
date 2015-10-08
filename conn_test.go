@@ -356,7 +356,9 @@ func TestEncodeDecode(t *testing.T) {
 			NULL::integer,
 			'2000-1-1 01:02:03.04-7'::timestamptz,
 			0::boolean,
-			123,
+			123::smallint,
+			123::integer,
+			123::bigint,
 			-321,
 			3.14::float8
 		WHERE
@@ -383,12 +385,12 @@ func TestEncodeDecode(t *testing.T) {
 	}
 
 	var got1 []byte
-	var got2 string
+	var got2 interface{}
 	var got3 = sql.NullInt64{Valid: true}
 	var got4 time.Time
-	var got5, got6, got7, got8 interface{}
+	var got5, got6, got7, got8, got9, got10 interface{}
 
-	err = r.Scan(&got1, &got2, &got3, &got4, &got5, &got6, &got7, &got8)
+	err = r.Scan(&got1, &got2, &got3, &got4, &got5, &got6, &got7, &got8, &got9, &got10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +399,7 @@ func TestEncodeDecode(t *testing.T) {
 		t.Errorf("expected %q byte: %q", exp1, got1)
 	}
 
-	if !reflect.DeepEqual(exp2, got2) {
+	if got2 != exp2 {
 		t.Errorf("expected %q byte: %q", exp2, got2)
 	}
 
@@ -413,16 +415,24 @@ func TestEncodeDecode(t *testing.T) {
 		t.Fatalf("expected false, got %q", got5)
 	}
 
-	if got6 != int64(123) {
+	if got6 != int16(123) {
 		t.Fatalf("expected 123, got %d", got6)
 	}
 
-	if got7 != int64(-321) {
+	if got7 != int32(123) {
+		t.Fatalf("expected 123, got %d", got6)
+	}
+
+	if got8 != int64(123) {
+		t.Fatalf("expected 123, got %d", got6)
+	}
+
+	if got9 != int32(-321) {
 		t.Fatalf("expected -321, got %d", got7)
 	}
 
-	if got8 != float64(3.14) {
-		t.Fatalf("expected 3.14, got %f", got8)
+	if got10 != float64(3.14) {
+		t.Fatalf("expected 3.14, got %f", got10)
 	}
 }
 
