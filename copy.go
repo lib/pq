@@ -32,7 +32,7 @@ func CopyIn(table string, columns ...string) string {
 // CopyInSchema creates a COPY FROM statement which can be prepared with
 // Tx.Prepare().
 func CopyInSchema(schema, table string, columns ...string) string {
-	stmt := "COPY " + QuoteIdentifier(schema) + "." + QuoteIdentifier(table) + " ("
+	stmt := "COPY " + schema + "." + QuoteIdentifier(table) + " ("
 	for i, col := range columns {
 		if i != 0 {
 			stmt += ", "
