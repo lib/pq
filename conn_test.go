@@ -296,52 +296,62 @@ func TestEmptyQuery(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	_, err := db.Exec("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows, err := db.Query("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cols, err := rows.Columns()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cols) != 0 {
-		t.Fatalf("unexpected number of columns %d in response to an empty query", len(cols))
-	}
-	if rows.Next() {
-		t.Fatal("unexpected row")
-	}
-	if rows.Err() != nil {
-		t.Fatal(rows.Err())
-	}
+	for _, testcase := range []struct {
+		exec, query string
+		cols        []string
+	}{
+		{"", "", []string{}},
+		{"CREATE TEMP TABLE temp (a int)", "SELECT * FROM temp", []string{"a"}},
+	} {
+		if _, err := db.Exec(testcase.exec); err != nil {
+			t.Fatal(err)
+		}
+		{
+			rows, err := db.Query(testcase.query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cols, err := rows.Columns()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !(len(cols) == 0 && len(testcase.cols) == 0 || reflect.DeepEqual(cols, testcase.cols)) {
+				t.Fatalf("expected columns:\n%s\nbut got columns:\n%s", testcase.cols, cols)
+			}
+			if rows.Next() {
+				t.Fatal("unexpected row")
+			}
+			if rows.Err() != nil {
+				t.Fatal(rows.Err())
+			}
+		}
 
-	stmt, err := db.Prepare("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = stmt.Exec()
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows, err = stmt.Query()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cols, err = rows.Columns()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cols) != 0 {
-		t.Fatalf("unexpected number of columns %d in response to an empty query", len(cols))
-	}
-	if rows.Next() {
-		t.Fatal("unexpected row")
-	}
-	if rows.Err() != nil {
-		t.Fatal(rows.Err())
+		{
+			stmt, err := db.Prepare(testcase.query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := stmt.Exec(); err != nil {
+				t.Fatal(err)
+			}
+			rows, err := stmt.Query()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cols, err := rows.Columns()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !(len(cols) == 0 && len(testcase.cols) == 0 || reflect.DeepEqual(cols, testcase.cols)) {
+				t.Fatalf("expected columns:\n%s\nbut got columns:\n%s", testcase.cols, cols)
+			}
+			if rows.Next() {
+				t.Fatal("unexpected row")
+			}
+			if rows.Err() != nil {
+				t.Fatal(rows.Err())
+			}
+		}
 	}
 }
 
