@@ -38,6 +38,7 @@ Optionally, a benchmark suite can be run as part of the tests:
 * Many libpq compatible environment variables
 * Unix socket support
 * Notifications: `LISTEN`/`NOTIFY`
+* pgpass support
 
 ## Future / Things you can help with
 
