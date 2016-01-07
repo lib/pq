@@ -67,6 +67,7 @@ code still exists in here.
 * Everyone at The Go Team
 * Evan Shaw (edsrzf)
 * Ewan Chou (coocood)
+* Fazal Majid (fazalmajid)
 * Federico Romero (federomero)
 * Fumin (fumin)
 * Gary Burd (garyburd)
