@@ -3,6 +3,7 @@ package pq
 import (
 	"bytes"
 	"database/sql"
+	"database/sql/driver"
 	"strings"
 	"testing"
 )
@@ -402,7 +403,9 @@ func TestCopyRespLoopConnectionError(t *testing.T) {
 	}
 	pge, ok := err.(*Error)
 	if !ok {
-		t.Fatalf("expected *pq.Error, got %+#v", err)
+		if err != driver.ErrBadConn {
+			t.Fatalf("expected *pq.Error or driver.ErrBadConn, got %+#v", err)
+		}
 	} else if pge.Code.Name() != "admin_shutdown" {
 		t.Fatalf("expected admin_shutdown, got %s", pge.Code.Name())
 	}
