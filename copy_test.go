@@ -403,7 +403,11 @@ func TestCopyRespLoopConnectionError(t *testing.T) {
 	}
 	pge, ok := err.(*Error)
 	if !ok {
-		if err != driver.ErrBadConn {
+		if err == driver.ErrBadConn {
+			// Likely an EPIPE
+			_ = stmt.Close()
+			return
+		} else {
 			t.Fatalf("expected *pq.Error or driver.ErrBadConn, got %+#v", err)
 		}
 	} else if pge.Code.Name() != "admin_shutdown" {
