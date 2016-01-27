@@ -985,7 +985,7 @@ func (cn *conn) ssl(o values) {
 	case "disable":
 		return
 	default:
-		errorf(`unsupported sslmode %q; only "require" (default), "verify-full", and "disable" supported`, mode)
+		errorf(`unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`, mode)
 	}
 
 	cn.setupSSLClientCertificates(&tlsConf, o)
