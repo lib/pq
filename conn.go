@@ -115,6 +115,9 @@ type conn struct {
 	// Whether to always send []byte parameters over as binary.  Enables single
 	// round-trip mode for non-prepared Query calls.
 	binaryParameters bool
+
+	// Whether the connection is ready to execute a query.
+	readyForQuery bool
 }
 
 // Handle driver-side settings in parsed connection string.
@@ -587,6 +590,8 @@ func (cn *conn) gname() string {
 }
 
 func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err error) {
+	cn.waitReadyForQuery()
+
 	b := cn.writeBuf('Q')
 	b.string(q)
 	cn.send(b)
@@ -614,11 +619,16 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 	defer cn.errRecover(&err)
 
+	cn.waitReadyForQuery()
+
+	// Mark the connection has having sent a query.
+	cn.readyForQuery = false
 	b := cn.writeBuf('Q')
 	b.string(q)
 	cn.send(b)
 
 	for {
+
 		t, r := cn.recv1()
 		switch t {
 		case 'C', 'I':
@@ -742,6 +752,8 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 	}
 	defer cn.errRecover(&err)
 
+	cn.waitReadyForQuery()
+
 	if len(q) >= 4 && strings.EqualFold(q[:4], "COPY") {
 		return cn.prepareCopyIn(q)
 	}
@@ -776,6 +788,8 @@ func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err err
 	if len(args) == 0 {
 		return cn.simpleQuery(query)
 	}
+
+	cn.waitReadyForQuery()
 
 	if cn.binaryParameters {
 		cn.sendBinaryModeQuery(query, args)
@@ -812,6 +826,8 @@ func (cn *conn) Exec(query string, args []driver.Value) (res driver.Result, err 
 		r, _, err := cn.simpleExec(query)
 		return r, err
 	}
+
+	cn.waitReadyForQuery()
 
 	if cn.binaryParameters {
 		cn.sendBinaryModeQuery(query, args)
@@ -1301,6 +1317,10 @@ func (st *stmt) exec(v []driver.Value) {
 	}
 
 	cn := st.cn
+	cn.waitReadyForQuery()
+	// Mark the connection has having sent a query.
+	cn.readyForQuery = false
+
 	w := cn.writeBuf('B')
 	w.byte(0) // unnamed portal
 	w.string(st.name)
@@ -1431,7 +1451,11 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 		case 'E':
 			err = parseError(&rs.rb)
 		case 'C', 'I':
-			continue
+			rs.done = true
+			if err != nil {
+				return err
+			}
+			return io.EOF
 		case 'Z':
 			conn.processReadyForQuery(&rs.rb)
 			rs.done = true
@@ -1527,6 +1551,9 @@ func (cn *conn) sendBinaryModeQuery(query string, args []driver.Value) {
 		errorf("got %d parameters but PostgreSQL only supports 65535 parameters", len(args))
 	}
 
+	// Mark the connection has having sent a query.
+	cn.readyForQuery = false
+
 	b := cn.writeBuf('P')
 	b.byte(0) // unnamed statement
 	b.string(query)
@@ -1576,6 +1603,7 @@ func (c *conn) processParameterStatus(r *readBuf) {
 
 func (c *conn) processReadyForQuery(r *readBuf) {
 	c.txnStatus = transactionStatus(r.byte())
+	c.readyForQuery = true
 }
 
 func (cn *conn) readReadyForQuery() {
@@ -1587,6 +1615,21 @@ func (cn *conn) readReadyForQuery() {
 	default:
 		cn.bad = true
 		errorf("unexpected message %q; expected ReadyForQuery", t)
+	}
+}
+
+func (cn *conn) waitReadyForQuery() {
+	// The postgres server sends a 'Z' command when it is ready to receive a
+	// query. We use this as a sync marker to skip over commands we're not
+	// handling in our current state. For example, we might be skipping over
+	// subsequent results when a query contained multiple statements and only the
+	// first result was retrieved.
+	for !cn.readyForQuery {
+		t, r := cn.recv1()
+		switch t {
+		case 'Z':
+			cn.processReadyForQuery(r)
+		}
 	}
 }
 
