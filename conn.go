@@ -32,7 +32,10 @@ var (
 	ErrSSLNotSupported           = errors.New("pq: SSL is not enabled on the server")
 	ErrSSLKeyHasWorldPermissions = errors.New("pq: Private key file has group or world access. Permissions should be u=rw (0600) or less.")
 	ErrCouldNotDetectUsername    = errors.New("pq: Could not detect default username. Please provide one explicitly.")
+	ErrNoMoreResults             = errors.New("pq: no more results")
 )
+
+const NextResults = "NEXT"
 
 type drv struct{}
 
@@ -619,56 +622,73 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 	defer cn.errRecover(&err)
 
-	cn.waitReadyForQuery()
-
-	// Mark the connection has having sent a query.
-	cn.readyForQuery = false
-	b := cn.writeBuf('Q')
-	b.string(q)
-	cn.send(b)
+	querySent := false
+	nextResult := q == NextResults
 
 	for {
+		if cn.readyForQuery && !querySent {
+			if nextResult {
+				return nil, ErrNoMoreResults
+			}
+
+			// Mark the connection as having sent a query.
+			cn.readyForQuery = false
+			b := cn.writeBuf('Q')
+			b.string(q)
+			cn.send(b)
+			querySent = true
+		}
 
 		t, r := cn.recv1()
 		switch t {
 		case 'C', 'I':
-			// We allow queries which don't return any results through Query as
-			// well as Exec.  We still have to give database/sql a rows object
-			// the user can close, though, to avoid connections from being
-			// leaked.  A "rows" with done=true works fine for that purpose.
-			if err != nil {
-				cn.bad = true
-				errorf("unexpected message %q in simple query execution", t)
-			}
-			if res == nil {
-				res = &rows{
-					cn: cn,
+			if nextResult || querySent {
+				// We allow queries which don't return any results through Query as
+				// well as Exec.  We still have to give database/sql a rows object
+				// the user can close, though, to avoid connections from being
+				// leaked.  A "rows" with done=true works fine for that purpose.
+				if err != nil {
+					cn.bad = true
+					errorf("unexpected message %q in simple query execution", t)
 				}
+				if res == nil {
+					res = &rows{
+						cn: cn,
+					}
+				}
+				res.done = true
 			}
-			res.done = true
 		case 'Z':
 			cn.processReadyForQuery(r)
-			// done
-			return
-		case 'E':
-			res = nil
-			err = parseError(r)
-		case 'D':
-			if res == nil {
-				cn.bad = true
-				errorf("unexpected DataRow in simple query execution")
+			if querySent {
+				// done
+				return
 			}
-			// the query didn't fail; kick off to Next
-			cn.saveMessage(t, r)
-			return
+		case 'E':
+			if nextResult || querySent {
+				res = nil
+				err = parseError(r)
+			}
+		case 'D':
+			if nextResult || querySent {
+				if res == nil {
+					cn.bad = true
+					errorf("unexpected DataRow in simple query execution")
+				}
+				// the query didn't fail; kick off to Next
+				cn.saveMessage(t, r)
+				return
+			}
 		case 'T':
-			// res might be non-nil here if we received a previous
-			// CommandComplete, but that's fine; just overwrite it
-			res = &rows{cn: cn}
-			res.colNames, res.colFmts, res.colTyps = parsePortalRowDescribe(r)
+			if nextResult || querySent {
+				// res might be non-nil here if we received a previous
+				// CommandComplete, but that's fine; just overwrite it
+				res = &rows{cn: cn}
+				res.colNames, res.colFmts, res.colTyps = parsePortalRowDescribe(r)
 
-			// To work around a bug in QueryRow in Go 1.2 and earlier, wait
-			// until the first DataRow has been received.
+				// To work around a bug in QueryRow in Go 1.2 and earlier, wait
+				// until the first DataRow has been received.
+			}
 		default:
 			cn.bad = true
 			errorf("unknown response for simple query: %q", t)

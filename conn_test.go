@@ -136,6 +136,7 @@ func TestOpenURL(t *testing.T) {
 }
 
 const pgpass_file = "/tmp/pqgotest_pgpass"
+
 func TestPgpass(t *testing.T) {
 	testAssert := func(conninfo string, expected string, reason string) {
 		conn, err := openTestConnConninfo(conninfo)
@@ -336,6 +337,70 @@ func TestRowsCloseBeforeDone(t *testing.T) {
 
 	if r.Err() != nil {
 		t.Fatal(r.Err())
+	}
+}
+
+func TestMultipleResults(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	var val int
+	if err := db.QueryRow("SELECT 1; SELECT 2").Scan(&val); err != nil {
+		t.Fatal(err)
+	}
+	if val != 1 {
+		t.Fatalf("expected 1, but found %d", val)
+	}
+	if err := db.QueryRow(NextResults).Scan(&val); err != nil {
+		t.Fatal(err)
+	}
+	if val != 2 {
+		t.Fatalf("expected 2, but found %d", val)
+	}
+	if err := db.QueryRow(NextResults).Scan(&val); err != ErrNoMoreResults {
+		t.Fatalf("expected %s, but found %v", ErrNoMoreResults, err)
+	}
+
+	// Now test discarding the second result.
+	if err := db.QueryRow("SELECT 3; SELECT 4").Scan(&val); err != nil {
+		t.Fatal(err)
+	}
+	if val != 3 {
+		t.Fatalf("expected 3, but found %d", val)
+	}
+	if err := db.QueryRow("SELECT 5").Scan(&val); err != nil {
+		t.Fatal(err)
+	}
+	if val != 5 {
+		t.Fatalf("expected 5, but found %d", val)
+	}
+}
+
+func TestTxnMultipleResults(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	var val int
+	if err := tx.QueryRow("SELECT 1; SELECT 2").Scan(&val); err != nil {
+		t.Fatal(err)
+	}
+	if val != 1 {
+		t.Fatalf("expected 1, but found %d", val)
+	}
+	if err := tx.QueryRow(NextResults).Scan(&val); err != nil {
+		t.Fatal(err)
+	}
+	if val != 2 {
+		t.Fatalf("expected 2, but found %d", val)
+	}
+	if err := tx.QueryRow(NextResults).Scan(&val); err != ErrNoMoreResults {
+		t.Fatalf("expected %s, but found %v", ErrNoMoreResults, err)
 	}
 }
 
