@@ -46,8 +46,7 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 	case bool:
 		return strconv.AppendBool(nil, v)
 	case time.Time:
-		return formatTs(v)
-
+		return formatTs(v, pgtypOid)
 	default:
 		errorf("encode: unknown type for %T", v)
 	}
@@ -132,7 +131,7 @@ func appendEncodedText(parameterStatus *parameterStatus, buf []byte, x interface
 	case bool:
 		return strconv.AppendBool(buf, v)
 	case time.Time:
-		return append(buf, formatTs(v)...)
+		return append(buf, formatTs(v, 0)...)
 	case nil:
 		return append(buf, "\\N"...)
 	default:
@@ -399,8 +398,8 @@ func parseTs(currentLocation *time.Location, str string) interface{} {
 	return t
 }
 
-// formatTs formats t into a format postgres understands.
-func formatTs(t time.Time) (b []byte) {
+// formatTs formats t into a time format postgres understands.
+func formatTs(t time.Time, pgtypOid oid.Oid) (b []byte) {
 	if infinityTsEnabled {
 		// t <= -infinity : ! (t > -infinity)
 		if !t.After(infinityTsNegative) {
@@ -420,25 +419,39 @@ func formatTs(t time.Time) (b []byte) {
 		t = t.AddDate((-t.Year())*2+1, 0, 0)
 		bc = true
 	}
-	b = []byte(t.Format(time.RFC3339Nano))
 
-	_, offset := t.Zone()
-	offset = offset % 60
-	if offset != 0 {
-		// RFC3339Nano already printed the minus sign
-		if offset < 0 {
-			offset = -offset
+	switch pgtypOid {
+	case oid.T_time, oid.T__time:
+		b = []byte(t.Format("15:04:05"))
+	case oid.T_timetz, oid.T__timetz:
+		b = []byte(t.Format("15:04:05-0700"))
+	case oid.T_date, oid.T__date:
+		b = []byte(t.Format("2006-01-02"))
+
+		if bc {
+			b = append(b, " BC"...)
+		}
+	default:
+		b = []byte(t.Format(time.RFC3339Nano))
+
+		_, offset := t.Zone()
+		offset = offset % 60
+		if offset != 0 {
+			// RFC3339Nano already printed the minus sign
+			if offset < 0 {
+				offset = -offset
+			}
+
+			b = append(b, ':')
+			if offset < 10 {
+				b = append(b, '0')
+			}
+			b = strconv.AppendInt(b, int64(offset), 10)
 		}
 
-		b = append(b, ':')
-		if offset < 10 {
-			b = append(b, '0')
+		if bc {
+			b = append(b, " BC"...)
 		}
-		b = strconv.AppendInt(b, int64(offset), 10)
-	}
-
-	if bc {
-		b = append(b, " BC"...)
 	}
 	return b
 }
