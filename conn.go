@@ -362,7 +362,7 @@ func network(o values) (string, string) {
 		return "unix", sockPath
 	}
 
-	return "tcp", host + ":" + o.Get("port")
+	return "tcp", net.JoinHostPort(host, o.Get("port"))
 }
 
 type values map[string]string
