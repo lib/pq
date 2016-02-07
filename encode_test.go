@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -270,24 +271,24 @@ func TestInfinityTimestamp(t *testing.T) {
 	var err error
 	var resultT time.Time
 
-	expectedError := fmt.Errorf(`sql: Scan error on column index 0: unsupported driver -> Scan pair: []uint8 -> *time.Time`)
+	expectedErrorStrPrefix := `sql: Scan error on column index 0: unsupported`
 	type testCases []struct {
-		Query       string
-		Param       string
-		ExpectedErr error
-		ExpectedVal interface{}
+		Query                string
+		Param                string
+		ExpectedErrStrPrefix string
+		ExpectedVal          interface{}
 	}
 	tc := testCases{
-		{"SELECT $1::timestamp", "-infinity", expectedError, "-infinity"},
-		{"SELECT $1::timestamptz", "-infinity", expectedError, "-infinity"},
-		{"SELECT $1::timestamp", "infinity", expectedError, "infinity"},
-		{"SELECT $1::timestamptz", "infinity", expectedError, "infinity"},
+		{"SELECT $1::timestamp", "-infinity", expectedErrorStrPrefix, "-infinity"},
+		{"SELECT $1::timestamptz", "-infinity", expectedErrorStrPrefix, "-infinity"},
+		{"SELECT $1::timestamp", "infinity", expectedErrorStrPrefix, "infinity"},
+		{"SELECT $1::timestamptz", "infinity", expectedErrorStrPrefix, "infinity"},
 	}
 	// try to assert []byte to time.Time
 	for _, q := range tc {
 		err = db.QueryRow(q.Query, q.Param).Scan(&resultT)
-		if err.Error() != q.ExpectedErr.Error() {
-			t.Errorf("Scanning -/+infinity, expected error, %q, got %q", q.ExpectedErr, err)
+		if !strings.HasPrefix(err.Error(), q.ExpectedErrStrPrefix) {
+			t.Errorf("Scanning -/+infinity, expected error to have prefix %q, got %q", q.ExpectedErrStrPrefix, err)
 		}
 	}
 	// yield []byte
