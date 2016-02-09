@@ -259,7 +259,7 @@ const (
  * driver will decode Postgres' "-infinity" and "infinity" for "timestamp",
  * "timestamp with time zone" and "date" types to the predefined minimum and
  * maximum times, respectively.  When encoding time.Time values, any time which
- * equals or preceeds the predefined minimum time will be encoded to
+ * equals or precedes the predefined minimum time will be encoded to
  * "-infinity".  Any values at or past the maximum time will similarly be
  * encoded to "infinity".
  *
