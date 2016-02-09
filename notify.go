@@ -446,7 +446,7 @@ func (l *Listener) NotificationChannel() <-chan *Notification {
 }
 
 // Listen starts listening for notifications on a channel.  Calls to this
-// function will block until an acknowledgement has been received from the
+// function will block until an acknowledgment has been received from the
 // server.  Note that Listener automatically re-establishes the connection
 // after connection loss, so this function may block indefinitely if the
 // connection can not be re-established.
