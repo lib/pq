@@ -614,8 +614,6 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 	defer cn.errRecover(&err)
 
-	st := &stmt{cn: cn, name: ""}
-
 	b := cn.writeBuf('Q')
 	b.string(q)
 	cn.send(b)
@@ -634,10 +632,7 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 			}
 			if res == nil {
 				res = &rows{
-					cn:       cn,
-					colNames: st.colNames,
-					colTyps:  st.colTyps,
-					colFmts:  st.colFmts,
+					cn: cn,
 				}
 			}
 			res.done = true
