@@ -72,31 +72,38 @@ var timeTests = []struct {
 	{"123456-02-03 04:05:06.1", time.Date(123456, time.February, 3, 4, 5, 6, 100000000, time.FixedZone("", 0))},
 }
 
-// Helper function for the two tests below
-func tryParse(str string) (t time.Time, err error) {
-	defer func() {
-		if p := recover(); p != nil {
-			err = fmt.Errorf("%v", p)
-			return
-		}
-	}()
-	i := parseTs(nil, str)
-	t, ok := i.(time.Time)
-	if !ok {
-		err = fmt.Errorf("Not a time.Time type, got %#v", i)
-	}
-	return
-}
-
 // Test that parsing the string results in the expected value.
 func TestParseTs(t *testing.T) {
 	for i, tt := range timeTests {
-		val, err := tryParse(tt.str)
+		val, err := ParseTimestamp(nil, tt.str)
 		if err != nil {
 			t.Errorf("%d: got error: %v", i, err)
 		} else if val.String() != tt.timeval.String() {
 			t.Errorf("%d: expected to parse %q into %q; got %q",
 				i, tt.str, tt.timeval, val)
+		}
+	}
+}
+
+var timeErrorTests = []string{
+	"2001",
+	"2001-2-03",
+	"2001-02-3",
+	"2001-02-03 ",
+	"2001-02-03 04",
+	"2001-02-03 04:",
+	"2001-02-03 04:05",
+	"2001-02-03 04:05:",
+	"2001-02-03 04:05:6",
+	"2001-02-03 04:05:06.123 B",
+}
+
+// Test that parsing the string results in an error.
+func TestParseTsErrors(t *testing.T) {
+	for i, tt := range timeErrorTests {
+		_, err := ParseTimestamp(nil, tt)
+		if err == nil {
+			t.Errorf("%d: expected an error from parsing: %v", i, tt)
 		}
 	}
 }
@@ -118,7 +125,7 @@ func TestEncodeAndParseTs(t *testing.T) {
 			continue
 		}
 
-		val, err := tryParse(dbstr)
+		val, err := ParseTimestamp(nil, dbstr)
 		if err != nil {
 			t.Errorf("%d: could not parse value %q: %s", i, dbstr, err)
 			continue
