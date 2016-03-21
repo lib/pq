@@ -17,6 +17,7 @@ import (
 	"os/user"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -1281,6 +1282,10 @@ func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) {
 	}, nil
 }
 
+func (st *stmt) ColumnConverter(idx int) driver.ValueConverter {
+	return converter{}
+}
+
 func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
 	if st.cn.bad {
 		return nil, driver.ErrBadConn
@@ -1844,4 +1849,35 @@ func alnumLowerASCII(ch rune) rune {
 		return ch
 	}
 	return -1 // discard
+}
+
+type converter struct{}
+
+func (converter) ConvertValue(v interface{}) (driver.Value, error) {
+	if driver.IsValue(v) {
+		return v, nil
+	}
+
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Ptr:
+		// indirect pointers
+		if rv.IsNil() {
+			return nil, nil
+		}
+		return driver.DefaultParameterConverter.ConvertValue(rv.Elem().Interface())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int(), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32:
+		return int64(rv.Uint()), nil
+	case reflect.Uint64:
+		u64 := rv.Uint()
+		if u64 >= 1<<63 {
+			return fmt.Sprintf("%d", u64), nil
+		}
+		return int64(u64), nil
+	case reflect.Float32, reflect.Float64:
+		return rv.Float(), nil
+	}
+	return nil, fmt.Errorf("unsupported type %T, a %s", v, rv.Kind())
 }
