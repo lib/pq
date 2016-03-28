@@ -433,7 +433,7 @@ func ParseTimestamp(currentLocation *time.Location, str string) (time.Time, erro
 }
 
 // formatTs formats t into a format postgres understands.
-func formatTs(t time.Time) (b []byte) {
+func formatTs(t time.Time) []byte {
 	if infinityTsEnabled {
 		// t <= -infinity : ! (t > -infinity)
 		if !t.After(infinityTsNegative) {
@@ -444,6 +444,11 @@ func formatTs(t time.Time) (b []byte) {
 			return []byte("infinity")
 		}
 	}
+	return FormatTimestamp(t)
+}
+
+// FormatTimestamp formats t into Postgres' text format for timestamps.
+func FormatTimestamp(t time.Time) []byte {
 	// Need to send dates before 0001 A.D. with " BC" suffix, instead of the
 	// minus sign preferred by Go.
 	// Beware, "0000" in ISO is "1 BC", "-0001" is "2 BC" and so on
@@ -453,7 +458,7 @@ func formatTs(t time.Time) (b []byte) {
 		t = t.AddDate((-t.Year())*2+1, 0, 0)
 		bc = true
 	}
-	b = []byte(t.Format(time.RFC3339Nano))
+	b := []byte(t.Format(time.RFC3339Nano))
 
 	_, offset := t.Zone()
 	offset = offset % 60
