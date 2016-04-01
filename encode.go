@@ -336,6 +336,10 @@ func parseTs(currentLocation *time.Location, str string) interface{} {
 	return t
 }
 
+// ParseTimestamp parses Postgres' text format. It returns a time.Time in
+// currentLocation iff that time's offset agrees with the offset sent from the
+// Postgres server. Otherwise, ParseTimestamp returns a time.Time with the
+// fixed offset offset provided by the Postgres server.
 func ParseTimestamp(currentLocation *time.Location, str string) (time.Time, error) {
 	p := timestampParser{}
 
