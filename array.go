@@ -2,6 +2,7 @@ package pq
 
 import (
 	"bytes"
+	"database/sql"
 	"database/sql/driver"
 	"encoding/hex"
 	"fmt"
@@ -12,9 +13,10 @@ import (
 
 var typeByteSlice = reflect.TypeOf([]byte{})
 var typeDriverValuer = reflect.TypeOf((*driver.Valuer)(nil)).Elem()
+var typeSqlScanner = reflect.TypeOf((*sql.Scanner)(nil)).Elem()
 
-// ArrayDelimiter may be optionally implemented by driver.Valuer to override the
-// array delimiter used by GenericArray.
+// ArrayDelimiter may be optionally implemented by driver.Valuer or sql.Scanner
+// to override the array delimiter used by GenericArray.
 type ArrayDelimiter interface {
 	// ArrayDelimiter returns the delimiter character(s) for this element's type.
 	ArrayDelimiter() string
@@ -223,9 +225,125 @@ func (a Float64Array) Value() (driver.Value, error) {
 	return "{}", nil
 }
 
-// GenericArray implements the driver.Valuer interface for an array or slice
-// of any dimension.
+// GenericArray implements the driver.Valuer and sql.Scanner interfaces for
+// an array or slice of any dimension.
 type GenericArray struct{ A interface{} }
+
+func (GenericArray) evaluateDestination(rt reflect.Type) (reflect.Type, func([]byte, reflect.Value) error, string) {
+	var assign func([]byte, reflect.Value) error
+	var del = ","
+
+	// TODO calculate the assign function for other types
+	// TODO repeat this section on the element type of arrays or slices (multidimensional)
+	{
+		if reflect.PtrTo(rt).Implements(typeSqlScanner) {
+			// dest is always addressable because it is an element of a slice.
+			assign = func(src []byte, dest reflect.Value) (err error) {
+				ss := dest.Addr().Interface().(sql.Scanner)
+				if src == nil {
+					err = ss.Scan(nil)
+				} else {
+					err = ss.Scan(src)
+				}
+				return
+			}
+			goto FoundType
+		}
+
+		assign = func([]byte, reflect.Value) error {
+			return fmt.Errorf("pq: scanning to %s is not implemented; only sql.Scanner", rt)
+		}
+	}
+
+FoundType:
+
+	if ad, ok := reflect.Zero(rt).Interface().(ArrayDelimiter); ok {
+		del = ad.ArrayDelimiter()
+	}
+
+	return rt, assign, del
+}
+
+// Scan implements the sql.Scanner interface.
+func (a GenericArray) Scan(src interface{}) error {
+	dpv := reflect.ValueOf(a.A)
+	switch {
+	case dpv.Kind() != reflect.Ptr:
+		return fmt.Errorf("pq: destination %T is not a pointer to array or slice", a.A)
+	case dpv.IsNil():
+		return fmt.Errorf("pq: destination %T is nil", a.A)
+	}
+
+	dv := dpv.Elem()
+	switch dv.Kind() {
+	case reflect.Slice:
+	case reflect.Array:
+	default:
+		return fmt.Errorf("pq: destination %T is not a pointer to array or slice", a.A)
+	}
+
+	switch src := src.(type) {
+	case []byte:
+		return a.scanBytes(src, dv)
+	case string:
+		return a.scanBytes([]byte(src), dv)
+	}
+
+	return fmt.Errorf("pq: cannot convert %T to %s", src, dv.Type())
+}
+
+func (a GenericArray) scanBytes(src []byte, dv reflect.Value) error {
+	dtype, assign, del := a.evaluateDestination(dv.Type().Elem())
+	dims, elems, err := parseArray(src, []byte(del))
+	if err != nil {
+		return err
+	}
+
+	// TODO allow multidimensional
+
+	if len(dims) > 1 {
+		return fmt.Errorf("pq: scanning from multidimensional ARRAY%s is not implemented",
+			strings.Replace(fmt.Sprint(dims), " ", "][", -1))
+	}
+
+	// Treat a zero-dimensional array like an array with a single dimension of zero.
+	if len(dims) == 0 {
+		dims = append(dims, 0)
+	}
+
+	for i, rt := 0, dv.Type(); i < len(dims); i, rt = i+1, rt.Elem() {
+		switch rt.Kind() {
+		case reflect.Slice:
+		case reflect.Array:
+			if rt.Len() != dims[i] {
+				return fmt.Errorf("pq: cannot convert ARRAY%s to %s",
+					strings.Replace(fmt.Sprint(dims), " ", "][", -1), dv.Type())
+			}
+		default:
+			// TODO handle multidimensional
+		}
+	}
+
+	values := reflect.MakeSlice(reflect.SliceOf(dtype), len(elems), len(elems))
+	for i, e := range elems {
+		if err := assign(e, values.Index(i)); err != nil {
+			return fmt.Errorf("pq: parsing array element index %d: %v", i, err)
+		}
+	}
+
+	// TODO handle multidimensional
+
+	switch dv.Kind() {
+	case reflect.Slice:
+		dv.Set(values.Slice(0, dims[0]))
+	case reflect.Array:
+		for i := 0; i < dims[0]; i++ {
+			dv.Index(i).Set(values.Index(i))
+		}
+	}
+
+	return nil
+}
 
 // Value implements the driver.Valuer interface.
 func (a GenericArray) Value() (driver.Value, error) {
