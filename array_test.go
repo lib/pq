@@ -1029,6 +1029,31 @@ func BenchmarkGenericArrayValueStrings(b *testing.B) {
 	}
 }
 
+func TestArrayScanBackend(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	for _, tt := range []struct {
+		s string
+		d sql.Scanner
+		e interface{}
+	}{
+		{`ARRAY[true, false]`, new(BoolArray), &BoolArray{true, false}},
+		{`ARRAY[E'\\xdead', E'\\xbeef']`, new(ByteaArray), &ByteaArray{{'\xDE', '\xAD'}, {'\xBE', '\xEF'}}},
+		{`ARRAY[1.2, 3.4]`, new(Float64Array), &Float64Array{1.2, 3.4}},
+		{`ARRAY[1, 2, 3]`, new(Int64Array), &Int64Array{1, 2, 3}},
+		{`ARRAY['a', E'\\b', 'c"', 'd,e']`, new(StringArray), &StringArray{`a`, `\b`, `c"`, `d,e`}},
+	} {
+		err := db.QueryRow(`SELECT ` + tt.s).Scan(tt.d)
+		if err != nil {
+			t.Errorf("Expected no error when scanning %s into %T, got %v", tt.s, tt.d, err)
+		}
+		if !reflect.DeepEqual(tt.d, tt.e) {
+			t.Errorf("Expected %v when scanning %s into %T, got %v", tt.e, tt.s, tt.d, tt.d)
+		}
+	}
+}
+
 func TestArrayValueBackend(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
