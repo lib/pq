@@ -84,6 +84,81 @@ func TestParseArrayError(t *testing.T) {
 	}
 }
 
+func TestArrayScanner(t *testing.T) {
+	var s sql.Scanner
+
+	s = Array(&[]bool{})
+	if _, ok := s.(*BoolArray); !ok {
+		t.Errorf("Expected *BoolArray, got %T", s)
+	}
+
+	s = Array(&[]float64{})
+	if _, ok := s.(*Float64Array); !ok {
+		t.Errorf("Expected *Float64Array, got %T", s)
+	}
+
+	s = Array(&[]int64{})
+	if _, ok := s.(*Int64Array); !ok {
+		t.Errorf("Expected *Int64Array, got %T", s)
+	}
+
+	s = Array(&[]string{})
+	if _, ok := s.(*StringArray); !ok {
+		t.Errorf("Expected *StringArray, got %T", s)
+	}
+
+	for _, tt := range []interface{}{
+		&[]sql.Scanner{},
+		&[][]bool{},
+		&[][]float64{},
+		&[][]int64{},
+		&[][]string{},
+	} {
+		s = Array(tt)
+		if _, ok := s.(GenericArray); !ok {
+			t.Errorf("Expected GenericArray for %T, got %T", tt, s)
+		}
+	}
+}
+
+func TestArrayValuer(t *testing.T) {
+	var v driver.Valuer
+
+	v = Array([]bool{})
+	if _, ok := v.(*BoolArray); !ok {
+		t.Errorf("Expected *BoolArray, got %T", v)
+	}
+
+	v = Array([]float64{})
+	if _, ok := v.(*Float64Array); !ok {
+		t.Errorf("Expected *Float64Array, got %T", v)
+	}
+
+	v = Array([]int64{})
+	if _, ok := v.(*Int64Array); !ok {
+		t.Errorf("Expected *Int64Array, got %T", v)
+	}
+
+	v = Array([]string{})
+	if _, ok := v.(*StringArray); !ok {
+		t.Errorf("Expected *StringArray, got %T", v)
+	}
+
+	for _, tt := range []interface{}{
+		nil,
+		[]driver.Value{},
+		[][]bool{},
+		[][]float64{},
+		[][]int64{},
+		[][]string{},
+	} {
+		v = Array(tt)
+		if _, ok := v.(GenericArray); !ok {
+			t.Errorf("Expected GenericArray for %T, got %T", tt, v)
+		}
+	}
+}
+
 func TestBoolArrayScanUnsupported(t *testing.T) {
 	var arr BoolArray
 	err := arr.Scan(1)

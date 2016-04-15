@@ -15,6 +15,41 @@ var typeByteSlice = reflect.TypeOf([]byte{})
 var typeDriverValuer = reflect.TypeOf((*driver.Valuer)(nil)).Elem()
 var typeSqlScanner = reflect.TypeOf((*sql.Scanner)(nil)).Elem()
 
+// Array returns the optimal driver.Valuer and sql.Scanner for an array or
+// slice of any dimension.
+//
+// For example:
+//  db.Query(`SELECT * FROM t WHERE id = ANY($1)`, pq.Array([]int{235, 401}))
+//
+//  var x []sql.NullInt64
+//  db.QueryRow('SELECT ARRAY[235, 401]').Scan(pq.Array(&x))
+func Array(a interface{}) interface {
+	driver.Valuer
+	sql.Scanner
+} {
+	switch a := a.(type) {
+	case []bool:
+		return (*BoolArray)(&a)
+	case []float64:
+		return (*Float64Array)(&a)
+	case []int64:
+		return (*Int64Array)(&a)
+	case []string:
+		return (*StringArray)(&a)
+
+	case *[]bool:
+		return (*BoolArray)(a)
+	case *[]float64:
+		return (*Float64Array)(a)
+	case *[]int64:
+		return (*Int64Array)(a)
+	case *[]string:
+		return (*StringArray)(a)
+	}
+
+	return GenericArray{a}
+}
+
 // ArrayDelimiter may be optionally implemented by driver.Valuer or sql.Scanner
 // to override the array delimiter used by GenericArray.
 type ArrayDelimiter interface {
