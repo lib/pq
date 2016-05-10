@@ -136,6 +136,7 @@ func TestOpenURL(t *testing.T) {
 }
 
 const pgpass_file = "/tmp/pqgotest_pgpass"
+
 func TestPgpass(t *testing.T) {
 	testAssert := func(conninfo string, expected string, reason string) {
 		conn, err := openTestConnConninfo(conninfo)
