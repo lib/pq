@@ -59,7 +59,7 @@ env:
     - PGVERSION=9.0 PQTEST_BINARY_PARAMETERS=no
 
 script:
- - go test -v ./...
+ - go vet ./... && go test -v ./...
 
 before_script:
  - psql -c 'create database pqgotest' -U postgres
