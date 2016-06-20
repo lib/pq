@@ -56,10 +56,13 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 }
 
 func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid, f format) interface{} {
-	if f == formatBinary {
+	switch f {
+	case formatBinary:
 		return binaryDecode(parameterStatus, s, typ)
-	} else {
+	case formatText:
 		return textDecode(parameterStatus, s, typ)
+	default:
+		panic("not reached")
 	}
 }
 
@@ -195,7 +198,7 @@ func mustParse(f string, typ oid.Oid, s []byte) time.Time {
 	return t
 }
 
-var invalidTimestampErr = errors.New("invalid timestamp")
+var errInvalidTimestamp = errors.New("invalid timestamp")
 
 type timestampParser struct {
 	err error
@@ -206,7 +209,7 @@ func (p *timestampParser) expect(str, char string, pos int) {
 		return
 	}
 	if pos+1 > len(str) {
-		p.err = invalidTimestampErr
+		p.err = errInvalidTimestamp
 		return
 	}
 	if c := str[pos : pos+1]; c != char && p.err == nil {
@@ -219,7 +222,7 @@ func (p *timestampParser) mustAtoi(str string, begin int, end int) int {
 		return 0
 	}
 	if begin < 0 || end < 0 || begin > end || end > len(str) {
-		p.err = invalidTimestampErr
+		p.err = errInvalidTimestamp
 		return 0
 	}
 	result, err := strconv.Atoi(str[begin:end])
@@ -242,7 +245,7 @@ type locationCache struct {
 // about 5% speed could be gained by putting the cache in the connection and
 // losing the mutex, at the cost of a small amount of memory and a somewhat
 // significant increase in code complexity.
-var globalLocationCache *locationCache = newLocationCache()
+var globalLocationCache = newLocationCache()
 
 func newLocationCache() *locationCache {
 	return &locationCache{cache: make(map[int]*time.Location)}
@@ -272,26 +275,26 @@ const (
 	infinityTsNegativeMustBeSmaller = "pq: infinity timestamp: negative value must be smaller (before) than positive"
 )
 
-/*
- * If EnableInfinityTs is not called, "-infinity" and "infinity" will return
- * []byte("-infinity") and []byte("infinity") respectively, and potentially
- * cause error "sql: Scan error on column index 0: unsupported driver -> Scan pair: []uint8 -> *time.Time",
- * when scanning into a time.Time value.
- *
- * Once EnableInfinityTs has been called, all connections created using this
- * driver will decode Postgres' "-infinity" and "infinity" for "timestamp",
- * "timestamp with time zone" and "date" types to the predefined minimum and
- * maximum times, respectively.  When encoding time.Time values, any time which
- * equals or precedes the predefined minimum time will be encoded to
- * "-infinity".  Any values at or past the maximum time will similarly be
- * encoded to "infinity".
- *
- *
- * If EnableInfinityTs is called with negative >= positive, it will panic.
- * Calling EnableInfinityTs after a connection has been established results in
- * undefined behavior.  If EnableInfinityTs is called more than once, it will
- * panic.
- */
+// EnableInfinityTs controls the handling of Postgres' "-infinity" and
+// "infinity" "timestamp"s.
+//
+// If EnableInfinityTs is not called, "-infinity" and "infinity" will return
+// []byte("-infinity") and []byte("infinity") respectively, and potentially
+// cause error "sql: Scan error on column index 0: unsupported driver -> Scan
+// pair: []uint8 -> *time.Time", when scanning into a time.Time value.
+//
+// Once EnableInfinityTs has been called, all connections created using this
+// driver will decode Postgres' "-infinity" and "infinity" for "timestamp",
+// "timestamp with time zone" and "date" types to the predefined minimum and
+// maximum times, respectively.  When encoding time.Time values, any time which
+// equals or precedes the predefined minimum time will be encoded to
+// "-infinity".  Any values at or past the maximum time will similarly be
+// encoded to "infinity".
+//
+// If EnableInfinityTs is called with negative >= positive, it will panic.
+// Calling EnableInfinityTs after a connection has been established results in
+// undefined behavior.  If EnableInfinityTs is called more than once, it will
+// panic.
 func EnableInfinityTs(negative time.Time, positive time.Time) {
 	if infinityTsEnabled {
 		panic(infinityTsEnabledAlready)
