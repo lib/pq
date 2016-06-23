@@ -56,10 +56,13 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 }
 
 func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid, f format) interface{} {
-	if f == formatBinary {
+	switch f {
+	case formatBinary:
 		return binaryDecode(parameterStatus, s, typ)
-	} else {
+	case formatText:
 		return textDecode(parameterStatus, s, typ)
+	default:
+		panic("not reached")
 	}
 }
 
@@ -197,21 +200,21 @@ func mustParse(f string, typ oid.Oid, s []byte) time.Time {
 	return t
 }
 
-var invalidTimestampErr = errors.New("invalid timestamp")
+var errInvalidTimestamp = errors.New("invalid timestamp")
 
 type timestampParser struct {
 	err error
 }
 
-func (p *timestampParser) expect(str, char string, pos int) {
+func (p *timestampParser) expect(str string, char byte, pos int) {
 	if p.err != nil {
 		return
 	}
 	if pos+1 > len(str) {
-		p.err = invalidTimestampErr
+		p.err = errInvalidTimestamp
 		return
 	}
-	if c := str[pos : pos+1]; c != char && p.err == nil {
+	if c := str[pos]; c != char && p.err == nil {
 		p.err = fmt.Errorf("expected '%v' at position %v; got '%v'", char, pos, c)
 	}
 }
@@ -221,7 +224,7 @@ func (p *timestampParser) mustAtoi(str string, begin int, end int) int {
 		return 0
 	}
 	if begin < 0 || end < 0 || begin > end || end > len(str) {
-		p.err = invalidTimestampErr
+		p.err = errInvalidTimestamp
 		return 0
 	}
 	result, err := strconv.Atoi(str[begin:end])
@@ -244,7 +247,7 @@ type locationCache struct {
 // about 5% speed could be gained by putting the cache in the connection and
 // losing the mutex, at the cost of a small amount of memory and a somewhat
 // significant increase in code complexity.
-var globalLocationCache *locationCache = newLocationCache()
+var globalLocationCache = newLocationCache()
 
 func newLocationCache() *locationCache {
 	return &locationCache{cache: make(map[int]*time.Location)}
@@ -274,26 +277,26 @@ const (
 	infinityTsNegativeMustBeSmaller = "pq: infinity timestamp: negative value must be smaller (before) than positive"
 )
 
-/*
- * If EnableInfinityTs is not called, "-infinity" and "infinity" will return
- * []byte("-infinity") and []byte("infinity") respectively, and potentially
- * cause error "sql: Scan error on column index 0: unsupported driver -> Scan pair: []uint8 -> *time.Time",
- * when scanning into a time.Time value.
- *
- * Once EnableInfinityTs has been called, all connections created using this
- * driver will decode Postgres' "-infinity" and "infinity" for "timestamp",
- * "timestamp with time zone" and "date" types to the predefined minimum and
- * maximum times, respectively.  When encoding time.Time values, any time which
- * equals or precedes the predefined minimum time will be encoded to
- * "-infinity".  Any values at or past the maximum time will similarly be
- * encoded to "infinity".
- *
- *
- * If EnableInfinityTs is called with negative >= positive, it will panic.
- * Calling EnableInfinityTs after a connection has been established results in
- * undefined behavior.  If EnableInfinityTs is called more than once, it will
- * panic.
- */
+// EnableInfinityTs controls the handling of Postgres' "-infinity" and
+// "infinity" "timestamp"s.
+//
+// If EnableInfinityTs is not called, "-infinity" and "infinity" will return
+// []byte("-infinity") and []byte("infinity") respectively, and potentially
+// cause error "sql: Scan error on column index 0: unsupported driver -> Scan
+// pair: []uint8 -> *time.Time", when scanning into a time.Time value.
+//
+// Once EnableInfinityTs has been called, all connections created using this
+// driver will decode Postgres' "-infinity" and "infinity" for "timestamp",
+// "timestamp with time zone" and "date" types to the predefined minimum and
+// maximum times, respectively.  When encoding time.Time values, any time which
+// equals or precedes the predefined minimum time will be encoded to
+// "-infinity".  Any values at or past the maximum time will similarly be
+// encoded to "infinity".
+//
+// If EnableInfinityTs is called with negative >= positive, it will panic.
+// Calling EnableInfinityTs after a connection has been established results in
+// undefined behavior.  If EnableInfinityTs is called more than once, it will
+// panic.
 func EnableInfinityTs(negative time.Time, positive time.Time) {
 	if infinityTsEnabled {
 		panic(infinityTsEnabledAlready)
@@ -350,18 +353,18 @@ func ParseTimestamp(currentLocation *time.Location, str string) (time.Time, erro
 	year := p.mustAtoi(str, 0, monSep)
 	daySep := monSep + 3
 	month := p.mustAtoi(str, monSep+1, daySep)
-	p.expect(str, "-", daySep)
+	p.expect(str, '-', daySep)
 	timeSep := daySep + 3
 	day := p.mustAtoi(str, daySep+1, timeSep)
 
 	var hour, minute, second int
 	if len(str) > monSep+len("01-01")+1 {
-		p.expect(str, " ", timeSep)
+		p.expect(str, ' ', timeSep)
 		minSep := timeSep + 3
-		p.expect(str, ":", minSep)
+		p.expect(str, ':', minSep)
 		hour = p.mustAtoi(str, timeSep+1, minSep)
 		secSep := minSep + 3
-		p.expect(str, ":", secSep)
+		p.expect(str, ':', secSep)
 		minute = p.mustAtoi(str, minSep+1, secSep)
 		secEnd := secSep + 3
 		second = p.mustAtoi(str, secSep+1, secEnd)
@@ -375,7 +378,7 @@ func ParseTimestamp(currentLocation *time.Location, str string) (time.Time, erro
 	nanoSec := 0
 	tzOff := 0
 
-	if remainderIdx+1 <= len(str) && str[remainderIdx:remainderIdx+1] == "." {
+	if remainderIdx < len(str) && str[remainderIdx] == '.' {
 		fracStart := remainderIdx + 1
 		fracOff := strings.IndexAny(str[fracStart:], "-+ ")
 		if fracOff < 0 {
@@ -386,25 +389,26 @@ func ParseTimestamp(currentLocation *time.Location, str string) (time.Time, erro
 
 		remainderIdx += fracOff + 1
 	}
-	if tzStart := remainderIdx; tzStart+1 <= len(str) && (str[tzStart:tzStart+1] == "-" || str[tzStart:tzStart+1] == "+") {
+	if tzStart := remainderIdx; tzStart < len(str) && (str[tzStart] == '-' || str[tzStart] == '+') {
 		// time zone separator is always '-' or '+' (UTC is +00)
 		var tzSign int
-		if c := str[tzStart : tzStart+1]; c == "-" {
+		switch c := str[tzStart]; c {
+		case '-':
 			tzSign = -1
-		} else if c == "+" {
+		case '+':
 			tzSign = +1
-		} else {
+		default:
 			return time.Time{}, fmt.Errorf("expected '-' or '+' at position %v; got %v", tzStart, c)
 		}
 		tzHours := p.mustAtoi(str, tzStart+1, tzStart+3)
 		remainderIdx += 3
 		var tzMin, tzSec int
-		if tzStart+4 <= len(str) && str[tzStart+3:tzStart+4] == ":" {
-			tzMin = p.mustAtoi(str, tzStart+4, tzStart+6)
+		if remainderIdx < len(str) && str[remainderIdx] == ':' {
+			tzMin = p.mustAtoi(str, remainderIdx+1, remainderIdx+3)
 			remainderIdx += 3
 		}
-		if tzStart+7 <= len(str) && str[tzStart+6:tzStart+7] == ":" {
-			tzSec = p.mustAtoi(str, tzStart+7, tzStart+9)
+		if remainderIdx < len(str) && str[remainderIdx] == ':' {
+			tzSec = p.mustAtoi(str, remainderIdx+1, remainderIdx+3)
 			remainderIdx += 3
 		}
 		tzOff = tzSign * ((tzHours * 60 * 60) + (tzMin * 60) + tzSec)
