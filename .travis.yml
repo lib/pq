@@ -21,11 +21,11 @@ env:
     - PGVERSION=9.0
 
 before_install:
-  - .travis.sh postgresql_uninstall
-  - .travis.sh pgdg_repository
-  - .travis.sh postgresql_install
-  - .travis.sh postgresql_configure
-  - .travis.sh client_configure
+  - ./.travis.sh postgresql_uninstall
+  - ./.travis.sh pgdg_repository
+  - ./.travis.sh postgresql_install
+  - ./.travis.sh postgresql_configure
+  - ./.travis.sh client_configure
   - go get golang.org/x/tools/cmd/goimports
 
 before_script:
