@@ -70,6 +70,10 @@ func TestParseArrayError(t *testing.T) {
 		{`{,}`, "unexpected ',' at offset 1"},
 		{`{,x}`, "unexpected ',' at offset 1"},
 		{`{x,}`, "unexpected '}' at offset 3"},
+		{`{x,{`, "unexpected '{' at offset 3"},
+		{`{x},`, "unexpected ',' at offset 3"},
+		{`{x}}`, "unexpected '}' at offset 3"},
+		{`{{x}`, "expected '}' at offset 4"},
 		{`{""x}`, "unexpected 'x' at offset 3"},
 		{`{{a},{b,c}}`, "multidimensional arrays must have elements with matching dimensions"},
 	} {
