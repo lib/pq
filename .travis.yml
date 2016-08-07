@@ -21,12 +21,12 @@ env:
     - PGVERSION=9.0
 
 before_install:
+  - ./.travis.sh golang_tools
   - ./.travis.sh postgresql_uninstall
   - ./.travis.sh pgdg_repository
   - ./.travis.sh postgresql_install
   - ./.travis.sh postgresql_configure
   - ./.travis.sh client_configure
-  - go get golang.org/x/tools/cmd/goimports
 
 before_script:
   - createdb pqgotest
@@ -34,8 +34,7 @@ before_script:
   - createuser -DRS pqgosslcert
 
 script:
-  - >
-    goimports -d -e $(find -name '*.go') | awk '{ print } END { exit NR == 0 ? 0 : 1 }'
+  - ./.travis.sh golang_formatting
   - go vet ./...
   - PQTEST_BINARY_PARAMETERS=no  go test -v ./...
   - PQTEST_BINARY_PARAMETERS=yes go test -v ./...
