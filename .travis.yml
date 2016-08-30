@@ -3,7 +3,7 @@ language: go
 go:
   - 1.5
   - 1.6
-  - tip
+  - 1.7
 
 env:
   global:
