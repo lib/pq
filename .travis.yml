@@ -6,6 +6,8 @@ go:
   - 1.7
   - tip
 
+sudo: true
+
 env:
   global:
     - PGUSER=postgres
