@@ -71,10 +71,19 @@ func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) inter
 	case oid.T_bytea:
 		return s
 	case oid.T_int8:
+		if len(s) != 8 {
+			errorf("decode: expected 8 bytes for int8, got %d", len(s))
+		}
 		return int64(binary.BigEndian.Uint64(s))
 	case oid.T_int4:
+		if len(s) != 4 {
+			errorf("decode: expected 4 bytes for int4, got %d", len(s))
+		}
 		return int64(int32(binary.BigEndian.Uint32(s)))
 	case oid.T_int2:
+		if len(s) != 2 {
+			errorf("decode: expected 2 bytes for int2, got %d", len(s))
+		}
 		return int64(int16(binary.BigEndian.Uint16(s)))
 
 	default:
