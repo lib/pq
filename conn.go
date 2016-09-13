@@ -751,9 +751,9 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 func (cn *conn) Close() (err error) {
 	defer cn.errRecover(&err)
 
-	// Don't go through send(); ListenerConn relies on us not scribbling on the
-	// scratch buffer of this connection.
 	if cn.c != nil {
+		// Don't go through send(); ListenerConn relies on us not scribbling on the
+		// scratch buffer of this connection.
 		err := cn.sendSimpleMessage('X')
 		if err != nil {
 			return err
