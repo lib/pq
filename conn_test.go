@@ -385,9 +385,15 @@ func TestEmptyQuery(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	_, err := db.Exec("")
+	res, err := db.Exec("")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := res.RowsAffected(); err != errNoRowsAffected {
+		t.Fatalf("expected %s, got %v", errNoRowsAffected, err)
+	}
+	if _, err := res.LastInsertId(); err != errNoLastInsertId {
+		t.Fatalf("expected %s, got %v", errNoLastInsertId, err)
 	}
 	rows, err := db.Query("")
 	if err != nil {
@@ -411,9 +417,15 @@ func TestEmptyQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = stmt.Exec()
+	res, err = stmt.Exec()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := res.RowsAffected(); err != errNoRowsAffected {
+		t.Fatalf("expected %s, got %v", errNoRowsAffected, err)
+	}
+	if _, err := res.LastInsertId(); err != errNoLastInsertId {
+		t.Fatalf("expected %s, got %v", errNoLastInsertId, err)
 	}
 	rows, err = stmt.Query()
 	if err != nil {
