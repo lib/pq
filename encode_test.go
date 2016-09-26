@@ -31,6 +31,29 @@ func TestScanNilTimestamp(t *testing.T) {
 	}
 }
 
+func TestScanBytea(t *testing.T) {
+	var nb NullBytea
+	bytes := []byte("byteatest")
+	nb.Scan(bytes)
+	if !nb.Valid {
+		t.Errorf("Expected Valid=false")
+	}
+	for i, elem := range nb.Bytea {
+		if bytes[i] != elem {
+			t.Errorf("Bytea value mismatch")
+			break
+		}
+	}
+}
+
+func TestScanNilBytea(t *testing.T) {
+	var nb NullBytea
+	nb.Scan(nil)
+	if nb.Valid {
+		t.Errorf("Expected Valid=false")
+	}
+}
+
 var timeTests = []struct {
 	str     string
 	timeval time.Time
