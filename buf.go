@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/lib/pq/oid"
+	"github.com/sendwithus/pq/oid"
 )
 
 type readBuf []byte
