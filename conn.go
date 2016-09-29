@@ -22,7 +22,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/lib/pq/oid"
+	"github.com/sendwithus/pq/oid"
 )
 
 // Common error types
