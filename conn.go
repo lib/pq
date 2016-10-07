@@ -32,6 +32,10 @@ var (
 	ErrSSLNotSupported           = errors.New("pq: SSL is not enabled on the server")
 	ErrSSLKeyHasWorldPermissions = errors.New("pq: Private key file has group or world access. Permissions should be u=rw (0600) or less.")
 	ErrCouldNotDetectUsername    = errors.New("pq: Could not detect default username. Please provide one explicitly.")
+
+	errUnexpectedReady = errors.New("unexpected ReadyForQuery")
+	errNoRowsAffected  = errors.New("no RowsAffected available after the empty statement")
+	errNoLastInsertId  = errors.New("no LastInsertId available after the empty statement")
 )
 
 type drv struct{}
@@ -598,11 +602,16 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 			res, commandTag = cn.parseComplete(r.string())
 		case 'Z':
 			cn.processReadyForQuery(r)
+			if res == nil && err == nil {
+				err = errUnexpectedReady
+			}
 			// done
 			return
 		case 'E':
 			err = parseError(r)
-		case 'T', 'D', 'I':
+		case 'I':
+			res = emptyRows
+		case 'T', 'D':
 			// ignore any results
 		default:
 			cn.bad = true
@@ -664,6 +673,20 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 			errorf("unknown response for simple query: %q", t)
 		}
 	}
+}
+
+type noRows struct{}
+
+var emptyRows noRows
+
+var _ driver.Result = noRows{}
+
+func (noRows) LastInsertId() (int64, error) {
+	return 0, errNoLastInsertId
+}
+
+func (noRows) RowsAffected() (int64, error) {
+	return 0, errNoRowsAffected
 }
 
 // Decides which column formats to use for a prepared statement.  The input is
@@ -1720,6 +1743,9 @@ func (cn *conn) readExecuteResponse(protocolState string) (res driver.Result, co
 			res, commandTag = cn.parseComplete(r.string())
 		case 'Z':
 			cn.processReadyForQuery(r)
+			if res == nil && err == nil {
+				err = errUnexpectedReady
+			}
 			return res, commandTag, err
 		case 'E':
 			err = parseError(r)
@@ -1727,6 +1753,9 @@ func (cn *conn) readExecuteResponse(protocolState string) (res driver.Result, co
 			if err != nil {
 				cn.bad = true
 				errorf("unexpected %q after error %s", t, err)
+			}
+			if t == 'I' {
+				res = emptyRows
 			}
 			// ignore any results
 		default:
