@@ -772,19 +772,24 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 }
 
 func (cn *conn) Close() (err error) {
-	if cn.bad {
-		return driver.ErrBadConn
-	}
 	defer cn.errRecover(&err)
 
-	// Don't go through send(); ListenerConn relies on us not scribbling on the
-	// scratch buffer of this connection.
-	err = cn.sendSimpleMessage('X')
-	if err != nil {
-		return err
+	if cn.c != nil {
+		// Don't go through send(); ListenerConn relies on us not scribbling on the
+		// scratch buffer of this connection.
+		err := cn.sendSimpleMessage('X')
+		if err != nil {
+			return err
+		}
+
+		err = cn.c.Close()
+		cn.c = nil
+		if err != nil {
+			return err
+		}
 	}
 
-	return cn.c.Close()
+	return nil
 }
 
 // Implement the "Queryer" interface
