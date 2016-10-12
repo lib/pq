@@ -772,10 +772,17 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 }
 
 func (cn *conn) Close() (err error) {
-	if cn.bad {
-		return driver.ErrBadConn
-	}
+	// Skip cn.bad return here because we always want to close a connection.
 	defer cn.errRecover(&err)
+
+	// Ensure that cn.c.Close is always run. Since error handling is done with
+	// panics and cn.errRecover, the Close must be in a defer.
+	defer func() {
+		cerr := cn.c.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
 
 	// Don't go through send(); ListenerConn relies on us not scribbling on the
 	// scratch buffer of this connection.
@@ -784,7 +791,7 @@ func (cn *conn) Close() (err error) {
 		return err
 	}
 
-	return cn.c.Close()
+	return
 }
 
 // Implement the "Queryer" interface
