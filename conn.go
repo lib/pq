@@ -621,7 +621,7 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 }
 
 func (cn *conn) simpleQuery(q string) (res *rows, err error) {
-	defer cn.errRecover(&err)
+	defer cn.errRecoverWithQuery(&err, q)
 
 	b := cn.writeBuf('Q')
 	b.string(q)
@@ -763,7 +763,7 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
-	defer cn.errRecover(&err)
+	defer cn.errRecoverWithQuery(&err, q)
 
 	if len(q) >= 4 && strings.EqualFold(q[:4], "COPY") {
 		return cn.prepareCopyIn(q)
@@ -794,7 +794,7 @@ func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err err
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
-	defer cn.errRecover(&err)
+	defer cn.errRecoverWithQuery(&err, query)
 
 	// Check to see if we can use the "simpleQuery" interface, which is
 	// *much* faster than going through prepare/exec
@@ -828,7 +828,7 @@ func (cn *conn) Exec(query string, args []driver.Value) (res driver.Result, err 
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
-	defer cn.errRecover(&err)
+	defer cn.errRecoverWithQuery(&err, query)
 
 	// Check to see if we can use the "simpleExec" interface, which is
 	// *much* faster than going through prepare/exec
