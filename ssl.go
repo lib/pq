@@ -48,6 +48,7 @@ func ssl(o values) func(net.Conn) net.Conn {
 
 	sslClientCertificates(&tlsConf, o)
 	sslCertificateAuthority(&tlsConf, o)
+	sslRenegotiation(&tlsConf)
 
 	return func(conn net.Conn) net.Conn {
 		client := tls.Client(conn, &tlsConf)
