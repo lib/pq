@@ -64,50 +64,37 @@ func ssl(o values) func(net.Conn) net.Conn {
 // in the user's home directory. The configured files must exist and have
 // the correct permissions.
 func sslClientCertificates(tlsConf *tls.Config, o values) {
-	var missingOk bool
-
 	sslkey := o.Get("sslkey")
 	sslcert := o.Get("sslcert")
-	if sslkey != "" && sslcert != "" {
-		// If the user has set an sslkey and sslcert, they *must* exist.
-		missingOk = false
-	} else {
-		// Automatically load certificates from ~/.postgresql.
-		user, err := user.Current()
+
+	var cinfo, kinfo os.FileInfo
+	var err error
+
+	if sslcert != "" && sslkey != "" {
+		// Check that both files exist. Note that we don't do any more extensive
+		// checks than this (such as checking that the paths aren't directories);
+		// LoadX509KeyPair() will take care of the rest.
+		cinfo, err = os.Stat(sslcert)
 		if err != nil {
-			// user.Current() might fail when cross-compiling.  We have to
-			// ignore the error and continue without client certificates, since
-			// we wouldn't know where to load them from.
-			return
+			panic(err)
 		}
 
-		sslkey = filepath.Join(user.HomeDir, ".postgresql", "postgresql.key")
-		sslcert = filepath.Join(user.HomeDir, ".postgresql", "postgresql.crt")
-		missingOk = true
+		kinfo, err = os.Stat(sslkey)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		// Automatically find certificates from ~/.postgresql
+		sslcert, sslkey, cinfo, kinfo = sslHomeCertificates()
+
+		if cinfo == nil || kinfo == nil {
+			// No certificates to load
+			return
+		}
 	}
 
-	// Check that both files exist, and report the error or stop, depending on
-	// which behaviour we want.  Note that we don't do any more extensive
-	// checks than this (such as checking that the paths aren't directories);
-	// LoadX509KeyPair() will take care of the rest.
-	keyfinfo, err := os.Stat(sslkey)
-	if err != nil && missingOk {
-		return
-	} else if err != nil {
-		panic(err)
-	}
-	_, err = os.Stat(sslcert)
-	if err != nil && missingOk {
-		return
-	} else if err != nil {
-		panic(err)
-	}
-
-	// If we got this far, the key file must also have the correct permissions
-	kmode := keyfinfo.Mode()
-	if kmode != kmode&0600 {
-		panic(ErrSSLKeyHasWorldPermissions)
-	}
+	// The files must also have the correct permissions
+	sslCertificatePermissions(cinfo, kinfo)
 
 	cert, err := tls.LoadX509KeyPair(sslcert, sslkey)
 	if err != nil {
@@ -131,6 +118,34 @@ func sslCertificateAuthority(tlsConf *tls.Config, o values) {
 			errorf("couldn't parse pem in sslrootcert")
 		}
 	}
+}
+
+// sslHomeCertificates returns the path and stats of certificates in the current
+// user's home directory.
+func sslHomeCertificates() (cert, key string, cinfo, kinfo os.FileInfo) {
+	user, err := user.Current()
+
+	if err != nil {
+		// user.Current() might fail when cross-compiling. We have to ignore the
+		// error and continue without client certificates, since we wouldn't know
+		// from where to load them.
+		return
+	}
+
+	cert = filepath.Join(user.HomeDir, ".postgresql", "postgresql.crt")
+	key = filepath.Join(user.HomeDir, ".postgresql", "postgresql.key")
+
+	cinfo, err = os.Stat(cert)
+	if err != nil {
+		cinfo = nil
+	}
+
+	kinfo, err = os.Stat(key)
+	if err != nil {
+		kinfo = nil
+	}
+
+	return
 }
 
 // sslVerifyCertificateAuthority carries out a TLS handshake to the server and
