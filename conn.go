@@ -119,6 +119,9 @@ type conn struct {
 	// Whether to always send []byte parameters over as binary.  Enables single
 	// round-trip mode for non-prepared Query calls.
 	binaryParameters bool
+
+	// If true this connection is in the middle of a COPY
+	inCopy bool
 }
 
 // Handle driver-side settings in parsed connection string.
@@ -766,7 +769,11 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 	defer cn.errRecover(&err)
 
 	if len(q) >= 4 && strings.EqualFold(q[:4], "COPY") {
-		return cn.prepareCopyIn(q)
+		s, err := cn.prepareCopyIn(q)
+		if err == nil {
+			cn.inCopy = true
+		}
+		return s, err
 	}
 	return cn.prepareTo(q, cn.gname()), nil
 }
@@ -793,6 +800,9 @@ func (cn *conn) Close() (err error) {
 func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err error) {
 	if cn.bad {
 		return nil, driver.ErrBadConn
+	}
+	if cn.inCopy {
+		return nil, errCopyInProgress
 	}
 	defer cn.errRecover(&err)
 
