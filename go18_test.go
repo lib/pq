@@ -87,7 +87,7 @@ func TestContextCancel(t *testing.T) {
 	}
 
 	// Context is already canceled, so error should come before execution.
-	if _, err := db.ExecContext(ctx, "select pg_sleep(1)"); err == nil {
+	if _, err := db.QueryContext(ctx, "select pg_sleep(1)"); err == nil {
 		t.Fatal("expected error")
 	} else if err.Error() != "context canceled" {
 		t.Fatalf("unexpected error: %s", err)

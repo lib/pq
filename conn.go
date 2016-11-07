@@ -808,7 +808,11 @@ func (cn *conn) Close() (err error) {
 }
 
 // Implement the "Queryer" interface
-func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err error) {
+func (cn *conn) Query(query string, args []driver.Value) (driver.Rows, error) {
+	return cn.query(context.Background(), query, args)
+}
+
+func (cn *conn) query(ctx context.Context, query string, args []driver.Value) (_ driver.Rows, err error) {
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
@@ -817,31 +821,44 @@ func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err err
 	}
 	defer cn.errRecover(&err)
 
+	var r *rows
+
 	// Check to see if we can use the "simpleQuery" interface, which is
 	// *much* faster than going through prepare/exec
 	if len(args) == 0 {
-		return cn.simpleQuery(query)
-	}
-
-	if cn.binaryParameters {
+		r, err = cn.simpleQuery(query)
+	} else if cn.binaryParameters {
 		cn.sendBinaryModeQuery(query, args)
 
 		cn.readParseResponse()
 		cn.readBindResponse()
-		rows := &rows{cn: cn}
-		rows.colNames, rows.colFmts, rows.colTyps = cn.readPortalDescribeResponse()
+		r = &rows{cn: cn}
+		r.colNames, r.colFmts, r.colTyps = cn.readPortalDescribeResponse()
 		cn.postExecuteWorkaround()
-		return rows, nil
 	} else {
 		st := cn.prepareTo(query, "")
 		st.exec(args)
-		return &rows{
+		r = &rows{
 			cn:       cn,
 			colNames: st.colNames,
 			colTyps:  st.colTyps,
 			colFmts:  st.colFmts,
-		}, nil
+		}
 	}
+
+	if r != nil && ctx.Done() != context.Background().Done() {
+		closed := make(chan struct{})
+		go func() {
+			select {
+			case <-ctx.Done():
+				cn.Cancel()
+			case <-closed:
+			}
+		}()
+		r.close = closed
+	}
+
+	return r, err
 }
 
 // Implement the optional "Execer" interface for one-shot queries
@@ -1330,6 +1347,7 @@ func (cn *conn) parseComplete(commandTag string) (driver.Result, string) {
 
 type rows struct {
 	cn       *conn
+	close    chan struct{}
 	colNames []string
 	colTyps  []oid.Oid
 	colFmts  []format
@@ -1338,6 +1356,9 @@ type rows struct {
 }
 
 func (rs *rows) Close() error {
+	if rs.close != nil {
+		defer close(rs.close)
+	}
 	// no need to look at cn.bad as Next() will
 	for {
 		err := rs.Next(nil)
