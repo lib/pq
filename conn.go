@@ -2,6 +2,7 @@ package pq
 
 import (
 	"bufio"
+	"context"
 	"crypto/md5"
 	"database/sql"
 	"database/sql/driver"
@@ -98,6 +99,14 @@ type conn struct {
 	namei     int
 	scratch   [512]byte
 	txnStatus transactionStatus
+
+	// Save connection arguments to use during CancelRequest.
+	dialer Dialer
+	opts   values
+
+	// Cancellation key data for use with CancelRequest messages.
+	processID int
+	secretKey int
 
 	parameterStatus parameterStatus
 
@@ -307,7 +316,10 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 		}
 	}
 
-	cn := &conn{}
+	cn := &conn{
+		opts:   o,
+		dialer: d,
+	}
 	err = cn.handleDriverSettings(o)
 	if err != nil {
 		return nil, err
@@ -833,18 +845,34 @@ func (cn *conn) Query(query string, args []driver.Value) (_ driver.Rows, err err
 }
 
 // Implement the optional "Execer" interface for one-shot queries
-func (cn *conn) Exec(query string, args []driver.Value) (res driver.Result, err error) {
+func (cn *conn) Exec(query string, args []driver.Value) (driver.Result, error) {
+	return cn.exec(context.Background(), query, args)
+}
+
+func (cn *conn) exec(ctx context.Context, query string, args []driver.Value) (res driver.Result, err error) {
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
 	defer cn.errRecover(&err)
 
+	if done := ctx.Done(); done != nil {
+		closed := make(chan struct{})
+		defer close(closed)
+		go func() {
+			select {
+			case <-done:
+				cn.Cancel()
+			case <-closed:
+			}
+		}()
+	}
+
 	// Check to see if we can use the "simpleExec" interface, which is
 	// *much* faster than going through prepare/exec
 	if len(args) == 0 {
 		// ignore commandTag, our caller doesn't care
-		r, _, err := cn.simpleExec(query)
-		return r, err
+		res, _, err = cn.simpleExec(query)
+		return res, err
 	}
 
 	if cn.binaryParameters {
@@ -861,11 +889,11 @@ func (cn *conn) Exec(query string, args []driver.Value) (res driver.Result, err 
 		// time, or else value-based selectivity estimates cannot be
 		// used.
 		st := cn.prepareTo(query, "")
-		r, err := st.Exec(args)
+		res, err = st.Exec(args)
 		if err != nil {
 			panic(err)
 		}
-		return r, err
+		return res, err
 	}
 }
 
@@ -1074,6 +1102,7 @@ func (cn *conn) startup(o values) {
 		t, r := cn.recv()
 		switch t {
 		case 'K':
+			cn.processBackendKeyData(r)
 		case 'S':
 			cn.processParameterStatus(r)
 		case 'R':
@@ -1511,6 +1540,31 @@ func (cn *conn) readReadyForQuery() {
 		cn.bad = true
 		errorf("unexpected message %q; expected ReadyForQuery", t)
 	}
+}
+
+func (c *conn) processBackendKeyData(r *readBuf) {
+	c.processID = r.int32()
+	c.secretKey = r.int32()
+}
+
+func (cn *conn) Cancel() {
+	var err error
+	can := &conn{}
+	can.c, err = dial(cn.dialer, cn.opts)
+	if err != nil {
+		return
+	}
+	can.ssl(cn.opts)
+
+	defer can.errRecover(&err)
+
+	w := can.writeBuf(0)
+	w.int32(80877102) // cancel request code
+	w.int32(cn.processID)
+	w.int32(cn.secretKey)
+
+	can.sendStartupPacket(w)
+	_ = can.c.Close()
 }
 
 func (cn *conn) readParseResponse() {

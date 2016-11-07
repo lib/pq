@@ -2,7 +2,10 @@
 
 package pq
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestMultipleSimpleQuery(t *testing.T) {
 	db := openTestConn(t)
@@ -64,5 +67,29 @@ func TestMultipleSimpleQuery(t *testing.T) {
 	}
 	if rows.NextResultSet() {
 		t.Fatal("unexpected result set")
+	}
+}
+
+func TestContextCancel(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Delay execution for just a bit until db.ExecContext has begun.
+	go cancel()
+
+	// Not canceled until after the exec has started.
+	if _, err := db.ExecContext(ctx, "select pg_sleep(1)"); err == nil {
+		t.Fatal("expected error")
+	} else if err.Error() != "pq: canceling statement due to user request" {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// Context is already canceled, so error should come before execution.
+	if _, err := db.ExecContext(ctx, "select pg_sleep(1)"); err == nil {
+		t.Fatal("expected error")
+	} else if err.Error() != "context canceled" {
+		t.Fatalf("unexpected error: %s", err)
 	}
 }
