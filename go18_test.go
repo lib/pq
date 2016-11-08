@@ -3,8 +3,9 @@
 package pq
 
 import (
-	"context"
 	"testing"
+
+	"golang.org/x/net/context"
 )
 
 func TestMultipleSimpleQuery(t *testing.T) {
@@ -70,7 +71,7 @@ func TestMultipleSimpleQuery(t *testing.T) {
 	}
 }
 
-func TestContextCancel(t *testing.T) {
+func TestContextCancelQuery(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
@@ -88,6 +89,41 @@ func TestContextCancel(t *testing.T) {
 
 	// Context is already canceled, so error should come before execution.
 	if _, err := db.QueryContext(ctx, "select pg_sleep(1)"); err == nil {
+		t.Fatal("expected error")
+	} else if err.Error() != "context canceled" {
+		t.Fatalf("unexpected error: %s", err)
+	}
+}
+
+func TestContextCancelBegin(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	tx, err := db.BeginContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Delay execution for just a bit until tx.Exec has begun.
+	go cancel()
+
+	// Not canceled until after the exec has started.
+	if _, err := tx.Exec("select pg_sleep(1)"); err == nil {
+		t.Fatal("expected error")
+	} else if err.Error() != "pq: canceling statement due to user request" {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// Transaction is canceled, so expect an error.
+	if _, err := tx.Query("select pg_sleep(1)"); err == nil {
+		t.Fatal("expected error")
+	} else if err.Error() != "pq: current transaction is aborted, commands ignored until end of transaction block" {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// Context is canceled, so cannot begin a transaction.
+	if _, err := db.BeginContext(ctx); err == nil {
 		t.Fatal("expected error")
 	} else if err.Error() != "context canceled" {
 		t.Fatalf("unexpected error: %s", err)

@@ -2,7 +2,6 @@ package pq
 
 import (
 	"bufio"
-	"context"
 	"crypto/md5"
 	"database/sql"
 	"database/sql/driver"
@@ -19,6 +18,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"golang.org/x/net/context"
 
 	"github.com/lib/pq/oid"
 )
@@ -99,6 +100,7 @@ type conn struct {
 	namei     int
 	scratch   [512]byte
 	txnStatus transactionStatus
+	txnClose  chan struct{}
 
 	// Save connection arguments to use during CancelRequest.
 	dialer Dialer
@@ -520,6 +522,10 @@ func (cn *conn) checkIsInTransaction(intxn bool) {
 }
 
 func (cn *conn) Begin() (_ driver.Tx, err error) {
+	return cn.begin(context.Background())
+}
+
+func (cn *conn) begin(ctx context.Context) (_ driver.Tx, err error) {
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
@@ -538,10 +544,29 @@ func (cn *conn) Begin() (_ driver.Tx, err error) {
 		cn.bad = true
 		return nil, fmt.Errorf("unexpected transaction status %v", cn.txnStatus)
 	}
+	if ctx.Done() != context.Background().Done() {
+		closed := make(chan struct{})
+		cn.txnClose = closed
+		go func() {
+			select {
+			case <-ctx.Done():
+				cn.Cancel()
+			case <-closed:
+			}
+		}()
+	}
 	return cn, nil
 }
 
+func (cn *conn) closeTxn() {
+	if cn.txnClose != nil {
+		close(cn.txnClose)
+		cn.txnClose = nil
+	}
+}
+
 func (cn *conn) Commit() (err error) {
+	defer cn.closeTxn()
 	if cn.bad {
 		return driver.ErrBadConn
 	}
@@ -577,6 +602,7 @@ func (cn *conn) Commit() (err error) {
 }
 
 func (cn *conn) Rollback() (err error) {
+	defer cn.closeTxn()
 	if cn.bad {
 		return driver.ErrBadConn
 	}
@@ -872,12 +898,12 @@ func (cn *conn) exec(ctx context.Context, query string, args []driver.Value) (re
 	}
 	defer cn.errRecover(&err)
 
-	if done := ctx.Done(); done != nil {
+	if ctx.Done() != context.Background().Done() {
 		closed := make(chan struct{})
 		defer close(closed)
 		go func() {
 			select {
-			case <-done:
+			case <-ctx.Done():
 				cn.Cancel()
 			case <-closed:
 			}

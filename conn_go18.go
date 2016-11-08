@@ -1,4 +1,5 @@
 // +build go1.8
+
 package pq
 
 import (
@@ -22,4 +23,9 @@ func (cn *conn) ExecContext(ctx context.Context, query string, args []driver.Nam
 		list[i] = nv.Value
 	}
 	return cn.exec(ctx, query, list)
+}
+
+// Implement the "ConnBeginContext" interface
+func (cn *conn) BeginContext(ctx context.Context) (_ driver.Tx, err error) {
+	return cn.begin(ctx)
 }
