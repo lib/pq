@@ -1493,3 +1493,59 @@ func TestQuoteIdentifier(t *testing.T) {
 		}
 	}
 }
+
+func TestRowsResultTag(t *testing.T) {
+	type ResultTag interface {
+		Result() driver.Result
+		Tag() string
+	}
+
+	tests := []struct {
+		query string
+		tag   string
+		ra    int64
+	}{
+		{
+			query: "CREATE TEMP TABLE temp (a int)",
+			tag:   "CREATE TABLE",
+		},
+		{
+			query: "INSERT INTO temp VALUES (1), (2)",
+			tag:   "INSERT",
+			ra:    2,
+		},
+		{
+			query: "SELECT 1",
+		},
+		// A SELECT anywhere should take precedent.
+		{
+			query: "SELECT 1; INSERT INTO temp VALUES (1), (2)",
+		},
+		{
+			query: "INSERT INTO temp VALUES (1), (2); SELECT 1",
+		},
+	}
+
+	conn, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	q := conn.(driver.Queryer)
+
+	for _, test := range tests {
+		if rows, err := q.Query(test.query, nil); err != nil {
+			t.Fatalf("%s: %s", test.query, err)
+		} else {
+			r := rows.(ResultTag)
+			if tag := r.Tag(); tag != test.tag {
+				t.Fatalf("%s: unexpected tag %q", test.query, tag)
+			}
+			res := r.Result()
+			if ra, _ := res.RowsAffected(); ra != test.ra {
+				t.Fatalf("%s: unexpected rows affected: %d", test.query, ra)
+			}
+			rows.Close()
+		}
+	}
+}
