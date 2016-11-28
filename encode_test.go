@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lib/pq/oid"
+	"reflect"
 )
 
 func TestScanTimestamp(t *testing.T) {
@@ -36,13 +37,10 @@ func TestScanBytea(t *testing.T) {
 	bytes := []byte("byteatest")
 	nb.Scan(bytes)
 	if !nb.Valid {
-		t.Errorf("Expected Valid=false")
+		t.Errorf("Expected Valid=true")
 	}
-	for i, elem := range nb.Bytea {
-		if bytes[i] != elem {
-			t.Errorf("Bytea value mismatch")
-			break
-		}
+	if !reflect.DeepEqual(bytes, nb.Bytea) {
+		t.Errorf("Expected %v, got %v", bytes, nb.Bytea)
 	}
 }
 
