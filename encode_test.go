@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/lib/pq/oid"
-	"reflect"
 )
 
 func TestScanTimestamp(t *testing.T) {
