@@ -14,7 +14,6 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
-	"os/user"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -1100,16 +1099,8 @@ func (cn *conn) setupSSLClientCertificates(tlsConf *tls.Config, o values) {
 		missingOk = false
 	} else {
 		// Automatically load certificates from ~/.postgresql.
-		user, err := user.Current()
-		if err != nil {
-			// user.Current() might fail when cross-compiling.  We have to
-			// ignore the error and continue without client certificates, since
-			// we wouldn't know where to load them from.
-			return
-		}
-
-		sslkey = filepath.Join(user.HomeDir, ".postgresql", "postgresql.key")
-		sslcert = filepath.Join(user.HomeDir, ".postgresql", "postgresql.crt")
+		sslkey = filepath.Join(homeDir, ".postgresql", "postgresql.key")
+		sslcert = filepath.Join(homeDir, ".postgresql", "postgresql.crt")
 		missingOk = true
 	}
 

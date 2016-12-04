@@ -6,6 +6,8 @@ import (
 	"syscall"
 )
 
+var homeDir = os.Getenv("HOMEDRIVE") + os.Getenv("HOMEPATH")
+
 // Perform Windows user name lookup identically to libpq.
 //
 // The PostgreSQL code makes use of the legacy Win32 function
