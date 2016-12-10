@@ -11,7 +11,7 @@ using this package directly. For example:
 	)
 
 	func main() {
-		db, err := sql.Open("postgres", "user=pqgotest dbname=pqgotest sslmode=verify-full")
+		db, err := sql.Open("lqm-postgres", "user=pqgotest dbname=pqgotest sslmode=verify-full")
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -23,7 +23,7 @@ using this package directly. For example:
 
 You can also connect to a database using a URL. For example:
 
-	db, err := sql.Open("postgres", "postgres://pqgotest:password@localhost/pqgotest?sslmode=verify-full")
+	db, err := sql.Open("lqm-postgres", "postgres://pqgotest:password@localhost/pqgotest?sslmode=verify-full")
 
 
 Connection String Parameters

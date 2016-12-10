@@ -44,7 +44,7 @@ func openTestConnConninfo(conninfo string) (*sql.DB, error) {
 		conninfo = conninfo + " binary_parameters=yes"
 	}
 
-	return sql.Open("postgres", conninfo)
+	return sql.Open("lqm-postgres", conninfo)
 }
 
 func openTestConn(t Fatalistic) *sql.DB {

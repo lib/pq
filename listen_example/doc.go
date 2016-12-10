@@ -72,7 +72,7 @@ mechanism to avoid polling the database while waiting for more work to arrive.
     func main() {
         var conninfo string = ""
 
-        db, err := sql.Open("postgres", conninfo)
+        db, err := sql.Open("lqm-postgres", conninfo)
         if err != nil {
             panic(err)
         }

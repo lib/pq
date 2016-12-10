@@ -45,7 +45,7 @@ func (d *drv) Open(name string) (driver.Conn, error) {
 }
 
 func init() {
-	sql.Register("postgres", &drv{})
+	sql.Register("lqm-postgres", &drv{})
 }
 
 type parameterStatus struct {
