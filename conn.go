@@ -22,7 +22,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/lib/pq/oid"
+	"github.com/sendwithus/pq/oid"
 )
 
 // Common error types
@@ -1032,6 +1032,16 @@ func (cn *conn) ssl(o values) {
 	default:
 		errorf(`unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`, mode)
 	}
+
+	switch o.Get("tls-renegotiation") {
+	case "RenegotiateNever":
+		tlsConf.Renegotiation = tls.RenegotiateNever
+	case "RenegotiateFreelyAsClient":
+		tlsConf.Renegotiation = tls.RenegotiateFreelyAsClient
+	case "RenegotiateOnceAsClient":
+		tlsConf.Renegotiation = tls.RenegotiateOnceAsClient
+	}
+	delete(o, "tls-renegotiation")
 
 	cn.setupSSLClientCertificates(&tlsConf, o)
 	cn.setupSSLCA(&tlsConf, o)
