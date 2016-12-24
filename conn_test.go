@@ -725,6 +725,14 @@ func TestErrorOnExec(t *testing.T) {
 		t.Fatalf("expected Error, got %#v", err)
 	} else if e.Code.Name() != "unique_violation" {
 		t.Fatalf("expected unique_violation, got %s (%+v)", e.Code.Name(), err)
+	} else if e.Constraint != "foo_pk" {
+		t.Fatalf("expected Constraint == foo_pk, got \"%s\" (%+v)", e.Constraint, err)
+	} else if e.Table != "foo" {
+		t.Fatalf("expected Table == foo, got \"%s\" (%+v)", e.Table, err)
+	} else if e.Column != "f1" {
+		t.Fatalf("expected Column == f1, got \"%s\" (%+v)", e.Column, err)
+	} else if e.Schema != "f1" {
+		t.Fatalf("expected Schema == pqgotest, got \"%s\" (%+v)", e.Schema, err)
 	}
 }
 
