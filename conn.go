@@ -715,6 +715,8 @@ func decideColumnFormats(colTyps []oid.Oid, forceText bool) (colFmts []format, c
 		case oid.T_int4:
 			fallthrough
 		case oid.T_int2:
+			fallthrough
+		case oid.T_uuid:
 			colFmts[i] = formatBinary
 			allText = false
 
