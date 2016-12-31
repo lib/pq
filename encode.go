@@ -77,13 +77,10 @@ func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) inter
 	case oid.T_int2:
 		return int64(int16(binary.BigEndian.Uint16(s)))
 	case oid.T_uuid:
-		b := make([]byte, 36)
-		b[8], b[13], b[18], b[23] = '-', '-', '-', '-'
-		hex.Encode(b[0:], s[0:4])
-		hex.Encode(b[9:], s[4:6])
-		hex.Encode(b[14:], s[6:8])
-		hex.Encode(b[19:], s[8:10])
-		hex.Encode(b[24:], s[10:16])
+		b, err := decodeUUIDBinary(s)
+		if err != nil {
+			panic(err)
+		}
 		return b
 
 	default:
