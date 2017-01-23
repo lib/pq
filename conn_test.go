@@ -1307,6 +1307,21 @@ func TestCommit(t *testing.T) {
 	}
 }
 
+func TestTransactionMultipleRequest(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	rows, err := db.Query("SELECT 1; BEGIN; SELECT 2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestErrorClass(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
