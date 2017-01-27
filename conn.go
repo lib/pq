@@ -19,8 +19,6 @@ import (
 	"time"
 	"unicode"
 
-	"golang.org/x/net/context"
-
 	"github.com/lib/pq/oid"
 )
 
@@ -100,7 +98,7 @@ type conn struct {
 	namei     int
 	scratch   [512]byte
 	txnStatus transactionStatus
-	txnClose  chan struct{}
+	txnClose  chan<- struct{}
 
 	// Save connection arguments to use during CancelRequest.
 	dialer Dialer
@@ -522,10 +520,10 @@ func (cn *conn) checkIsInTransaction(intxn bool) {
 }
 
 func (cn *conn) Begin() (_ driver.Tx, err error) {
-	return cn.begin(context.Background())
+	return cn.begin(background)
 }
 
-func (cn *conn) begin(ctx context.Context) (_ driver.Tx, err error) {
+func (cn *conn) begin(ctx contextInterface) (_ driver.Tx, err error) {
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
@@ -544,16 +542,8 @@ func (cn *conn) begin(ctx context.Context) (_ driver.Tx, err error) {
 		cn.bad = true
 		return nil, fmt.Errorf("unexpected transaction status %v", cn.txnStatus)
 	}
-	if ctx.Done() != context.Background().Done() {
-		closed := make(chan struct{})
-		cn.txnClose = closed
-		go func() {
-			select {
-			case <-ctx.Done():
-				cn.Cancel()
-			case <-closed:
-			}
-		}()
+	if ctx.Done() != nil {
+		cn.txnClose = watchCancel(ctx, cn.cancel)
 	}
 	return cn, nil
 }
@@ -835,10 +825,10 @@ func (cn *conn) Close() (err error) {
 
 // Implement the "Queryer" interface
 func (cn *conn) Query(query string, args []driver.Value) (driver.Rows, error) {
-	return cn.query(context.Background(), query, args)
+	return cn.query(background, query, args)
 }
 
-func (cn *conn) query(ctx context.Context, query string, args []driver.Value) (_ driver.Rows, err error) {
+func (cn *conn) query(ctx contextInterface, query string, args []driver.Value) (_ driver.Rows, err error) {
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
@@ -872,16 +862,8 @@ func (cn *conn) query(ctx context.Context, query string, args []driver.Value) (_
 		}
 	}
 
-	if r != nil && ctx.Done() != context.Background().Done() {
-		closed := make(chan struct{})
-		go func() {
-			select {
-			case <-ctx.Done():
-				cn.Cancel()
-			case <-closed:
-			}
-		}()
-		r.close = closed
+	if r != nil && ctx.Done() != nil {
+		r.close = watchCancel(ctx, cn.cancel)
 	}
 
 	return r, err
@@ -889,25 +871,18 @@ func (cn *conn) query(ctx context.Context, query string, args []driver.Value) (_
 
 // Implement the optional "Execer" interface for one-shot queries
 func (cn *conn) Exec(query string, args []driver.Value) (driver.Result, error) {
-	return cn.exec(context.Background(), query, args)
+	return cn.exec(background, query, args)
 }
 
-func (cn *conn) exec(ctx context.Context, query string, args []driver.Value) (res driver.Result, err error) {
+func (cn *conn) exec(ctx contextInterface, query string, args []driver.Value) (res driver.Result, err error) {
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
 	defer cn.errRecover(&err)
 
-	if ctx.Done() != context.Background().Done() {
-		closed := make(chan struct{})
+	if ctx.Done() != nil {
+		closed := watchCancel(ctx, cn.cancel)
 		defer close(closed)
-		go func() {
-			select {
-			case <-ctx.Done():
-				cn.Cancel()
-			case <-closed:
-			}
-		}()
 	}
 
 	// Check to see if we can use the "simpleExec" interface, which is
@@ -938,6 +913,18 @@ func (cn *conn) exec(ctx context.Context, query string, args []driver.Value) (re
 		}
 		return res, err
 	}
+}
+
+func watchCancel(ctx contextInterface, cancel func()) chan<- struct{} {
+	closed := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancel()
+		case <-closed:
+		}
+	}()
+	return closed
 }
 
 func (cn *conn) send(m *writeBuf) {
@@ -1373,7 +1360,7 @@ func (cn *conn) parseComplete(commandTag string) (driver.Result, string) {
 
 type rows struct {
 	cn       *conn
-	close    chan struct{}
+	close    chan<- struct{}
 	colNames []string
 	colTyps  []oid.Oid
 	colFmts  []format
@@ -1594,7 +1581,7 @@ func (c *conn) processBackendKeyData(r *readBuf) {
 	c.secretKey = r.int32()
 }
 
-func (cn *conn) Cancel() {
+func (cn *conn) cancel() {
 	var err error
 	can := &conn{}
 	can.c, err = dial(cn.dialer, cn.opts)

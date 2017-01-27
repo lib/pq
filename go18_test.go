@@ -3,9 +3,9 @@
 package pq
 
 import (
+	"context"
+	"database/sql"
 	"testing"
-
-	"golang.org/x/net/context"
 )
 
 func TestMultipleSimpleQuery(t *testing.T) {
@@ -100,7 +100,7 @@ func TestContextCancelBegin(t *testing.T) {
 	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	tx, err := db.BeginContext(ctx)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,12 +118,12 @@ func TestContextCancelBegin(t *testing.T) {
 	// Transaction is canceled, so expect an error.
 	if _, err := tx.Query("select pg_sleep(1)"); err == nil {
 		t.Fatal("expected error")
-	} else if err.Error() != "pq: current transaction is aborted, commands ignored until end of transaction block" {
+	} else if err != sql.ErrTxDone {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
 	// Context is canceled, so cannot begin a transaction.
-	if _, err := db.BeginContext(ctx); err == nil {
+	if _, err := db.BeginTx(ctx, nil); err == nil {
 		t.Fatal("expected error")
 	} else if err.Error() != "context canceled" {
 		t.Fatalf("unexpected error: %s", err)

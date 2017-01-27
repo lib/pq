@@ -5,6 +5,7 @@ package pq
 import (
 	"context"
 	"database/sql/driver"
+	"errors"
 )
 
 // Implement the "QueryerContext" interface
@@ -26,6 +27,12 @@ func (cn *conn) ExecContext(ctx context.Context, query string, args []driver.Nam
 }
 
 // Implement the "ConnBeginContext" interface
-func (cn *conn) BeginContext(ctx context.Context) (_ driver.Tx, err error) {
+func (cn *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	if opts.Isolation != 0 {
+		return nil, errors.New("isolation levels not supported")
+	}
+	if opts.ReadOnly {
+		return nil, errors.New("read-only transactions not supported")
+	}
 	return cn.begin(ctx)
 }
