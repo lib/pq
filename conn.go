@@ -520,10 +520,6 @@ func (cn *conn) checkIsInTransaction(intxn bool) {
 }
 
 func (cn *conn) Begin() (_ driver.Tx, err error) {
-	return cn.begin(background)
-}
-
-func (cn *conn) begin(ctx contextInterface) (_ driver.Tx, err error) {
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
@@ -541,9 +537,6 @@ func (cn *conn) begin(ctx contextInterface) (_ driver.Tx, err error) {
 	if cn.txnStatus != txnStatusIdleInTransaction {
 		cn.bad = true
 		return nil, fmt.Errorf("unexpected transaction status %v", cn.txnStatus)
-	}
-	if ctx.Done() != nil {
-		cn.txnClose = watchCancel(ctx, cn.cancel)
 	}
 	return cn, nil
 }
@@ -825,10 +818,10 @@ func (cn *conn) Close() (err error) {
 
 // Implement the "Queryer" interface
 func (cn *conn) Query(query string, args []driver.Value) (driver.Rows, error) {
-	return cn.query(background, query, args)
+	return cn.query(query, args)
 }
 
-func (cn *conn) query(ctx contextInterface, query string, args []driver.Value) (_ driver.Rows, err error) {
+func (cn *conn) query(query string, args []driver.Value) (_ *rows, err error) {
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
@@ -837,53 +830,39 @@ func (cn *conn) query(ctx contextInterface, query string, args []driver.Value) (
 	}
 	defer cn.errRecover(&err)
 
-	var r *rows
-
 	// Check to see if we can use the "simpleQuery" interface, which is
 	// *much* faster than going through prepare/exec
 	if len(args) == 0 {
-		r, err = cn.simpleQuery(query)
-	} else if cn.binaryParameters {
+		return cn.simpleQuery(query)
+	}
+
+	if cn.binaryParameters {
 		cn.sendBinaryModeQuery(query, args)
 
 		cn.readParseResponse()
 		cn.readBindResponse()
-		r = &rows{cn: cn}
-		r.colNames, r.colFmts, r.colTyps = cn.readPortalDescribeResponse()
+		rows := &rows{cn: cn}
+		rows.colNames, rows.colFmts, rows.colTyps = cn.readPortalDescribeResponse()
 		cn.postExecuteWorkaround()
+		return rows, nil
 	} else {
 		st := cn.prepareTo(query, "")
 		st.exec(args)
-		r = &rows{
+		return &rows{
 			cn:       cn,
 			colNames: st.colNames,
 			colTyps:  st.colTyps,
 			colFmts:  st.colFmts,
-		}
+		}, nil
 	}
-
-	if r != nil && ctx.Done() != nil {
-		r.close = watchCancel(ctx, cn.cancel)
-	}
-
-	return r, err
 }
 
 // Implement the optional "Execer" interface for one-shot queries
-func (cn *conn) Exec(query string, args []driver.Value) (driver.Result, error) {
-	return cn.exec(background, query, args)
-}
-
-func (cn *conn) exec(ctx contextInterface, query string, args []driver.Value) (res driver.Result, err error) {
+func (cn *conn) Exec(query string, args []driver.Value) (res driver.Result, err error) {
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
 	defer cn.errRecover(&err)
-
-	if ctx.Done() != nil {
-		closed := watchCancel(ctx, cn.cancel)
-		defer close(closed)
-	}
 
 	// Check to see if we can use the "simpleExec" interface, which is
 	// *much* faster than going through prepare/exec
@@ -913,18 +892,6 @@ func (cn *conn) exec(ctx contextInterface, query string, args []driver.Value) (r
 		}
 		return res, err
 	}
-}
-
-func watchCancel(ctx contextInterface, cancel func()) chan<- struct{} {
-	closed := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			cancel()
-		case <-closed:
-		}
-	}()
-	return closed
 }
 
 func (cn *conn) send(m *writeBuf) {
@@ -1579,26 +1546,6 @@ func (cn *conn) readReadyForQuery() {
 func (c *conn) processBackendKeyData(r *readBuf) {
 	c.processID = r.int32()
 	c.secretKey = r.int32()
-}
-
-func (cn *conn) cancel() {
-	var err error
-	can := &conn{}
-	can.c, err = dial(cn.dialer, cn.opts)
-	if err != nil {
-		return
-	}
-	can.ssl(cn.opts)
-
-	defer can.errRecover(&err)
-
-	w := can.writeBuf(0)
-	w.int32(80877102) // cancel request code
-	w.int32(cn.processID)
-	w.int32(cn.secretKey)
-
-	can.sendStartupPacket(w)
-	_ = can.c.Close()
 }
 
 func (cn *conn) readParseResponse() {

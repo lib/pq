@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 )
 
 func TestMultipleSimpleQuery(t *testing.T) {
@@ -71,17 +72,47 @@ func TestMultipleSimpleQuery(t *testing.T) {
 	}
 }
 
-func TestContextCancelQuery(t *testing.T) {
+func TestContextCancelExec(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Delay execution for just a bit until db.ExecContext has begun.
-	go cancel()
+	go func() {
+		time.Sleep(time.Millisecond * 10)
+		cancel()
+	}()
 
 	// Not canceled until after the exec has started.
 	if _, err := db.ExecContext(ctx, "select pg_sleep(1)"); err == nil {
+		t.Fatal("expected error")
+	} else if err.Error() != "pq: canceling statement due to user request" {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// Context is already canceled, so error should come before execution.
+	if _, err := db.ExecContext(ctx, "select pg_sleep(1)"); err == nil {
+		t.Fatal("expected error")
+	} else if err.Error() != "context canceled" {
+		t.Fatalf("unexpected error: %s", err)
+	}
+}
+
+func TestContextCancelQuery(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Delay execution for just a bit until db.QueryContext has begun.
+	go func() {
+		time.Sleep(time.Millisecond * 10)
+		cancel()
+	}()
+
+	// Not canceled until after the exec has started.
+	if _, err := db.QueryContext(ctx, "select pg_sleep(1)"); err == nil {
 		t.Fatal("expected error")
 	} else if err.Error() != "pq: canceling statement due to user request" {
 		t.Fatalf("unexpected error: %s", err)
@@ -106,7 +137,10 @@ func TestContextCancelBegin(t *testing.T) {
 	}
 
 	// Delay execution for just a bit until tx.Exec has begun.
-	go cancel()
+	go func() {
+		time.Sleep(time.Millisecond * 10)
+		cancel()
+	}()
 
 	// Not canceled until after the exec has started.
 	if _, err := tx.Exec("select pg_sleep(1)"); err == nil {
