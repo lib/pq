@@ -1549,3 +1549,24 @@ func TestRowsResultTag(t *testing.T) {
 		}
 	}
 }
+
+func TestIntegerArray(t *testing.T) {
+	db, err := sql.Open("postgres", cs)
+	if err != nil {
+		t.Error(err)
+	}
+	rows, err := db.Query("SELECT num,'{}'::bigint[] FROM  generate_series(1, 600) num")
+	if err != nil {
+		t.Error(err)
+	}
+	var id uint64
+	//var rulearr string
+	//var subjectarr []int8
+	var subjectarr string
+	for rows.Next() {
+		err := rows.Scan(&id, &subjectarr)
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
