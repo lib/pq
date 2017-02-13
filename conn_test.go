@@ -1524,7 +1524,30 @@ func TestRowsResultTag(t *testing.T) {
 		{
 			query: "INSERT INTO temp VALUES (1), (2); SELECT 1",
 		},
+		// Multiple statements that don't return rows should return the last tag.
+		{
+			query: "CREATE TEMP TABLE t (a int); DROP TABLE t",
+			tag:   "DROP TABLE",
+		},
+		// Ensure a rows-returning query in any position among various tags-returing
+		// statements will prefer the rows.
+		{
+			query: "SELECT 1; CREATE TEMP TABLE t (a int); DROP TABLE t",
+		},
+		{
+			query: "CREATE TEMP TABLE t (a int); SELECT 1; DROP TABLE t",
+		},
+		{
+			query: "CREATE TEMP TABLE t (a int); DROP TABLE t; SELECT 1",
+		},
+		// Verify that an no-results query doesn't set the tag.
+		{
+			query: "CREATE TEMP TABLE t (a int); SELECT 1 WHERE FALSE; DROP TABLE t;",
+		},
 	}
+
+	// If this is the only test run, this will correct the connection string.
+	openTestConn(t).Close()
 
 	conn, err := Open("")
 	if err != nil {
