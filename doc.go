@@ -128,7 +128,7 @@ This package returns the following types for values from the PostgreSQL backend:
 
 	- integer types smallint, integer, and bigint are returned as int64
 	- floating-point types real and double precision are returned as float64
-	- character types char, varchar, and text are returned as string
+	- character types char, varchar, text, and uuid are returned as string
 	- temporal types date, time, timetz, timestamp, and timestamptz are returned as time.Time
 	- the boolean type is returned as bool
 	- the bytea type is returned as []byte
