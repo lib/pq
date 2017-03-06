@@ -686,17 +686,28 @@ func TestCloseBadConn(t *testing.T) {
 	if err := cn.Close(); err != nil {
 		t.Fatal(err)
 	}
+
+	// During the Go 1.9 cycle, https://github.com/golang/go/commit/3792db5
+	// changed this error from
+	//
+	// net.errClosing = errors.New("use of closed network connection")
+	//
+	// to
+	//
+	// internal/poll.ErrClosing = errors.New("use of closed file or network connection")
+	const errClosing = "use of closed"
+
 	// Verify write after closing fails.
 	if _, err := nc.Write(nil); err == nil {
 		t.Fatal("expected error")
-	} else if !strings.Contains(err.Error(), "use of closed network connection") {
-		t.Fatalf("expected use of closed network connection error, got %s", err)
+	} else if !strings.Contains(err.Error(), errClosing) {
+		t.Fatalf("expected %s error, got %s", errClosing, err)
 	}
 	// Verify second close fails.
 	if err := cn.Close(); err == nil {
 		t.Fatal("expected error")
-	} else if !strings.Contains(err.Error(), "use of closed network connection") {
-		t.Fatalf("expected use of closed network connection error, got %s", err)
+	} else if !strings.Contains(err.Error(), errClosing) {
+		t.Fatalf("expected %s error, got %s", errClosing, err)
 	}
 }
 
