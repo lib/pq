@@ -128,6 +128,7 @@ type conn struct {
 
 	// If true this connection is in the middle of a COPY
 	inCopy bool
+	gss    gssctx
 }
 
 // Handle driver-side settings in parsed connection string.
@@ -261,6 +262,7 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	// N.B.: Extra float digits should be set to 3, but that breaks
 	// Postgres 8.4 and older, where the max is 2.
 	o.Set("extra_float_digits", "2")
+	o.Set("krbsrvname", "postgres")
 	for k, v := range parseEnviron(os.Environ()) {
 		o.Set(k, v)
 	}
@@ -1072,6 +1074,8 @@ func isDriverSetting(key string) bool {
 		return true
 	case "binary_parameters":
 		return true
+	case "krbsrvname":
+		return true
 
 	default:
 		return false
@@ -1150,6 +1154,8 @@ func (cn *conn) auth(r *readBuf, o values) {
 		if r.int32() != 0 {
 			errorf("unexpected authentication response: %q", t)
 		}
+	case 7:
+		cn.gssapiStart(o)
 	default:
 		errorf("unknown authentication response: %d", code)
 	}
@@ -1795,7 +1801,9 @@ func parseEnviron(env []string) (out map[string]string) {
 			unsupported()
 		case "PGREQUIREPEER":
 			unsupported()
-		case "PGKRBSRVNAME", "PGGSSLIB":
+		case "PGKRBSRVNAME":
+			accrue("krbsrvname")
+		case "PGGSSLIB":
 			unsupported()
 		case "PGCONNECT_TIMEOUT":
 			accrue("connect_timeout")
