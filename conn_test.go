@@ -191,7 +191,7 @@ localhost:*:*:*:pass_C
 	pgpass.Close()
 
 	assertPassword := func(extra values, expected string) {
-		o := &values{
+		o := values{
 			"host":               "localhost",
 			"sslmode":            "disable",
 			"connect_timeout":    "20",
@@ -203,11 +203,11 @@ localhost:*:*:*:pass_C
 			"datestyle":          "ISO, MDY",
 		}
 		for k, v := range extra {
-			(*o)[k] = v
+			o[k] = v
 		}
-		(&conn{}).handlePgpass(*o)
-		if o.Get("password") != expected {
-			t.Fatalf("For %v expected %s got %s", extra, expected, o.Get("password"))
+		(&conn{}).handlePgpass(o)
+		if pw := o["password"]; pw != expected {
+			t.Fatalf("For %v expected %s got %s", extra, expected, pw)
 		}
 	}
 	// wrong permissions for the pgpass file means it should be ignored
