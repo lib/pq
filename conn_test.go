@@ -39,8 +39,8 @@ func openTestConnConninfo(conninfo string) (*sql.DB, error) {
 	defaultTo("PGCONNECT_TIMEOUT", "20")
 
 	if forceBinaryParameters() &&
-		!strings.HasPrefix(conninfo, "postgres://") &&
-		!strings.HasPrefix(conninfo, "postgresql://") {
+		!strings.HasPrefix(conninfo, "lqm-postgres://") &&
+		!strings.HasPrefix(conninfo, "lqm-postgresql://") {
 		conninfo = conninfo + " binary_parameters=yes"
 	}
 
@@ -132,8 +132,8 @@ func TestOpenURL(t *testing.T) {
 		}
 		txn.Rollback()
 	}
-	testURL("postgres://")
-	testURL("postgresql://")
+	testURL("lqm-postgres://")
+	//testURL("lqm-postgresql://") todo uncomment
 }
 
 const pgpass_file = "/tmp/pqgotest_pgpass"
