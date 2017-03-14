@@ -42,7 +42,7 @@ func (d *drv) Open(name string) (driver.Conn, error) {
 }
 
 func init() {
-	sql.Register("postgres", &drv{})
+	sql.Register("lqm-postgres", &drv{})
 }
 
 type parameterStatus struct {
@@ -264,7 +264,7 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 		o[k] = v
 	}
 
-	if strings.HasPrefix(name, "postgres://") || strings.HasPrefix(name, "postgresql://") {
+	if strings.HasPrefix(name, "lqm-postgres://") || strings.HasPrefix(name, "lqm-postgresql://") {
 		name, err = ParseURL(name)
 		if err != nil {
 			return nil, err

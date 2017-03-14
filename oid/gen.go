@@ -26,7 +26,7 @@ func main() {
 		os.Setenv("PGSSLMODE", "disable")
 	}
 
-	db, err := sql.Open("postgres", "")
+	db, err := sql.Open("lqm-postgres", "")
 	if err != nil {
 		log.Fatal(err)
 	}

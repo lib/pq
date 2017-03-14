@@ -11,7 +11,7 @@ import (
 // ParseURL no longer needs to be used by clients of this library since supplying a URL as a
 // connection string to sql.Open() is now supported:
 //
-//	sql.Open("postgres", "postgres://bob:secret@1.2.3.4:5432/mydb?sslmode=verify-full")
+//	sql.Open("lqm-postgres", "postgres://bob:secret@1.2.3.4:5432/mydb?sslmode=verify-full")
 //
 // It remains exported here for backwards-compatibility.
 //
@@ -35,7 +35,7 @@ func ParseURL(url string) (string, error) {
 		return "", err
 	}
 
-	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
+	if u.Scheme != "lqm-postgres" && u.Scheme != "postgresql" {
 		return "", fmt.Errorf("invalid connection protocol: %s", u.Scheme)
 	}
 

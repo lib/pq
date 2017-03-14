@@ -15,6 +15,12 @@ func (b *readBuf) int32() (n int) {
 	return
 }
 
+func (b *readBuf) int64() (n int) {
+	n = int(int64(binary.BigEndian.Uint64(*b)))
+	*b = (*b)[8:]
+	return
+}
+
 func (b *readBuf) oid() (n oid.Oid) {
 	n = oid.Oid(binary.BigEndian.Uint32(*b))
 	*b = (*b)[4:]
@@ -51,6 +57,12 @@ func (b *readBuf) byte() byte {
 type writeBuf struct {
 	buf []byte
 	pos int
+}
+
+func (b *writeBuf) int64(n int64) {
+	x := make([]byte, 8)
+	binary.BigEndian.PutUint64(x, uint64(n))
+	b.buf = append(b.buf, x...)
 }
 
 func (b *writeBuf) int32(n int) {
