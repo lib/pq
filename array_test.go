@@ -101,6 +101,11 @@ func TestArrayScanner(t *testing.T) {
 		t.Errorf("Expected *Float64Array, got %T", s)
 	}
 
+	s = Array(&[]float32{})
+	if _, ok := s.(*Float32Array); !ok {
+		t.Errorf("Expected *Float32Array, got %T", s)
+	}
+
 	s = Array(&[]int64{})
 	if _, ok := s.(*Int64Array); !ok {
 		t.Errorf("Expected *Int64Array, got %T", s)
@@ -115,6 +120,7 @@ func TestArrayScanner(t *testing.T) {
 		&[]sql.Scanner{},
 		&[][]bool{},
 		&[][]float64{},
+		&[][]float32{},
 		&[][]int64{},
 		&[][]string{},
 	} {
@@ -138,6 +144,11 @@ func TestArrayValuer(t *testing.T) {
 		t.Errorf("Expected *Float64Array, got %T", v)
 	}
 
+	v = Array([]float32{})
+	if _, ok := v.(*Float32Array); !ok {
+		t.Errorf("Expected *Float32Array, got %T", v)
+	}
+
 	v = Array([]int64{})
 	if _, ok := v.(*Int64Array); !ok {
 		t.Errorf("Expected *Int64Array, got %T", v)
@@ -153,6 +164,7 @@ func TestArrayValuer(t *testing.T) {
 		[]driver.Value{},
 		[][]bool{},
 		[][]float64{},
+		[][]float32{},
 		[][]int64{},
 		[][]string{},
 	} {
@@ -618,6 +630,160 @@ func BenchmarkFloat64ArrayValue(b *testing.B) {
 		x[i] = rand.NormFloat64()
 	}
 	a := Float64Array(x)
+
+	for i := 0; i < b.N; i++ {
+		a.Value()
+	}
+}
+
+func TestFloat32ArrayScanUnsupported(t *testing.T) {
+	var arr Float32Array
+	err := arr.Scan(true)
+
+	if err == nil {
+		t.Fatal("Expected error when scanning from bool")
+	}
+	if !strings.Contains(err.Error(), "bool to Float32Array") {
+		t.Errorf("Expected type to be mentioned when scanning, got %q", err)
+	}
+}
+
+func TestFloat32ArrayScanEmpty(t *testing.T) {
+	var arr Float32Array
+	err := arr.Scan(`{}`)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if arr == nil || len(arr) != 0 {
+		t.Errorf("Expected empty, got %#v", arr)
+	}
+}
+
+func TestFloat32ArrayScanNil(t *testing.T) {
+	arr := Float32Array{5, 5, 5}
+	err := arr.Scan(nil)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if arr != nil {
+		t.Errorf("Expected nil, got %+v", arr)
+	}
+}
+
+var Float32ArrayStringTests = []struct {
+	str string
+	arr Float32Array
+}{
+	{`{}`, Float32Array{}},
+	{`{1.2}`, Float32Array{1.2}},
+	{`{3.456,7.89}`, Float32Array{3.456, 7.89}},
+	{`{3,1,2}`, Float32Array{3, 1, 2}},
+}
+
+func TestFloat32ArrayScanBytes(t *testing.T) {
+	for _, tt := range Float32ArrayStringTests {
+		bytes := []byte(tt.str)
+		arr := Float32Array{5, 5, 5}
+		err := arr.Scan(bytes)
+
+		if err != nil {
+			t.Fatalf("Expected no error for %q, got %v", bytes, err)
+		}
+		if !reflect.DeepEqual(arr, tt.arr) {
+			t.Errorf("Expected %+v for %q, got %+v", tt.arr, bytes, arr)
+		}
+	}
+}
+
+func BenchmarkFloat32ArrayScanBytes(b *testing.B) {
+	var a Float32Array
+	var x interface{} = []byte(`{1.2,3.4,5.6,7.8,9.01,2.34,5.67,8.90,1.234,5.678}`)
+
+	for i := 0; i < b.N; i++ {
+		a = Float32Array{}
+		a.Scan(x)
+	}
+}
+
+func TestFloat32ArrayScanString(t *testing.T) {
+	for _, tt := range Float32ArrayStringTests {
+		arr := Float32Array{5, 5, 5}
+		err := arr.Scan(tt.str)
+
+		if err != nil {
+			t.Fatalf("Expected no error for %q, got %v", tt.str, err)
+		}
+		if !reflect.DeepEqual(arr, tt.arr) {
+			t.Errorf("Expected %+v for %q, got %+v", tt.arr, tt.str, arr)
+		}
+	}
+}
+
+func TestFloat32ArrayScanError(t *testing.T) {
+	for _, tt := range []struct {
+		input, err string
+	}{
+		{``, "unable to parse array"},
+		{`{`, "unable to parse array"},
+		{`{{5.6},{7.8}}`, "cannot convert ARRAY[2][1] to Float32Array"},
+		{`{NULL}`, "parsing array element index 0:"},
+		{`{a}`, "parsing array element index 0:"},
+		{`{5.6,a}`, "parsing array element index 1:"},
+		{`{5.6,7.8,a}`, "parsing array element index 2:"},
+	} {
+		arr := Float32Array{5, 5, 5}
+		err := arr.Scan(tt.input)
+
+		if err == nil {
+			t.Fatalf("Expected error for %q, got none", tt.input)
+		}
+		if !strings.Contains(err.Error(), tt.err) {
+			t.Errorf("Expected error to contain %q for %q, got %q", tt.err, tt.input, err)
+		}
+		if !reflect.DeepEqual(arr, Float32Array{5, 5, 5}) {
+			t.Errorf("Expected destination not to change for %q, got %+v", tt.input, arr)
+		}
+	}
+}
+
+func TestFloat32ArrayValue(t *testing.T) {
+	result, err := Float32Array(nil).Value()
+
+	if err != nil {
+		t.Fatalf("Expected no error for nil, got %v", err)
+	}
+	if result != nil {
+		t.Errorf("Expected nil, got %q", result)
+	}
+
+	result, err = Float32Array([]float32{}).Value()
+
+	if err != nil {
+		t.Fatalf("Expected no error for empty, got %v", err)
+	}
+	if expected := `{}`; !reflect.DeepEqual(result, expected) {
+		t.Errorf("Expected empty, got %q", result)
+	}
+
+	result, err = Float32Array([]float32{1.2, 3.4, 5.6}).Value()
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if expected := `{1.2,3.4,5.6}`; !reflect.DeepEqual(result, expected) {
+		t.Errorf("Expected %q, got %q", expected, result)
+	}
+}
+
+func BenchmarkFloat32ArrayValue(b *testing.B) {
+	rand.Seed(1)
+	x := make([]float32, 10)
+	for i := 0; i < len(x); i++ {
+		x[i] = float32(rand.NormFloat64())
+	}
+	a := Float32Array(x)
 
 	for i := 0; i < b.N; i++ {
 		a.Value()
@@ -1232,6 +1398,19 @@ func BenchmarkGenericArrayValueFloat64s(b *testing.B) {
 	}
 }
 
+func BenchmarkGenericArrayValueFloat32s(b *testing.B) {
+	rand.Seed(1)
+	x := make([]float32, 10)
+	for i := 0; i < len(x); i++ {
+		x[i] = float32(rand.NormFloat64())
+	}
+	a := GenericArray{x}
+
+	for i := 0; i < b.N; i++ {
+		a.Value()
+	}
+}
+
 func BenchmarkGenericArrayValueInt64s(b *testing.B) {
 	rand.Seed(1)
 	x := make([]int64, 10)
@@ -1281,6 +1460,7 @@ func TestArrayScanBackend(t *testing.T) {
 		{`ARRAY[true, false]`, new(BoolArray), &BoolArray{true, false}},
 		{`ARRAY[E'\\xdead', E'\\xbeef']`, new(ByteaArray), &ByteaArray{{'\xDE', '\xAD'}, {'\xBE', '\xEF'}}},
 		{`ARRAY[1.2, 3.4]`, new(Float64Array), &Float64Array{1.2, 3.4}},
+		{`ARRAY[1.2, 3.4]`, new(Float32Array), &Float32Array{1.2, 3.4}},
 		{`ARRAY[1, 2, 3]`, new(Int64Array), &Int64Array{1, 2, 3}},
 		{`ARRAY['a', E'\\b', 'c"', 'd,e']`, new(StringArray), &StringArray{`a`, `\b`, `c"`, `d,e`}},
 	} {
@@ -1305,6 +1485,7 @@ func TestArrayValueBackend(t *testing.T) {
 		{`ARRAY[true, false]`, BoolArray{true, false}},
 		{`ARRAY[E'\\xdead', E'\\xbeef']`, ByteaArray{{'\xDE', '\xAD'}, {'\xBE', '\xEF'}}},
 		{`ARRAY[1.2, 3.4]`, Float64Array{1.2, 3.4}},
+		{`ARRAY[1.2, 3.4]`, Float32Array{1.2, 3.4}},
 		{`ARRAY[1, 2, 3]`, Int64Array{1, 2, 3}},
 		{`ARRAY['a', E'\\b', 'c"', 'd,e']`, StringArray{`a`, `\b`, `c"`, `d,e`}},
 	} {

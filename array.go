@@ -35,6 +35,8 @@ func Array(a interface{}) interface {
 		return (*BoolArray)(&a)
 	case []float64:
 		return (*Float64Array)(&a)
+	case []float32:
+		return (*Float32Array)(&a)
 	case []int64:
 		return (*Int64Array)(&a)
 	case []string:
@@ -44,6 +46,8 @@ func Array(a interface{}) interface {
 		return (*BoolArray)(a)
 	case *[]float64:
 		return (*Float64Array)(a)
+	case *[]float32:
+		return (*Float32Array)(a)
 	case *[]int64:
 		return (*Int64Array)(a)
 	case *[]string:
@@ -259,6 +263,70 @@ func (a Float64Array) Value() (driver.Value, error) {
 		for i := 1; i < n; i++ {
 			b = append(b, ',')
 			b = strconv.AppendFloat(b, a[i], 'f', -1, 64)
+		}
+
+		return string(append(b, '}')), nil
+	}
+
+	return "{}", nil
+}
+
+// Float32Array represents a one-dimensional array of the PostgreSQL single
+// precision type.
+type Float32Array []float32
+
+// Scan implements the sql.Scanner interface.
+func (a *Float32Array) Scan(src interface{}) error {
+	switch src := src.(type) {
+	case []byte:
+		return a.scanBytes(src)
+	case string:
+		return a.scanBytes([]byte(src))
+	case nil:
+		*a = nil
+		return nil
+	}
+
+	return fmt.Errorf("pq: cannot convert %T to Float32Array", src)
+}
+
+func (a *Float32Array) scanBytes(src []byte) error {
+	elems, err := scanLinearArray(src, []byte{','}, "Float32Array")
+	if err != nil {
+		return err
+	}
+	if *a != nil && len(elems) == 0 {
+		*a = (*a)[:0]
+	} else {
+		b := make(Float32Array, len(elems))
+		for i, v := range elems {
+			val, err := strconv.ParseFloat(string(v), 32)
+			if err != nil {
+				return fmt.Errorf("pq: parsing array element index %d: %v", i, err)
+			}
+			b[i] = float32(val)
+		}
+		*a = b
+	}
+	return nil
+}
+
+// Value implements the driver.Valuer interface.
+func (a Float32Array) Value() (driver.Value, error) {
+	if a == nil {
+		return nil, nil
+	}
+
+	if n := len(a); n > 0 {
+		// There will be at least two curly brackets, N bytes of values,
+		// and N-1 bytes of delimiters.
+		b := make([]byte, 1, 1+2*n)
+		b[0] = '{'
+
+		b = strconv.AppendFloat(b, float64(a[0]), 'f', -1, 32)
+		for i := 1; i < n; i++ {
+			b = append(b, ',')
+			b = strconv.AppendFloat(b, float64(a[i]), 'f', -1, 32)
 		}
 
 		return string(append(b, '}')), nil
