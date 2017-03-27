@@ -20,6 +20,7 @@ import (
 	"unicode"
 
 	"github.com/lib/pq/oid"
+	"reflect"
 )
 
 // Common error types
@@ -1148,6 +1149,52 @@ var colFmtDataAllBinary []byte = []byte{0, 1, 0, 1}
 // No result-column format codes (i.e. all text).
 var colFmtDataAllText []byte = []byte{0, 0}
 
+// DefaultParameterConverter is the default implementation of
+// PG's ValueConverter that's used when a Stmt doesn't implement
+// ColumnConverter.
+//
+// DefaultParameterConverter returns the given value directly if
+// Go's driver.DefaultParameterConverter can return driver.Value.
+// Otherwise slice of supported types is converted to PG array type
+// (https://github.com/lib/pq/issues/49)
+// Other types are an error.
+type defaultConverter struct{}
+
+var DefaultParameterConverter defaultConverter
+
+func (this defaultConverter) ConvertValue(v interface{}) (returnValue driver.Value, err error) {
+	// try to get it from DefaultParameterConverter first
+	returnValue, err = driver.DefaultParameterConverter.ConvertValue(v)
+	// and return if success
+	if err == nil {
+		return
+	}
+	// otherwise check if it is of Array or Slice kind
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	// if it is indeed of Array or Slice kind, do recursion
+	case reflect.Array, reflect.Slice:
+		if rv.IsNil() {
+			return nil, nil
+		}
+		var len = rv.Len()
+		var mySlice []string
+		for i := 0; i < len; i++ {
+			var elemValue driver.Value
+			elemValue, err = this.ConvertValue(rv.Index(i).Interface())
+			if err != nil {
+				return
+			}
+			myString := fmt.Sprintf("%q", elemValue)
+			mySlice = append(mySlice, myString)
+		}
+		returnValue = "{" + strings.Join(mySlice, ",") + "}"
+		return returnValue, nil
+	}
+	// still error? sorry, but we have to return now!
+	return
+}
+
 type stmt struct {
 	cn         *conn
 	name       string
@@ -1157,6 +1204,10 @@ type stmt struct {
 	colTyps    []oid.Oid
 	paramTyps  []oid.Oid
 	closed     bool
+}
+
+func (st *stmt) ColumnConverter(idx int) (c driver.ValueConverter) {
+	return DefaultParameterConverter
 }
 
 func (st *stmt) Close() (err error) {
