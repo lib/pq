@@ -35,7 +35,12 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 		if pgtypOid == oid.T_bytea {
 			return encodeBytea(parameterStatus.serverVersion, v)
 		}
-
+		if pgtypOid == oid.T_uuid {
+			if len(v) != 16 {
+				errorf("encode: got slice of %v bytes, while server expects 16 byte uuid", len(v))
+			}
+			return []byte(fmt.Sprintf("%x", v))
+		}
 		return v
 	case string:
 		if pgtypOid == oid.T_bytea {
@@ -68,6 +73,13 @@ func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid, f format) i
 
 func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{} {
 	switch typ {
+	case oid.T_uuid:
+		g := strings.Replace(string(s), "-", "", -1)
+		b, err := hex.DecodeString(g)
+		if err != nil {
+			errorf("decode: error while decoding uuid: %v", err)
+		}
+		return b
 	case oid.T_bytea:
 		return s
 	case oid.T_int8:
