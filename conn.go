@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -229,6 +230,8 @@ func (cn *conn) handleDriverSettings(o values) (err error) {
 	return boolSetting("binary_parameters", &cn.binaryParameters)
 }
 
+// TODO: this should probably return errors instead of silently skipping it on
+// errors?
 func (cn *conn) handlePgpass(o values) {
 	// if a password was supplied, do not process .pgpass
 	if _, ok := o["password"]; ok {
@@ -250,14 +253,19 @@ func (cn *conn) handlePgpass(o values) {
 		}
 		filename = filepath.Join(userHome, ".pgpass")
 	}
-	fileinfo, err := os.Stat(filename)
-	if err != nil {
-		return
-	}
-	mode := fileinfo.Mode()
-	if mode&(0x77) != 0 {
-		// XXX should warn about incorrect .pgpass permissions as psql does
-		return
+
+	// On Win32, the directory is protected, so we don't have to check the file.
+	if runtime.GOOS != "windows" {
+		fi, err := os.Stat(filename)
+		if err != nil {
+			return
+		}
+		if fi.Mode().Perm()&(0x77) != 0 {
+			fmt.Fprintf(os.Stderr,
+				"WARNING: password file %q has group or world access; permissions should be u=rw (0600) or less\n",
+				filename)
+			return
+		}
 	}
 	file, err := os.Open(filename)
 	if err != nil {
