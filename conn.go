@@ -19,7 +19,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/lib/pq/oid"
+	"github.com/it512/pq/oid"
 )
 
 // Common error types
@@ -1418,6 +1418,15 @@ func (rs *rows) HasNextResultSet() bool {
 
 func (rs *rows) NextResultSet() error {
 	return nil
+}
+
+func (rs *rows) ColumnTypeDatabaseTypeName(index int) string {
+	id := rs.colTyps[index]
+	if name, ok := oid.NameMap[id]; ok {
+		return name
+	}
+
+	return "UNKNOW"
 }
 
 // QuoteIdentifier quotes an "identifier" (e.g. a table or a column name) to be
