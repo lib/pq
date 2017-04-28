@@ -756,3 +756,13 @@ func BenchmarkAppendEscapedTextNoEscape(b *testing.B) {
 		appendEscapedText(nil, longString)
 	}
 }
+
+//TestRoundtripDecodeEncode tests that encode and decode work roundtrip.
+func TestRoundtripDecodeEncode(t *testing.T) {
+	inDate := FormatTimestamp(time.Now())
+	_, err := ParseTimestamp(nil, string(inDate))
+	if err != nil {
+		t.Errorf("ParseTimestamp fails on FormatTimestamp with error: %v\n", err)
+	}
+
+}
