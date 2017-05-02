@@ -329,6 +329,12 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	if err != nil {
 		return nil, err
 	}
+	if val, ok := o["keepalive"]; ok && val != "0" {
+		if tcpConn, ok := cn.c.(*net.TCPConn); ok {
+			tcpConn.SetKeepAlive(true)
+			tcpConn.SetKeepAlivePeriod(20 * time.Second)
+		}
+	}
 	cn.ssl(o)
 	cn.buf = bufio.NewReader(cn.c)
 	cn.startup(o)
@@ -337,6 +343,7 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	if timeout, ok := o["connect_timeout"]; ok && timeout != "0" {
 		err = cn.c.SetDeadline(time.Time{})
 	}
+
 	return cn, err
 }
 
@@ -1051,6 +1058,8 @@ func isDriverSetting(key string) bool {
 	case "disable_prepared_binary_result":
 		return true
 	case "binary_parameters":
+		return true
+	case "keepalive":
 		return true
 
 	default:
