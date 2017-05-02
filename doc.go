@@ -51,6 +51,7 @@ supported:
 	* sslcert - Cert file location. The file must contain PEM encoded data.
 	* sslkey - Key file location. The file must contain PEM encoded data.
 	* sslrootcert - The location of the root certificate file. The file must contain PEM encoded data.
+	* keepalive - Set tcp keepalives if set and not "0"
 
 Valid values for sslmode are:
 
