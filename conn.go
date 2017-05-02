@@ -1059,6 +1059,8 @@ func isDriverSetting(key string) bool {
 		return true
 	case "binary_parameters":
 		return true
+	case "keepalive":
+		return true
 
 	default:
 		return false
