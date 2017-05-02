@@ -337,6 +337,12 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	if timeout, ok := o["connect_timeout"]; ok && timeout != "0" {
 		err = cn.c.SetDeadline(time.Time{})
 	}
+	if val, ok := o["keepalive"]; ok && val != "0" {
+		if tcpConn, ok := cn.c.(*net.TCPConn); ok {
+			tcpConn.SetKeepAlive(true)
+			tcpConn.SetKeepAlivePeriod(20 * time.Second)
+		}
+	}
 	return cn, err
 }
 
