@@ -1105,6 +1105,8 @@ func (cn *conn) auth(r *readBuf, o values) {
 	switch code := r.int32(); code {
 	case 0:
 		// OK
+
+	// AuthenticationCleartextPassword
 	case 3:
 		w := cn.writeBuf('p')
 		w.string(o["password"])
@@ -1118,6 +1120,8 @@ func (cn *conn) auth(r *readBuf, o values) {
 		if r.int32() != 0 {
 			errorf("unexpected authentication response: %q", t)
 		}
+
+	// AuthenticationMD5Password
 	case 5:
 		s := string(r.next(4))
 		w := cn.writeBuf('p')
@@ -1132,6 +1136,11 @@ func (cn *conn) auth(r *readBuf, o values) {
 		if r.int32() != 0 {
 			errorf("unexpected authentication response: %q", t)
 		}
+
+	// AuthenticationSASL
+	case 10:
+		cn.authScram(r, o);
+
 	default:
 		errorf("unknown authentication response: %d", code)
 	}
