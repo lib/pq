@@ -5,8 +5,8 @@ import (
 )
 
 func TestInt32RangeString(t *testing.T) {
-	test := func(min, max int32, expect string) {
-		s := Int32Range{min, max}.String()
+	test := func(lower, upper int32, expect string) {
+		s := Int32Range{lower, upper}.String()
 		if s != expect {
 			t.Errorf("expected '%s', got '%s'", expect, s)
 		}

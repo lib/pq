@@ -8,35 +8,35 @@ import (
 
 // Float64Range represents a range between two float64 values
 type Float64Range struct {
-	Min          float64
-	MinInclusive bool
-	Max          float64
-	MaxInclusive bool
+	Lower          float64
+	LowerInclusive bool
+	Upper          float64
+	UpperInclusive bool
 }
 
 // Scan implements the sql.Scanner interface
 func (r *Float64Range) Scan(val interface{}) error {
 	if val == nil {
-		r.Min = 0
-		r.MinInclusive = false
-		r.Max = 0
-		r.MaxInclusive = false
+		r.Lower = 0
+		r.LowerInclusive = false
+		r.Upper = 0
+		r.UpperInclusive = false
 		return nil
 	}
-	minIn, maxIn, min, max, err := readRange(val.([]byte))
+	lowerIn, upperIn, lower, upper, err := readRange(val.([]byte))
 	if err != nil {
 		return err
 	}
-	r.Min, err = strconv.ParseFloat(string(min), 64)
+	r.Lower, err = strconv.ParseFloat(string(lower), 64)
 	if err != nil {
 		return err
 	}
-	r.Max, err = strconv.ParseFloat(string(max), 64)
+	r.Upper, err = strconv.ParseFloat(string(upper), 64)
 	if err != nil {
 		return err
 	}
-	r.MinInclusive = minIn
-	r.MaxInclusive = maxIn
+	r.LowerInclusive = lowerIn
+	r.UpperInclusive = upperIn
 	return nil
 }
 
@@ -51,11 +51,11 @@ func (r Float64Range) String() string {
 		open  = "("
 		close = ")"
 	)
-	if r.MinInclusive {
+	if r.LowerInclusive {
 		open = "["
 	}
-	if r.MaxInclusive {
+	if r.UpperInclusive {
 		close = "]"
 	}
-	return fmt.Sprintf("%s%f,%f%s", open, r.Min, r.Max, close)
+	return fmt.Sprintf("%s%f,%f%s", open, r.Lower, r.Upper, close)
 }

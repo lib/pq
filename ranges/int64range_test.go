@@ -5,8 +5,8 @@ import (
 )
 
 func TestInt64RangeString(t *testing.T) {
-	test := func(min, max int64, expect string) {
-		s := Int64Range{min, max}.String()
+	test := func(lower, upper int64, expect string) {
+		s := Int64Range{lower, upper}.String()
 		if s != expect {
 			t.Errorf("expected '%s', got '%s'", expect, s)
 		}

@@ -7,11 +7,11 @@ import (
 	"strconv"
 )
 
-// Int64Range represents a range between two int64 values. The minimum value is
-// inclusive and the maximum is exclusive.
+// Int64Range represents a range between two int64 values. The lower value is
+// inclusive and the upper is exclusive.
 type Int64Range struct {
-	Min int64
-	Max int64
+	Lower int64
+	Upper int64
 }
 
 // Scan implements the sql.Scanner interface
@@ -20,18 +20,18 @@ func (r *Int64Range) Scan(val interface{}) error {
 		return errors.New("cannot scan NULL into *Int64Range")
 	}
 	var (
-		err      error
-		min, max []byte
+		err          error
+		lower, upper []byte
 	)
-	min, max, err = readDiscreteRange(val.([]byte))
+	lower, upper, err = readDiscreteRange(val.([]byte))
 	if err != nil {
 		return err
 	}
-	r.Min, err = strconv.ParseInt(string(min), 10, 64)
+	r.Lower, err = strconv.ParseInt(string(lower), 10, 64)
 	if err != nil {
 		return err
 	}
-	r.Max, err = strconv.ParseInt(string(max), 10, 64)
+	r.Upper, err = strconv.ParseInt(string(upper), 10, 64)
 	if err != nil {
 		return err
 	}
@@ -45,5 +45,5 @@ func (r Int64Range) Value() (driver.Value, error) {
 
 // String returns a string representation of this range
 func (r Int64Range) String() string {
-	return fmt.Sprintf("[%d,%d)", r.Min, r.Max)
+	return fmt.Sprintf("[%d,%d)", r.Lower, r.Upper)
 }

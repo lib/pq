@@ -5,8 +5,8 @@ import (
 )
 
 func TestFloat64RangeString(t *testing.T) {
-	test := func(min, max float64, minIn, maxIn bool, expect string) {
-		s := Float64Range{min, minIn, max, maxIn}.String()
+	test := func(lower, upper float64, lowerIn, upperIn bool, expect string) {
+		s := Float64Range{lower, lowerIn, upper, upperIn}.String()
 		if s != expect {
 			t.Errorf("expected '%s', got '%s'", expect, s)
 		}
