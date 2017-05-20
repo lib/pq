@@ -33,11 +33,11 @@ func readNumber(buf []byte, pos int) ([]byte, int, error) {
 	return s, pos, nil
 }
 
-func readSeparator(buf []byte, pos int) (int, error) {
+func readByte(buf []byte, pos int, expect byte) (int, error) {
 	if pos >= len(buf) {
 		return pos, fmt.Errorf("unexpected end of input at position %d", pos)
 	}
-	if buf[pos] != ',' {
+	if buf[pos] != expect {
 		return pos, fmt.Errorf("unexpected character '%c' at position %d", buf[pos], pos)
 	}
 	return pos + 1, nil
@@ -67,7 +67,7 @@ func readRange(buf []byte) (minIncl bool, maxIncl bool, min []byte, max []byte, 
 	if err != nil {
 		return
 	}
-	pos, err = readSeparator(buf, pos)
+	pos, err = readByte(buf, pos, ',')
 	if err != nil {
 		return
 	}
@@ -76,6 +76,31 @@ func readRange(buf []byte) (minIncl bool, maxIncl bool, min []byte, max []byte, 
 		return
 	}
 	maxIncl, pos, err = readRangeBound(buf, pos, ']', ')')
+	if err != nil {
+		return
+	}
+	return
+}
+
+func readDiscreteRange(buf []byte) (min []byte, max []byte, err error) {
+	var pos int
+	pos, err = readByte(buf, pos, '[')
+	if err != nil {
+		return
+	}
+	min, pos, err = readNumber(buf, pos)
+	if err != nil {
+		return
+	}
+	pos, err = readByte(buf, pos, ',')
+	if err != nil {
+		return
+	}
+	max, pos, err = readNumber(buf, pos)
+	if err != nil {
+		return
+	}
+	pos, err = readByte(buf, pos, ')')
 	if err != nil {
 		return
 	}
