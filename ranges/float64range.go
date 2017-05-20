@@ -22,7 +22,7 @@ func (r *Float64Range) Scan(val interface{}) error {
 		r.MaxInclusive = false
 		return nil
 	}
-	minIncl, maxIncl, min, max, err := readFloatRange(val.([]byte))
+	minIn, maxIn, min, max, err := readRange(val.([]byte))
 	if err != nil {
 		return err
 	}
@@ -34,8 +34,8 @@ func (r *Float64Range) Scan(val interface{}) error {
 	if err != nil {
 		return err
 	}
-	r.MinInclusive = minIncl
-	r.MaxInclusive = maxIncl
+	r.MinInclusive = minIn
+	r.MaxInclusive = maxIn
 	return nil
 }
 

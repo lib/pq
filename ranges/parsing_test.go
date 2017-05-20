@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func TestReadFloatRange(t *testing.T) {
+func TestReadRange(t *testing.T) {
 	cases := []struct {
 		Input string
 		MinIn bool
@@ -19,7 +19,7 @@ func TestReadFloatRange(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		minIn, maxIn, min, max, err := readFloatRange([]byte(tc.Input))
+		minIn, maxIn, min, max, err := readRange([]byte(tc.Input))
 		if err != nil {
 			t.Fatalf("unexpected error: " + err.Error())
 		}

@@ -4,50 +4,32 @@ import (
 	"fmt"
 )
 
-func readDigits(buf []byte, pos int) ([]byte, int, error) {
-	var s []byte
-	for pos < len(buf) && buf[pos] >= 48 && buf[pos] <= 57 {
-		s = append(s, buf[pos])
-		pos++
-	}
-	if len(s) == 0 {
-		return s, pos, fmt.Errorf("unexpected end of input at position %d", pos)
-	}
-	return s, pos, nil
-}
-
-func readInteger(buf []byte, pos int) ([]byte, int, error) {
-	var s []byte
-	if pos < len(buf) && buf[pos] == '-' {
-		s = append(s, '-')
-		pos++
-	}
-	digs, pos, err := readDigits(buf, pos)
-	if err != nil {
-		return nil, pos, err
-	}
-	return append(s, digs...), pos, nil
-}
-
-func readFloat(buf []byte, pos int) ([]byte, int, error) {
-	s, pos, err := readInteger(buf, pos)
-	if err != nil {
-		return nil, pos, err
-	}
-
-	if pos < len(buf) && buf[pos] == '.' {
-		var digs []byte
-
-		s = append(s, '.')
-		pos++
-
-		digs, pos, err = readDigits(buf, pos)
-		if err != nil {
-			return nil, pos, err
+func readNumber(buf []byte, pos int) ([]byte, int, error) {
+	var (
+		s          []byte
+		b          byte
+		canEnd     = false
+		inMantissa bool
+	)
+	for pos < len(buf) {
+		b = buf[pos]
+		if b == '-' && len(s) == 0 {
+			s = append(s, b)
+			canEnd = false
+		} else if b >= 48 && b <= 57 {
+			s = append(s, b)
+			canEnd = true
+		} else if b == '.' && !inMantissa {
+			s = append(s, b)
+			canEnd = false
+		} else {
+			break
 		}
-		s = append(s, digs...)
+		pos++
 	}
-
+	if !canEnd {
+		return s, pos, fmt.Errorf("unexpected character '%c' at position %d", b, pos)
+	}
 	return s, pos, nil
 }
 
@@ -75,13 +57,13 @@ func readRangeBound(buf []byte, pos int, incl, excl byte) (bool, int, error) {
 	}
 }
 
-func readFloatRange(buf []byte) (minIncl bool, maxIncl bool, min []byte, max []byte, err error) {
+func readRange(buf []byte) (minIncl bool, maxIncl bool, min []byte, max []byte, err error) {
 	var pos int
 	minIncl, pos, err = readRangeBound(buf, pos, '[', '(')
 	if err != nil {
 		return
 	}
-	min, pos, err = readFloat(buf, pos)
+	min, pos, err = readNumber(buf, pos)
 	if err != nil {
 		return
 	}
@@ -89,7 +71,7 @@ func readFloatRange(buf []byte) (minIncl bool, maxIncl bool, min []byte, max []b
 	if err != nil {
 		return
 	}
-	max, pos, err = readFloat(buf, pos)
+	max, pos, err = readNumber(buf, pos)
 	if err != nil {
 		return
 	}
