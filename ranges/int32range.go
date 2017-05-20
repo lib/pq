@@ -37,5 +37,5 @@ func (r *Int32Range) Scan(val interface{}) error {
 
 // String returns a string representation of this range
 func (r Int32Range) String() string {
-	return fmt.Sprintf("[%d, %d)", r.Min, r.Max)
+	return fmt.Sprintf("[%d,%d)", r.Min, r.Max)
 }

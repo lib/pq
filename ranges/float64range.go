@@ -51,5 +51,5 @@ func (r Float64Range) String() string {
 	if r.MaxInclusive {
 		close += "]"
 	}
-	return fmt.Sprintf("%s%f, %f%s", open, r.Min, r.Max, close)
+	return fmt.Sprintf("%s%f,%f%s", open, r.Min, r.Max, close)
 }
