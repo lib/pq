@@ -1,6 +1,7 @@
 package ranges
 
 import (
+	"errors"
 	"fmt"
 )
 
@@ -82,6 +83,15 @@ func readRange(buf []byte) (minIncl bool, maxIncl bool, min []byte, max []byte, 
 	return
 }
 
+func readUntilTerminator(buf []byte, pos int, term byte) ([]byte, int, error) {
+	var s []byte
+	for pos < len(buf) && buf[pos] != term {
+		s = append(s, buf[pos])
+		pos++
+	}
+	return s, pos, nil
+}
+
 func readDiscreteRange(buf []byte) (min []byte, max []byte, err error) {
 	var pos int
 	pos, err = readByte(buf, pos, '[')
@@ -97,6 +107,35 @@ func readDiscreteRange(buf []byte) (min []byte, max []byte, err error) {
 		return
 	}
 	max, pos, err = readNumber(buf, pos)
+	if err != nil {
+		return
+	}
+	pos, err = readByte(buf, pos, ')')
+	if err != nil {
+		return
+	}
+	return
+}
+
+func readDiscreteTimeRange(buf []byte) (min []byte, max []byte, err error) {
+	var pos int
+	minIn, pos, err := readRangeBound(buf, pos, '[', '(')
+	if err != nil {
+		return
+	}
+	min, pos, err = readUntilTerminator(buf, pos, ',')
+	if err != nil {
+		return
+	}
+	if !minIn && len(min) != 0 {
+		err = errors.New("lower value is marked as exclusive but does not have an empty value")
+		return
+	}
+	pos, err = readByte(buf, pos, ',')
+	if err != nil {
+		return
+	}
+	max, pos, err = readUntilTerminator(buf, pos, ')')
 	if err != nil {
 		return
 	}
