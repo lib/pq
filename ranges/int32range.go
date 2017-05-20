@@ -4,7 +4,6 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"strconv"
 )
 
 // Int32Range represents a range between two int32 values. The lower value is
@@ -19,25 +18,20 @@ func (r *Int32Range) Scan(val interface{}) error {
 	if val == nil {
 		return errors.New("cannot scan NULL into *Int32Range")
 	}
-	lowerb, upperb, err := readDiscreteRange(val.([]byte))
+	l, u, err := parseIntRange(val.([]byte), 32)
 	if err != nil {
 		return err
 	}
-	lower, err := strconv.Atoi(string(lowerb))
-	if err != nil {
-		return err
-	}
-	upper, err := strconv.Atoi(string(upperb))
-	if err != nil {
-		return err
-	}
-	r.Lower = int32(lower)
-	r.Upper = int32(upper)
+	r.Lower = int32(l)
+	r.Upper = int32(u)
 	return nil
 }
 
 // Value implements the driver.Valuer interface
 func (r Int32Range) Value() (driver.Value, error) {
+	if r.Lower > r.Upper {
+		return nil, errors.New("lower value is greater than the upper value")
+	}
 	return []byte(r.String()), nil
 }
 

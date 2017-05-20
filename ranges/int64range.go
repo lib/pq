@@ -4,7 +4,6 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"strconv"
 )
 
 // Int64Range represents a range between two int64 values. The lower value is
@@ -19,27 +18,20 @@ func (r *Int64Range) Scan(val interface{}) error {
 	if val == nil {
 		return errors.New("cannot scan NULL into *Int64Range")
 	}
-	var (
-		err          error
-		lower, upper []byte
-	)
-	lower, upper, err = readDiscreteRange(val.([]byte))
+	l, u, err := parseIntRange(val.([]byte), 64)
 	if err != nil {
 		return err
 	}
-	r.Lower, err = strconv.ParseInt(string(lower), 10, 64)
-	if err != nil {
-		return err
-	}
-	r.Upper, err = strconv.ParseInt(string(upper), 10, 64)
-	if err != nil {
-		return err
-	}
+	r.Lower = l
+	r.Upper = u
 	return nil
 }
 
 // Value implements the driver.Valuer interface
 func (r Int64Range) Value() (driver.Value, error) {
+	if r.Lower > r.Upper {
+		return nil, errors.New("lower value is greater than the upper value")
+	}
 	return []byte(r.String()), nil
 }
 
