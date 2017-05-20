@@ -49,7 +49,7 @@ func (r Float64Range) String() string {
 		open = "["
 	}
 	if r.MaxInclusive {
-		close += "]"
+		close = "]"
 	}
 	return fmt.Sprintf("%s%f,%f%s", open, r.Min, r.Max, close)
 }
