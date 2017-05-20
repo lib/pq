@@ -6,7 +6,8 @@ import (
 	"strconv"
 )
 
-// Int64Range represents a range between two int64 values
+// Int64Range represents a range between two int64 values. The minimum value is
+// inclusive and the maximum is exclusive.
 type Int64Range struct {
 	Min int64
 	Max int64
