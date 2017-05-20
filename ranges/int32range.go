@@ -1,6 +1,7 @@
 package ranges
 
 import (
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"strconv"
@@ -33,6 +34,11 @@ func (r *Int32Range) Scan(val interface{}) error {
 	r.Min = int32(min)
 	r.Max = int32(max)
 	return nil
+}
+
+// Value implements the driver.Valuer interface
+func (r Int32Range) Value() (driver.Value, error) {
+	return []byte(r.String()), nil
 }
 
 // String returns a string representation of this range

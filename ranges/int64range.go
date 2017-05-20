@@ -1,6 +1,7 @@
 package ranges
 
 import (
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"strconv"
@@ -35,6 +36,11 @@ func (r *Int64Range) Scan(val interface{}) error {
 		return err
 	}
 	return nil
+}
+
+// Value implements the driver.Valuer interface
+func (r Int64Range) Value() (driver.Value, error) {
+	return []byte(r.String()), nil
 }
 
 // String returns a string representation of this range

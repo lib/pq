@@ -1,6 +1,7 @@
 package ranges
 
 import (
+	"database/sql/driver"
 	"fmt"
 	"strconv"
 )
@@ -37,6 +38,11 @@ func (r *Float64Range) Scan(val interface{}) error {
 	r.MinInclusive = minIn
 	r.MaxInclusive = maxIn
 	return nil
+}
+
+// Value implements the driver.Valuer interface
+func (r Float64Range) Value() (driver.Value, error) {
+	return []byte(r.String()), nil
 }
 
 // String returns a string representation of this range
