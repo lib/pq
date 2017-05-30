@@ -5,6 +5,7 @@ package pq
 import (
 	"context"
 	"database/sql"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -152,6 +153,36 @@ func TestContextCancelQuery(t *testing.T) {
 		} else if err := rows.Close(); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// TestIssue617 tests that a failed query in QueryContext doesn't lead to a
+// goroutine leak.
+func TestIssue617(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	const N = 10
+
+	numGoroutineStart := runtime.NumGoroutine()
+	for i := 0; i < N; i++ {
+		func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			_, err := db.QueryContext(ctx, `SELECT * FROM DOESNOTEXIST`)
+			pqErr, _ := err.(*Error)
+			// Expecting "pq: relation \"doesnotexist\" does not exist" error.
+			if err == nil || pqErr == nil || pqErr.Code != "42P01" {
+				t.Fatalf("expected undefined table error, got %v", err)
+			}
+		}()
+	}
+	numGoroutineFinish := runtime.NumGoroutine()
+
+	// We use N/2 and not N because the GC and other actors may increase or
+	// decrease the number of goroutines.
+	if numGoroutineFinish-numGoroutineStart >= N/2 {
+		t.Errorf("goroutine leak detected, was %d, now %d", numGoroutineStart, numGoroutineFinish)
 	}
 }
 
