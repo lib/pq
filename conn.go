@@ -1132,6 +1132,8 @@ func (cn *conn) auth(r *readBuf, o values) {
 		if r.int32() != 0 {
 			errorf("unexpected authentication response: %q", t)
 		}
+	case 10:
+		errorf("Server requests scram authentication method. The pq driver does not support this.")
 	default:
 		errorf("unknown authentication response: %d", code)
 	}
