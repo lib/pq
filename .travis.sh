@@ -6,6 +6,17 @@ client_configure() {
 	sudo chmod 600 $PQSSLCERTTEST_PATH/postgresql.key
 }
 
+golang_formatting() {
+	if command -v goimports > /dev/null ; then
+		echo "Checking formatting..."
+		goimports -d -e $(find -name '*.go') | awk '{ print } END { exit NR == 0 ? 0 : 1 }'
+	fi
+}
+
+golang_tools() {
+	go get golang.org/x/tools/cmd/goimports || true
+}
+
 pgdg_repository() {
 	local sourcelist='sources.list.d/postgresql.list'
 
