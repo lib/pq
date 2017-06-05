@@ -23,6 +23,7 @@ env:
     - PGVERSION=9.2
     - PGVERSION=9.1
     - PGVERSION=9.0
+    - PGVERSION=8.4
 
 before_install:
   - ./.travis.sh postgresql_uninstall
