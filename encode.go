@@ -116,12 +116,14 @@ func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interfa
 			errorf("%s", err)
 		}
 		return i
-	case oid.T_float4, oid.T_float8:
-		bits := 64
-		if typ == oid.T_float4 {
-			bits = 32
+	case oid.T_float4:
+		f, err := strconv.ParseFloat(string(s), 32)
+		if err != nil {
+			errorf("%s", err)
 		}
-		f, err := strconv.ParseFloat(string(s), bits)
+		return float32(f)
+	case oid.T_float8:
+		f, err := strconv.ParseFloat(string(s), 64)
 		if err != nil {
 			errorf("%s", err)
 		}

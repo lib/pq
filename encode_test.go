@@ -737,6 +737,21 @@ func TestAppendEscapedTextExistingBuffer(t *testing.T) {
 	}
 }
 
+func TestFloat(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	testfloat32 := float32(36.6)
+	var resultval interface{}
+	err := db.QueryRow("SELECT $1::real", testfloat32).Scan(&resultval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resultval != testfloat32 {
+		t.Fatal("expected ", testfloat32, ", got ", resultval)
+	}
+}
+
 func BenchmarkAppendEscapedText(b *testing.B) {
 	longString := ""
 	for i := 0; i < 100; i++ {
