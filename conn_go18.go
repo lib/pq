@@ -8,6 +8,10 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
+	"reflect"
+	"time"
+
+	"github.com/lib/pq/oid"
 )
 
 // Implement the "QueryerContext" interface
@@ -103,5 +107,36 @@ func (cn *conn) cancel() error {
 	{
 		_, err := io.Copy(ioutil.Discard, c)
 		return err
+	}
+}
+
+func (rs *rows) ColumnTypeScanType(index int) reflect.Type {
+	switch rs.colTyps[index] {
+	case oid.T_int8:
+		return reflect.TypeOf(int64(0))
+
+	case oid.T_int4:
+		return reflect.TypeOf(int32(0))
+
+	case oid.T_int2:
+		return reflect.TypeOf(int16(0))
+
+	case oid.T_varchar, oid.T_text:
+		return reflect.TypeOf("")
+
+	case oid.T_bool:
+		return reflect.TypeOf(false)
+
+	case oid.T_numeric:
+		return reflect.TypeOf(float64(0))
+
+	case oid.T_date, oid.T_time, oid.T_timetz, oid.T_timestamp, oid.T_timestamptz:
+		return reflect.TypeOf(time.Time{})
+
+	case oid.T_bytea:
+		return reflect.TypeOf([]byte{})
+
+	default:
+		return reflect.TypeOf(new(interface{})).Elem()
 	}
 }
