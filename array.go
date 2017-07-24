@@ -20,6 +20,7 @@ var typeSQLScanner = reflect.TypeOf((*sql.Scanner)(nil)).Elem()
 //
 // For example:
 //  db.Query(`SELECT * FROM t WHERE id = ANY($1)`, pq.Array([]int{235, 401}))
+//  db.Query(`SELECT * FROM t WHERE id = ANY($1)`, []int{235, 401}) // go1.9+
 //
 //  var x []sql.NullInt64
 //  db.QueryRow('SELECT ARRAY[235, 401]').Scan(pq.Array(&x))
