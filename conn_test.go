@@ -1612,3 +1612,29 @@ func TestQuickClose(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestArrayInIlikeStatment(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TEMP TABLE temp (a text[])")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec("insert into temp values($1::text[])", Array([]string{"\\\\"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec("insert into temp values($1::text[])", Array([]string{"\\"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec("select * from temp where 'a' ilike any($1::text[])", Array([]string{"\\"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+}
