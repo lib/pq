@@ -1,5 +1,3 @@
-// +build go1.8
-
 package pq
 
 import (
@@ -102,8 +100,15 @@ func TestDataTypePrecisionScale(t *testing.T) {
 
 	for i, tt := range tts {
 		dt := fieldDesc{OID: tt.typ, Mod: tt.mod}
-		if p, s, k := dt.PrecisionScale(); k != tt.ok || p != tt.precision || s != tt.scale {
-			t.Errorf("(%d) got: %d, %d %t want: %d, %d %t", i, p, s, k, tt.precision, tt.scale, tt.ok)
+		p, s, k := dt.PrecisionScale()
+		if k != tt.ok {
+			t.Errorf("(%d)  got: %t want: %t", i, k, tt.ok)
+		}
+		if p != tt.precision {
+			t.Errorf("(%d) wrong precision got: %d want: %d", i, p, tt.precision)
+		}
+		if s != tt.scale {
+			t.Errorf("(%d) wrong scale got: %d want: %d", i, s, tt.scale)
 		}
 	}
 }

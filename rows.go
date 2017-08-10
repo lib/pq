@@ -38,7 +38,7 @@ func (fd fieldDesc) Type() reflect.Type {
 	case oid.T_date, oid.T_time, oid.T_timetz, oid.T_timestamp, oid.T_timestamptz:
 		return reflect.TypeOf(time.Time{})
 	case oid.T_bytea:
-		return reflect.TypeOf([]byte{})
+		return reflect.TypeOf([]byte(nil))
 	default:
 		return reflect.TypeOf(new(interface{})).Elem()
 	}
