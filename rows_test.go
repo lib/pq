@@ -102,7 +102,7 @@ func TestDataTypePrecisionScale(t *testing.T) {
 		dt := fieldDesc{OID: tt.typ, Mod: tt.mod}
 		p, s, k := dt.PrecisionScale()
 		if k != tt.ok {
-			t.Errorf("(%d)  got: %t want: %t", i, k, tt.ok)
+			t.Errorf("(%d) got: %t want: %t", i, k, tt.ok)
 		}
 		if p != tt.precision {
 			t.Errorf("(%d) wrong precision got: %d want: %d", i, p, tt.precision)
