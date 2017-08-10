@@ -1,3 +1,5 @@
+//go:generate oid
+
 // Package oid contains OID constants
 // as defined by the Postgres server.
 package oid
