@@ -115,84 +115,84 @@ func TestDataTypePrecisionScale(t *testing.T) {
 	}
 }
 
-var columnTypesTests = []struct {
-	Name     string
-	TypeName string
-	Length   struct {
-		Len int64
-		OK  bool
-	}
-	DecimalSize struct {
-		Precision int64
-		Scale     int64
-		OK        bool
-	}
-	ScanType reflect.Type
-}{
-	{
-		Name:     "a",
-		TypeName: "INT4",
-		Length: struct {
-			Len int64
-			OK  bool
-		}{
-			Len: 0,
-			OK:  false,
-		},
-		DecimalSize: struct {
-			Precision int64
-			Scale     int64
-			OK        bool
-		}{
-			Precision: 0,
-			Scale:     0,
-			OK:        false,
-		},
-		ScanType: reflect.TypeOf(int32(0)),
-	}, {
-		Name:     "bar",
-		TypeName: "TEXT",
-		Length: struct {
-			Len int64
-			OK  bool
-		}{
-			Len: math.MaxInt64,
-			OK:  true,
-		},
-		DecimalSize: struct {
-			Precision int64
-			Scale     int64
-			OK        bool
-		}{
-			Precision: 0,
-			Scale:     0,
-			OK:        false,
-		},
-		ScanType: reflect.TypeOf(""),
-	}, {
-		Name:     "dec",
-		TypeName: "NUMERIC",
-		Length: struct {
-			Len int64
-			OK  bool
-		}{
-			Len: 0,
-			OK:  false,
-		},
-		DecimalSize: struct {
-			Precision int64
-			Scale     int64
-			OK        bool
-		}{
-			Precision: 9,
-			Scale:     2,
-			OK:        true,
-		},
-		ScanType: reflect.TypeOf(float64(0)),
-	},
-}
-
 func TestRowsColumnTypes(t *testing.T) {
+	columnTypesTests := []struct {
+		Name     string
+		TypeName string
+		Length   struct {
+			Len int64
+			OK  bool
+		}
+		DecimalSize struct {
+			Precision int64
+			Scale     int64
+			OK        bool
+		}
+		ScanType reflect.Type
+	}{
+		{
+			Name:     "a",
+			TypeName: "INT4",
+			Length: struct {
+				Len int64
+				OK  bool
+			}{
+				Len: 0,
+				OK:  false,
+			},
+			DecimalSize: struct {
+				Precision int64
+				Scale     int64
+				OK        bool
+			}{
+				Precision: 0,
+				Scale:     0,
+				OK:        false,
+			},
+			ScanType: reflect.TypeOf(int32(0)),
+		}, {
+			Name:     "bar",
+			TypeName: "TEXT",
+			Length: struct {
+				Len int64
+				OK  bool
+			}{
+				Len: math.MaxInt64,
+				OK:  true,
+			},
+			DecimalSize: struct {
+				Precision int64
+				Scale     int64
+				OK        bool
+			}{
+				Precision: 0,
+				Scale:     0,
+				OK:        false,
+			},
+			ScanType: reflect.TypeOf(""),
+		}, {
+			Name:     "dec",
+			TypeName: "NUMERIC",
+			Length: struct {
+				Len int64
+				OK  bool
+			}{
+				Len: 0,
+				OK:  false,
+			},
+			DecimalSize: struct {
+				Precision int64
+				Scale     int64
+				OK        bool
+			}{
+				Precision: 9,
+				Scale:     2,
+				OK:        true,
+			},
+			ScanType: reflect.TypeOf(float64(0)),
+		},
+	}
+
 	db := openTestConn(t)
 	defer db.Close()
 
