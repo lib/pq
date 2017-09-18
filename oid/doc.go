@@ -4,3 +4,5 @@ package oid
 
 // Oid is a Postgres Object ID.
 type Oid uint32
+
+type OidNameMap map[Oid]string
