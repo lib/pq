@@ -25,6 +25,38 @@ You can also connect to a database using a URL. For example:
 
 	db, err := sql.Open("postgres", "postgres://pqgotest:password@localhost/pqgotest?sslmode=verify-full")
 
+You can replace the DefaultDialer variable for specifi environments like appengine standard (in this case disable SSL). For example:
+
+	// +build appengine
+
+	package main
+
+	import (
+		"fmt"
+		"net"
+		"regexp"
+
+		"github.com/eclivus/pq"
+
+		"appengine/cloudsql"
+	)
+
+	func init() {
+		pq.DefaultDialer = cloudSqlDial{}
+	}
+
+	type cloudSqlDial struct{}
+
+	var cloudSqlInstanceExtracter = regexp.MustCompile(`cloudsql\(([^\)]+)\)`)
+
+	func (cloudSqlDial) Dial(network, address string) (net.Conn, error) {
+		extraction := cloudSqlInstanceExtracter.FindString("[cloudsql(exp-lkl:us-central1:b2b-pg)]:5432")
+		if extraction == "" {
+			return nil, fmt.Errorf("Error cloudsql.Dial because address in not in the form cloudsql(INSTANCE) : %s", address)
+		}
+		return cloudsql.Dial(extraction[9 : len(extraction)-1])
+	}
+
 
 Connection String Parameters
 

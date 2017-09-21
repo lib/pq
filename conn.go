@@ -29,6 +29,7 @@ var (
 	ErrSSLNotSupported           = errors.New("pq: SSL is not enabled on the server")
 	ErrSSLKeyHasWorldPermissions = errors.New("pq: Private key file has group or world access. Permissions should be u=rw (0600) or less")
 	ErrCouldNotDetectUsername    = errors.New("pq: Could not detect default username. Please provide one explicitly")
+	ErrDialerTimeoutNotSupported = errors.New("pq: Dialer does not support timeout")
 
 	errUnexpectedReady = errors.New("unexpected ReadyForQuery")
 	errNoRowsAffected  = errors.New("no RowsAffected available after the empty statement")
@@ -80,8 +81,13 @@ func (s transactionStatus) String() string {
 
 type Dialer interface {
 	Dial(network, address string) (net.Conn, error)
+}
+
+type DialerTimeout interface {
 	DialTimeout(network, address string, timeout time.Duration) (net.Conn, error)
 }
+
+var DefaultDialer Dialer = defaultDialer{}
 
 type defaultDialer struct{}
 
@@ -238,7 +244,7 @@ func (cn *conn) writeBuf(b byte) *writeBuf {
 }
 
 func Open(name string) (_ driver.Conn, err error) {
-	return DialOpen(defaultDialer{}, name)
+	return DialOpen(DefaultDialer, name)
 }
 
 func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
@@ -348,6 +354,10 @@ func dial(d Dialer, o values) (net.Conn, error) {
 
 	// Zero or not specified means wait indefinitely.
 	if timeout, ok := o["connect_timeout"]; ok && timeout != "0" {
+		dt, ok := d.(DialerTimeout)
+		if !ok {
+			return nil, ErrDialerTimeoutNotSupported
+		}
 		seconds, err := strconv.ParseInt(timeout, 10, 0)
 		if err != nil {
 			return nil, fmt.Errorf("invalid value for parameter connect_timeout: %s", err)
@@ -358,12 +368,13 @@ func dial(d Dialer, o values) (net.Conn, error) {
 		// establishment and set a deadline for doing the initial handshake.
 		// The deadline is then reset after startup() is done.
 		deadline := time.Now().Add(duration)
-		conn, err := d.DialTimeout(ntw, addr, duration)
+		conn, err := dt.DialTimeout(ntw, addr, duration)
 		if err != nil {
 			return nil, err
 		}
 		err = conn.SetDeadline(deadline)
 		return conn, err
+
 	}
 	return d.Dial(ntw, addr)
 }
