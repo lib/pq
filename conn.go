@@ -149,11 +149,7 @@ func (cn *conn) handleDriverSettings(o values) (err error) {
 	if err != nil {
 		return err
 	}
-	err = boolSetting("binary_parameters", &cn.binaryParameters)
-	if err != nil {
-		return err
-	}
-	return nil
+	return boolSetting("binary_parameters", &cn.binaryParameters)
 }
 
 func (cn *conn) handlePgpass(o values) {

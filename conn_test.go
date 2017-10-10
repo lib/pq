@@ -1207,16 +1207,11 @@ func TestParseComplete(t *testing.T) {
 	tpc("SELECT foo", "", 0, true) // invalid row count
 }
 
-func TestExecerInterface(t *testing.T) {
-	// Gin up a straw man private struct just for the type check
-	cn := &conn{c: nil}
-	var cni interface{} = cn
-
-	_, ok := cni.(driver.Execer)
-	if !ok {
-		t.Fatal("Driver doesn't implement Execer")
-	}
-}
+// Test interface conformance.
+var (
+	_ driver.Execer  = (*conn)(nil)
+	_ driver.Queryer = (*conn)(nil)
+)
 
 func TestNullAfterNonNull(t *testing.T) {
 	db := openTestConn(t)
