@@ -161,11 +161,16 @@ func (cn *conn) handlePgpass(o values) {
 	if filename == "" {
 		// XXX this code doesn't work on Windows where the default filename is
 		// XXX %APPDATA%\postgresql\pgpass.conf
-		user, err := user.Current()
-		if err != nil {
-			return
+		// Prefer $HOME over user.Current due to glibc bug: golang.org/issue/13470
+		userHome := os.Getenv("HOME")
+		if userHome == "" {
+			user, err := user.Current()
+			if err != nil {
+				return
+			}
+			userHome = user.HomeDir
 		}
-		filename = filepath.Join(user.HomeDir, ".pgpass")
+		filename = filepath.Join(userHome, ".pgpass")
 	}
 	fileinfo, err := os.Stat(filename)
 	if err != nil {
