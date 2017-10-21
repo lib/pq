@@ -128,10 +128,10 @@ func (cn *conn) cancel() error {
 	}
 }
 
-var _converter = &converter{}
+var defaultConverter = &converter{}
 
 func (st *stmt) ColumnConverter(idx int) driver.ValueConverter {
-	return _converter
+	return defaultConverter
 }
 
 type converter struct{}
