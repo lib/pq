@@ -5,6 +5,7 @@ package pq
 import (
 	"context"
 	"database/sql"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -315,5 +316,79 @@ func TestTxOptions(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "isolation level not supported") {
 		t.Errorf("Expected error to mention isolation level, got %q", err)
+	}
+}
+
+func TestColumnConverter(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
+	CREATE TEMP TABLE temp (
+		max_uint_64  numeric,
+		int_array    integer[],
+		bool_array   boolean[],
+		string_array text[]
+	)
+	`)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stmt, err := tx.Prepare("INSERT INTO temp VALUES ($1, $2, $3, $4)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var maxUint64 uint64 = 1<<64 - 1
+	_, err = stmt.Exec(
+		maxUint64,
+		[]int64{1, 2, 3},
+		[]bool{true, false},
+		[]string{"a", "b", "c"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := tx.Query("SELECT * FROM temp")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var (
+		maxUint64Value   uint64
+		intArrayValue    Int64Array
+		boolArrayValue   BoolArray
+		stringArrayValue StringArray
+	)
+
+	if rows.Next() {
+		if err := rows.Scan(&maxUint64Value, &intArrayValue, &boolArrayValue, &stringArrayValue); err != nil {
+			t.Fatal(err)
+		}
+		if maxUint64Value != maxUint64 {
+			t.Fatalf("uint64: expected %d, got %d", maxUint64, maxUint64Value)
+		}
+
+		if !reflect.DeepEqual(intArrayValue, Int64Array([]int64{1, 2, 3})) {
+			t.Fatalf("int_array: expected %v, got %v", []int64{1, 2, 3}, intArrayValue)
+		}
+
+		if !reflect.DeepEqual(boolArrayValue, BoolArray([]bool{true, false})) {
+			t.Fatalf("bool_array: expected %v, got %v", []bool{true, false}, boolArrayValue)
+		}
+
+		if !reflect.DeepEqual(stringArrayValue, StringArray([]string{"a", "b", "c"})) {
+			t.Fatalf("string_array: expected %v, got %v", []string{"a", "b", "c"}, stringArrayValue)
+		}
 	}
 }
