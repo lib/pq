@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"reflect"
 )
 
@@ -161,7 +162,7 @@ func (c *converter) ConvertValue(v interface{}) (driver.Value, error) {
 	case uint32:
 		return int64(value), nil
 	case uint64:
-		if value >= 1<<63 {
+		if value >= math.MaxInt64 {
 			return fmt.Sprintf("%d", value), nil
 		}
 		return int64(value), nil
