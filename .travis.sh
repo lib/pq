@@ -85,4 +85,14 @@ megacheck_install() {
 	megacheck --version
 }
 
+golint_install() {
+	# Golint is Go 1.6+, so skip if Go 1.5.
+	if [[ "$(go version)" =~ "go1.5" ]]
+	then
+		echo "golint not supported, skipping installation"
+		return 0
+	fi
+	go get github.com/golang/lint/golint
+}
+
 $1

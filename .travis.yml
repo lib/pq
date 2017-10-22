@@ -34,6 +34,7 @@ before_install:
   - ./.travis.sh postgresql_configure
   - ./.travis.sh client_configure
   - ./.travis.sh megacheck_install
+  - ./.travis.sh golint_install
   - go get golang.org/x/tools/cmd/goimports
 
 before_script:
@@ -53,5 +54,7 @@ script:
     which megacheck > /dev/null
     && megacheck -ignore 'github.com/lib/pq/conn_test.go:SA1019 github.com/lib/pq/*.go:S1024' ./...
     || echo 'megacheck is not supported, skipping check'
+    # For compatibility with Go 1.5, launch only if golint is present.
+  - which golint > /dev/null && golint ./...  || echo 'golint is not supported, skipping check'
   - PQTEST_BINARY_PARAMETERS=no  go test -race -v ./...
   - PQTEST_BINARY_PARAMETERS=yes go test -race -v ./...
