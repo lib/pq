@@ -317,3 +317,22 @@ func TestTxOptions(t *testing.T) {
 		t.Errorf("Expected error to mention isolation level, got %q", err)
 	}
 }
+
+func TestPing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	if err := db.PingContext(ctx); err != nil {
+		t.Fatal("expected success")
+	}
+
+	cancel()
+
+	if err := db.PingContext(ctx); err == nil {
+		t.Fatal("expected failure")
+	} else if err.Error() != "context canceled" {
+		t.Fatalf("expected canceled context: got %v", err)
+	}
+}
