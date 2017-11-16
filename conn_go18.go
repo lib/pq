@@ -83,10 +83,14 @@ func (cn *conn) Ping(ctx context.Context) error {
 
 	rows, err := cn.simpleQuery(`SELECT 'lib/pq ping test';`)
 	if err != nil {
-		return err
+		return driver.ErrBadConn
 	}
 
-	return rows.Close()
+	if err := rows.Close(); err != nil {
+		return driver.ErrBadConn
+	}
+	
+	return nil
 }
 
 func (cn *conn) watchCancel(ctx context.Context) func() {
