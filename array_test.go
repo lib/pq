@@ -202,6 +202,8 @@ var BoolArrayStringTests = []struct {
 	{`{}`, BoolArray{}},
 	{`{t}`, BoolArray{true}},
 	{`{f,t}`, BoolArray{false, true}},
+	{`{true,false}`, BoolArray{true, false}},
+	{`{1,0,true}`, BoolArray{true, false, true}},
 }
 
 func TestBoolArrayScanBytes(t *testing.T) {

@@ -88,12 +88,20 @@ func (a *BoolArray) scanBytes(src []byte) error {
 	} else {
 		b := make(BoolArray, len(elems))
 		for i, v := range elems {
-			if len(v) != 1 {
+			if len(v) == 4 && string(v) == "true" {
+				b[i] = true
+			} else if len(v) == 5 && string(v) == "false" {
+				b[i] = false
+			} else if len(v) != 1 {
 				return fmt.Errorf("pq: could not parse boolean array index %d: invalid boolean %q", i, v)
 			}
 			switch v[0] {
+			case '1':
+				fallthrough
 			case 't':
 				b[i] = true
+			case '0':
+				fallthrough
 			case 'f':
 				b[i] = false
 			default:
