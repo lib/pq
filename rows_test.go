@@ -20,6 +20,8 @@ func TestDataTypeName(t *testing.T) {
 		{oid.T_int2, "INT2"},
 		{oid.T_varchar, "VARCHAR"},
 		{oid.T_text, "TEXT"},
+		{oid.T_bit, "BIT"},
+		{oid.T_varbit, "VARBIT"},
 		{oid.T_bool, "BOOL"},
 		{oid.T_numeric, "NUMERIC"},
 		{oid.T_date, "DATE"},
@@ -48,6 +50,8 @@ func TestDataType(t *testing.T) {
 		{oid.T_int2, reflect.Int16},
 		{oid.T_varchar, reflect.String},
 		{oid.T_text, reflect.String},
+		{oid.T_bit, reflect.String},
+		{oid.T_varbit, reflect.String},
 		{oid.T_bool, reflect.Bool},
 		{oid.T_date, reflect.Struct},
 		{oid.T_time, reflect.Struct},
@@ -77,6 +81,8 @@ func TestDataTypeLength(t *testing.T) {
 		{oid.T_varchar, 65535, 9, 5, true},
 		{oid.T_text, 65535, -1, math.MaxInt64, true},
 		{oid.T_bytea, 65535, -1, math.MaxInt64, true},
+		{oid.T_bit, 0, 10, 10, true},
+		{oid.T_varbit, 0, 10, 10, true},
 	}
 
 	for i, tt := range tts {
@@ -169,13 +175,53 @@ func TestRowsColumnTypes(t *testing.T) {
 				OK:        false,
 			},
 			ScanType: reflect.TypeOf(""),
+		}, {
+			Name:     "bit4",
+			TypeName: "BIT",
+			Length: struct {
+				Len int64
+				OK  bool
+			}{
+				Len: 4,
+				OK:  true,
+			},
+			DecimalSize: struct {
+				Precision int64
+				Scale     int64
+				OK        bool
+			}{
+				Precision: 0,
+				Scale:     0,
+				OK:        false,
+			},
+			ScanType: reflect.TypeOf(""),
+		}, {
+			Name:     "varbit10",
+			TypeName: "VARBIT",
+			Length: struct {
+				Len int64
+				OK  bool
+			}{
+				Len: 10,
+				OK:  true,
+			},
+			DecimalSize: struct {
+				Precision int64
+				Scale     int64
+				OK        bool
+			}{
+				Precision: 0,
+				Scale:     0,
+				OK:        false,
+			},
+			ScanType: reflect.TypeOf(""),
 		},
 	}
 
 	db := openTestConn(t)
 	defer db.Close()
 
-	rows, err := db.Query("SELECT 1 AS a, text 'bar' AS bar, 1.28::numeric(9, 2) AS dec")
+	rows, err := db.Query("SELECT 1 AS a, text 'bar' AS bar, '1111'::bit(4) as bit4, '1111'::varbit(10) as varbit10, 1.28::numeric(9, 2) AS dec")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,8 +230,8 @@ func TestRowsColumnTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(columns) != 3 {
-		t.Errorf("expected 3 columns found %d", len(columns))
+	if len(columns) != 5 {
+		t.Errorf("expected 5 columns found %d", len(columns))
 	}
 
 	for i, tt := range columnTypesTests {
