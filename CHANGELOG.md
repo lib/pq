@@ -47,7 +47,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 - Decode bpchar into a string ([#949]).
 
-- Recognize float types in ColumnTypeScanType() ([#1166]).
+- Recognize bit/varbit ([#743]) and float types ([#1166]) in ColumnTypeScanType().
 
 - Accept `PGGSSLIB` and `PGKRBSRVNAME` environment variables ([#1143]).
 
@@ -57,6 +57,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 [#595]: https://github.com/lib/pq/pull/595
 [#745]: https://github.com/lib/pq/pull/745
+[#743]: https://github.com/lib/pq/pull/743
 [#838]: https://github.com/lib/pq/pull/838
 [#949]: https://github.com/lib/pq/pull/949
 [#1125]: https://github.com/lib/pq/pull/1125
