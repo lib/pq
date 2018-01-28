@@ -601,3 +601,24 @@ func (nt NullTime) Value() (driver.Value, error) {
 	}
 	return nt.Time, nil
 }
+
+// Bytea is a byte slice that holds a reference to memory owned by the database itself.
+// After a Scan, the slice is only valid until the next call to Next, Scan, or Close.
+type NullBytea struct {
+	Bytea []byte
+	Valid bool // Valid is true if Bytea is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (nb *NullBytea) Scan(value interface{}) error {
+	nb.Bytea, nb.Valid = value.([]byte)
+	return nil
+}
+
+// Value implements the driver Valuer interface.
+func (nb NullBytea) Value() (driver.Value, error) {
+	if !nb.Valid {
+		return nil, nil
+	}
+	return nb.Bytea, nil
+}

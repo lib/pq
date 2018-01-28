@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,26 @@ func TestScanNilTimestamp(t *testing.T) {
 	var nt NullTime
 	nt.Scan(nil)
 	if nt.Valid {
+		t.Errorf("Expected Valid=false")
+	}
+}
+
+func TestScanBytea(t *testing.T) {
+	var nb NullBytea
+	bytes := []byte("byteatest")
+	nb.Scan(bytes)
+	if !nb.Valid {
+		t.Errorf("Expected Valid=true")
+	}
+	if !reflect.DeepEqual(bytes, nb.Bytea) {
+		t.Errorf("Expected %v, got %v", bytes, nb.Bytea)
+	}
+}
+
+func TestScanNilBytea(t *testing.T) {
+	var nb NullBytea
+	nb.Scan(nil)
+	if nb.Valid {
 		t.Errorf("Expected Valid=false")
 	}
 }
