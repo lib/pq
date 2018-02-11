@@ -121,22 +121,44 @@ func TestCommitInFailedTransaction(t *testing.T) {
 }
 
 func TestOpenURL(t *testing.T) {
-	testURL := func(url string) {
+	maybeFatal := func(f func(string) error, url string, expectError bool) {
+		err := f(url)
+		if err != nil && !expectError {
+			t.Fatal(url, err)
+		} else if err == nil && expectError {
+			t.Fatal("expected failed connection")
+		}
+	}
+	testURL := func(url string) error {
 		db, err := openTestConnConninfo(url)
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
 		defer db.Close()
 		// database/sql might not call our Open at all unless we do something with
 		// the connection
-		txn, err := db.Begin()
+		_, err = db.Exec("SHOW server_version")
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
-		txn.Rollback()
+		return nil
 	}
-	testURL("postgres://")
-	testURL("postgresql://")
+	maybeFatal(testURL, "postgres://", false)
+	maybeFatal(testURL, "postgresql://", false)
+
+	// ensure we get an error for a non-running server
+	maybeFatal(testURL, "postgresql://:55555", true)
+
+	// ensure connection attempts where one server is down still work
+	maybeFatal(testURL, "postgresql://:5432,:55555/", false)
+	maybeFatal(testURL, "postgresql://:55555,:5432/", false)
+
+	// ensure target_session_attrs works
+	maybeFatal(testURL, "postgresql://:5432/?target_session_attrs=read-write", false)
+	maybeFatal(testURL, "postgresql://:54321/?target_session_attrs=any", false)
+	maybeFatal(testURL, "postgresql://:54321/?target_session_attrs=read-write", true)
+	maybeFatal(testURL, "postgresql://:5432,:54321/?target_session_attrs=read-write", false)
+	maybeFatal(testURL, "postgresql://:54321,:5432/?target_session_attrs=read-write", false)
 }
 
 const pgpassFile = "/tmp/pqgotest_pgpass"
