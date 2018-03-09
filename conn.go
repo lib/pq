@@ -1466,6 +1466,25 @@ func QuoteIdentifier(name string) string {
 	return `"` + strings.Replace(name, `"`, `""`, -1) + `"`
 }
 
+// QuoteLiteral quotes a string literal to be used as part of an SQL statement.
+// It's useful with SQL statements that don't support parametrization.
+// For example:
+//
+// quoted := pq.QuoteLiteral("secret")
+// err := db.Exec(fmt.Sprintf("CREATE USER foo PASSWORD %s", quoted))
+//
+// Any single quotes and backslashes in value will be escaped. If value contains
+// at least one backslash, "E" prefix will be prepended.
+func QuoteLiteral(value string) string {
+	prefix := ""
+	if strings.Contains(value, `\`) {
+		prefix = "E"
+	}
+	value = strings.Replace(value, "'", "''", -1)
+	value = strings.Replace(value, `\`, `\\`, -1)
+	return prefix + "'" + value + "'"
+}
+
 func md5s(s string) string {
 	h := md5.New()
 	h.Write([]byte(s))

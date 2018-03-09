@@ -1549,6 +1549,27 @@ func TestQuoteIdentifier(t *testing.T) {
 	}
 }
 
+func TestQuoteLiteral(t *testing.T) {
+	var cases = []struct {
+		input string
+		want  string
+	}{
+		{`foo`, `'foo'`},
+		{`foo'bar`, `'foo''bar'`},
+		{`foo'bar'baz`, `'foo''bar''baz'`},
+		{`foo"bar`, `'foo"bar'`},
+		{`foo\bar`, `E'foo\\bar'`},
+		{`foo\bar'baz`, `E'foo\\bar''baz'`},
+	}
+
+	for _, test := range cases {
+		got := QuoteLiteral(test.input)
+		if got != test.want {
+			t.Errorf("QuoteLiteral(%q) = %v want %v", test.input, got, test.want)
+		}
+	}
+}
+
 func TestRowsResultTag(t *testing.T) {
 	type ResultTag interface {
 		Result() driver.Result
