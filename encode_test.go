@@ -305,7 +305,7 @@ func TestInfinityTimestamp(t *testing.T) {
 	var resultT time.Time
 
 	expectedErrorStrRegexp, err := regexp.Compile(
-		`^sql: Scan error on column index 0(, name "timestamp"|): unsupported`)
+		`^sql: Scan error on column index 0(, name "timestamp(tz)?"|): unsupported`)
 	if err != nil {
 		t.Fatal("Error parsing expected error regexp")
 	}
