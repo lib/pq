@@ -733,14 +733,6 @@ func TestCloseBadConn(t *testing.T) {
 		defer cn.errRecover(&err)
 		panic(io.EOF)
 	}()
-	// Verify we can write before closing.
-	if _, err := nc.Write(nil); err != nil {
-		t.Fatal(err)
-	}
-	// First close should close the connection.
-	if err := cn.Close(); err != nil {
-		t.Fatal(err)
-	}
 
 	// During the Go 1.9 cycle, https://github.com/golang/go/commit/3792db5
 	// changed this error from
