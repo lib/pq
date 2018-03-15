@@ -69,7 +69,9 @@ func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid, f format) i
 func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{} {
 	switch typ {
 	case oid.T_bytea:
-		return s
+		c := make([]byte, len(s))
+		copy(c, s)
+		return c
 	case oid.T_int8:
 		return int64(binary.BigEndian.Uint64(s))
 	case oid.T_int4:
@@ -128,7 +130,9 @@ func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interfa
 		return f
 	}
 
-	return s
+	c := make([]byte, len(s))
+	copy(c, s)
+	return c
 }
 
 // appendEncodedText encodes item in text format as required by COPY
