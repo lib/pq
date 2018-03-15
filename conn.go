@@ -102,7 +102,7 @@ type conn struct {
 	c         net.Conn
 	buf       *bufio.Reader
 	namei     int
-	scratch   [512]byte
+	scratch   []byte
 	txnStatus transactionStatus
 	txnFinish func()
 
@@ -326,8 +326,9 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	}
 
 	cn := &conn{
-		opts:   o,
-		dialer: d,
+		opts:    o,
+		dialer:  d,
+		scratch: make([]byte, 512),
 	}
 	err = cn.handleDriverSettings(o)
 	if err != nil {
@@ -1359,6 +1360,9 @@ type rows struct {
 func (rs *rows) Close() error {
 	if finish := rs.finish; finish != nil {
 		defer finish()
+	}
+	if !rs.done { // multi-threaded call, most likely
+		rs.cn.scratch = make([]byte, 512)
 	}
 	// no need to look at cn.bad as Next() will
 	for {
