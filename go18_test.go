@@ -5,8 +5,10 @@ package pq
 import (
 	"context"
 	"database/sql"
+	"math/rand"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -155,6 +157,48 @@ func TestContextCancelQuery(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// TestContextCancelQueryWhileScan checks for race conditions that arise when
+// a query context is canceled while a user is calling rows.Scan(). The code
+// is based on database/sql TestIssue18429.
+// See https://github.com/golang/go/issues/23519
+func TestContextCancelQueryWhileScan(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	const milliWait = 30
+	sem := make(chan bool, 20)
+
+	// This query seems to work well for triggering race conditions between
+	// the rows.Scan() call below, and the implicit rows.Close() call triggered
+	// by ctx timing out.
+	sql := `SELECT (g/10)::int, json_agg(g) FROM generate_series(1, 1000) g, pg_sleep($1) GROUP BY 1;`
+	var wg sync.WaitGroup
+	for i := 0; i < contextRaceIterations; i++ {
+		sem <- true
+		wg.Add(1)
+		go func() {
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
+			qwait := float64(time.Duration(rand.Intn(milliWait))*time.Millisecond) / 1000
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(rand.Intn(milliWait))*time.Millisecond)
+			defer cancel()
+			rows, _ := db.QueryContext(ctx, sql, qwait)
+			if rows != nil {
+				var d int
+				var n string
+				for rows.Next() {
+					rows.Scan(&d, &n)
+				}
+				rows.Close()
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // TestIssue617 tests that a failed query in QueryContext doesn't lead to a

@@ -106,7 +106,8 @@ func (cn *conn) cancel() error {
 
 	{
 		can := conn{
-			c: c,
+			c:       c,
+			scratch: make([]byte, 512),
 		}
 		can.ssl(cn.opts)
 
