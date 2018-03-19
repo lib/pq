@@ -488,7 +488,12 @@ func (c *conn) errRecover(err *error) {
 			*err = v
 		}
 	case *net.OpError:
-		*err = driver.ErrBadConn
+		if v.Timeout() {
+			c.bad = true
+			*err = v
+		} else {
+			*err = driver.ErrBadConn
+		}
 	case error:
 		if v == io.EOF || v.(error).Error() == "remote error: handshake failure" {
 			*err = driver.ErrBadConn
