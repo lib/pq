@@ -138,6 +138,15 @@ type conn struct {
 
 // Handle driver-side settings in parsed connection string.
 func (cn *conn) handleDriverSettings(o values) (err error) {
+	if targetSessionAttrs, ok := o["target_session_attrs"]; ok {
+		switch targetSessionAttrs {
+		case "any":
+		case "read-write":
+		default:
+			return fmt.Errorf("unrecognized value %q for target_session_attrs", targetSessionAttrs)
+		}
+	}
+
 	boolSetting := func(key string, val *bool) error {
 		if value, ok := o[key]; ok {
 			if value == "yes" {
@@ -251,6 +260,19 @@ func Open(name string) (_ driver.Conn, err error) {
 	return DialOpen(defaultDialer{}, name)
 }
 
+// errors is used to accumulate connection errors when attempting to connect to
+// multiple hosts.
+type errorSlice []error
+
+func (es errorSlice) Error() string {
+	// use bytes.Buffer?
+	out := ""
+	for _, e := range es {
+		out += "; " + e.Error()
+	}
+	return out
+}
+
 // DialOpen opens a new connection to the database using a dialer.
 func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	// Handle any panics during connection initialization.  Note that we
@@ -325,39 +347,56 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 		o["user"] = u
 	}
 
-	cn := &conn{
-		opts:   o,
-		dialer: d,
-	}
-	err = cn.handleDriverSettings(o)
+	oo, err := buildHostOptions(o)
 	if err != nil {
 		return nil, err
 	}
-	cn.handlePgpass(o)
-
-	cn.c, err = dial(d, o)
-	if err != nil {
-		return nil, err
-	}
-
-	// cn.ssl and cn.startup panic on error. Make sure we don't leak cn.c.
-	panicking := true
-	defer func() {
-		if panicking {
-			cn.c.Close()
+	errs := make(errorSlice, 0)
+	for _, o = range oo {
+		cn := &conn{
+			opts:   o,
+			dialer: d,
 		}
-	}()
+		err = cn.handleDriverSettings(o)
+		if err != nil {
+			return nil, err
+		}
+		cn.handlePgpass(o)
 
-	cn.ssl(o)
-	cn.buf = bufio.NewReader(cn.c)
-	cn.startup(o)
+		cn.c, err = dial(d, o)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
 
-	// reset the deadline, in case one was set (see dial)
-	if timeout, ok := o["connect_timeout"]; ok && timeout != "0" {
-		err = cn.c.SetDeadline(time.Time{})
+		// cn.ssl and cn.startup panic on error. Make sure we don't leak cn.c.
+		panicking := true
+		defer func() {
+			if panicking {
+				cn.c.Close()
+			}
+		}()
+
+		cn.ssl(o)
+		cn.buf = bufio.NewReader(cn.c)
+		cn.startup(o)
+		if err = cn.checkWritable(o); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+
+		// reset the deadline, in case one was set (see dial)
+		if timeout, ok := o["connect_timeout"]; ok && timeout != "0" {
+			err = cn.c.SetDeadline(time.Time{})
+		}
+		panicking = false
+		return cn, err
 	}
-	panicking = false
-	return cn, err
+	// try to avoid breakig clients that expect a single error
+	if len(errs) == 1 {
+		return nil, errs[0]
+	}
+	return nil, errs
 }
 
 func dial(d Dialer, o values) (net.Conn, error) {
@@ -398,6 +437,29 @@ func network(o values) (string, string) {
 	}
 
 	return "tcp", net.JoinHostPort(host, o["port"])
+}
+
+func buildHostOptions(o values) ([]values, error) {
+	hosts := strings.Split(o["host"], ",")
+	ports := strings.Split(o["port"], ",")
+	if len(ports) > 1 && len(hosts) != len(ports) {
+		return nil, fmt.Errorf("could not match %d port numbers to %d hosts", len(ports), len(hosts))
+	}
+	oo := make([]values, len(hosts))
+	for i, host := range hosts {
+		oCopy := make(values, len(o))
+		for key, val := range o {
+			oCopy[key] = val
+		}
+		oCopy["host"] = host
+		if len(ports) > 1 {
+			oCopy["port"] = ports[i]
+		} else {
+			oCopy["port"] = ports[0]
+		}
+		oo[i] = oCopy
+	}
+	return oo, nil
 }
 
 type values map[string]string
@@ -1074,6 +1136,8 @@ func isDriverSetting(key string) bool {
 		return true
 	case "binary_parameters":
 		return true
+	case "target_session_attrs":
+		return true
 
 	default:
 		return false
@@ -1120,6 +1184,38 @@ func (cn *conn) startup(o values) {
 		default:
 			errorf("unknown response for startup: %q", t)
 		}
+	}
+}
+
+func (cn *conn) checkWritable(o values) error {
+	tsa, ok := o["target_session_attrs"]
+	if !ok {
+		return nil
+	}
+	switch tsa {
+	case "any":
+		return nil
+	case "read-write":
+		res, err := cn.simpleQuery("SHOW transaction_read_only")
+		if err != nil {
+			return err
+		}
+		defer res.Close()
+		// ok to be optimistic here?
+		vs := make([]driver.Value, 1)
+		res.Next(vs)
+
+		readOnly, ok := vs[0].(string)
+		if !ok {
+			return errors.New("could not parse result of transaction_read_only as string")
+		}
+		if readOnly == "on" {
+			return errors.New("could not make a writable connection to server")
+		}
+		return nil
+	default:
+		// sanity check; should never happen because we handleDriverSettings() before connecting
+		panic("unrecognized value for target_session_attrs")
 	}
 }
 
