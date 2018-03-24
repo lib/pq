@@ -460,6 +460,11 @@ func errorf(s string, args ...interface{}) {
 	panic(fmt.Errorf("pq: %s", fmt.Sprintf(s, args...)))
 }
 
+// TODO(ainar-g) Rename to errorf after removing panics.
+func fmterrorf(s string, args ...interface{}) error {
+	return fmt.Errorf("pq: %s", fmt.Sprintf(s, args...))
+}
+
 func errRecoverNoErrBadConn(err *error) {
 	e := recover()
 	if e == nil {
