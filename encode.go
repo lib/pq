@@ -590,7 +590,17 @@ type NullTime struct {
 
 // Scan implements the Scanner interface.
 func (nt *NullTime) Scan(value interface{}) error {
-	nt.Time, nt.Valid = value.(time.Time)
+	switch typed := value.(type) {
+	case []uint8:
+		var parse_err error
+		nt.Time, parse_err = ParseTimestamp(nil, string(typed))
+		nt.Valid = parse_err == nil
+		return parse_err
+	case time.Time:
+		nt.Time = typed
+		nt.Valid = true
+		return nil
+	}
 	return nil
 }
 
