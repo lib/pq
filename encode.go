@@ -588,6 +588,25 @@ type NullTime struct {
 	Valid bool // Valid is true if Time is not NULL
 }
 
+func (nt *NullTime) UnmarshalJSON(data []byte) error {
+	dataStr := strings.Trim(string(data), `"`)
+	if dataStr == "null" {
+		return nil
+	}
+
+	var parse_err error
+	nt.Time, parse_err = time.Parse(time.RFC3339, dataStr)
+	nt.Valid = parse_err == nil
+	return parse_err
+}
+
+func (nt *NullTime) MarshalJSON() ([]byte, error) {
+	if !nt.Valid {
+		return []byte(`null`), nil
+	}
+	return []byte(nt.Time.Format(time.RFC3339)), nil
+}
+
 // Scan implements the Scanner interface.
 func (nt *NullTime) Scan(value interface{}) error {
 	switch typed := value.(type) {
@@ -611,3 +630,4 @@ func (nt NullTime) Value() (driver.Value, error) {
 	}
 	return nt.Time, nil
 }
+
