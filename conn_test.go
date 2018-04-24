@@ -733,7 +733,7 @@ func TestCloseBadConn(t *testing.T) {
 	if port == "" {
 		port = "5432"
 	}
-	addr := host + ":" + port
+	addr := net.JoinHostPort(host, port)
 	nc, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
