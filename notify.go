@@ -1,8 +1,5 @@
 package pq
 
-// Package pq is a pure Go Postgres driver for the database/sql package.
-// This module contains support for Postgres LISTEN/NOTIFY.
-
 import (
 	"context"
 	"database/sql/driver"
