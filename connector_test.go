@@ -4,6 +4,7 @@ package pq
 
 import (
 	"context"
+	"database/sql/driver"
 	"testing"
 )
 
@@ -20,7 +21,7 @@ func TestNewConnector_Connect(t *testing.T) {
 	defer db.Close()
 	// database/sql might not call our Open at all unless we do something with
 	// the connection
-	txn, err := db.Begin()
+	txn, err := db.(driver.ConnBeginTx).BeginTx(context.Background(), driver.TxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +41,7 @@ func TestNewConnector_Driver(t *testing.T) {
 	defer db.Close()
 	// database/sql might not call our Open at all unless we do something with
 	// the connection
-	txn, err := db.Begin()
+	txn, err := db.(driver.ConnBeginTx).BeginTx(context.Background(), driver.TxOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
