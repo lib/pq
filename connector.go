@@ -29,6 +29,8 @@ func (c *connector) Driver() driver.Driver {
 	return &Driver{}
 }
 
+var _ driver.Connector = &connector{}
+
 // NewConnector returns a connector for the pq driver in a fixed configuration
 // with the given name. The returned connect can be used to create any number
 // of equivalent Conn's. The returned connector is intended to be used with
