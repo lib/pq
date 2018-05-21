@@ -34,7 +34,7 @@ var _ driver.Connector = &connector{}
 // NewConnector returns a connector for the pq driver in a fixed configuration
 // with the given name. The returned connector can be used to create any number
 // of equivalent Conn's. The returned connector is intended to be used with
-// database/sql OpenDB.
+// database/sql.OpenDB.
 //
 // See https://golang.org/pkg/database/sql/driver/#Connector.
 // See https://golang.org/pkg/database/sql/#OpenDB.
