@@ -23,7 +23,7 @@ A benchmark suite can be run as part of the tests:
 Run a postgres container:
 
 ```
-docker run --expose 5432:5432 postgres
+docker run -p 5432:5432 postgres
 ```
 
 Run tests:
