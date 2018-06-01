@@ -39,6 +39,8 @@ func Array(a interface{}) interface {
 		return (*Int64Array)(&a)
 	case []string:
 		return (*StringArray)(&a)
+	case [][]byte:
+		return (*ByteaArray)(&a)
 
 	case *[]bool:
 		return (*BoolArray)(a)
@@ -48,6 +50,8 @@ func Array(a interface{}) interface {
 		return (*Int64Array)(a)
 	case *[]string:
 		return (*StringArray)(a)
+	case *[][]byte:
+		return (*ByteaArray)(a)
 	}
 
 	return GenericArray{a}

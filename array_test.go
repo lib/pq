@@ -109,12 +109,18 @@ func TestArrayScanner(t *testing.T) {
 		t.Errorf("Expected *StringArray, got %T", s)
 	}
 
+	s = Array(&[][]byte{})
+	if _, ok := s.(*ByteaArray); !ok {
+		t.Errorf("Expected *ByteaArray, got %T", s)
+	}
+
 	for _, tt := range []interface{}{
 		&[]sql.Scanner{},
 		&[][]bool{},
 		&[][]float64{},
 		&[][]int64{},
 		&[][]string{},
+		&[][][]byte{},
 	} {
 		s = Array(tt)
 		if _, ok := s.(GenericArray); !ok {
