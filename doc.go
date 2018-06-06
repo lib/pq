@@ -16,7 +16,7 @@ using this package directly. For example:
 		if err != nil {
 			log.Fatal(err)
 		}
-
+		defer db.Close()
 		age := 21
 		rows, err := db.Query("SELECT name FROM users WHERE age = $1", age)
 		…
