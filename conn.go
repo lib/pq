@@ -1549,14 +1549,19 @@ func (cn *conn) processParameterStatus(r *readBuf) {
 	param := r.string()
 	switch param {
 	case "server_version":
-		var major1 int
-		var major2 int
-		var minor int
-		_, err = fmt.Sscanf(r.string(), "%d.%d.%d", &major1, &major2, &minor)
-		if err == nil {
-			cn.parameterStatus.serverVersion = major1*10000 + major2*100 + minor
+		parts := strings.Split(r.string(), ".")
+		if len(parts) > 3 {
+			break
 		}
+		cn.parameterStatus.serverVersion = 0
+		for i, p := range parts {
+			val, err := strconv.Atoi(p)
+			if err != nil {
+				break
+			}
 
+			cn.parameterStatus.serverVersion += []int{10000, 100, 1}[i] * val
+		}
 	case "TimeZone":
 		cn.parameterStatus.currentLocation, err = time.LoadLocation(r.string())
 		if err != nil {
