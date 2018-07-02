@@ -2,6 +2,7 @@ package pq
 
 import (
 	"bufio"
+	"context"
 	"crypto/md5"
 	"database/sql"
 	"database/sql/driver"
@@ -20,7 +21,6 @@ import (
 	"unicode"
 
 	"github.com/lib/pq/oid"
-	"context"
 )
 
 // Common error types
