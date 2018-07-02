@@ -20,6 +20,7 @@ import (
 	"unicode"
 
 	"github.com/lib/pq/oid"
+	"context"
 )
 
 // Common error types
@@ -1190,6 +1191,31 @@ type stmt struct {
 	closed     bool
 }
 
+func (st *stmt) cancel() error {
+	return st.cn.cancel()
+}
+
+func (st *stmt) watchCancel(ctx context.Context) func() {
+	if done := ctx.Done(); done != nil {
+		finished := make(chan struct{})
+		go func() {
+			select {
+			case <-done:
+				_ = st.cancel()
+				finished <- struct{}{}
+			case <-finished:
+			}
+		}()
+		return func() {
+			select {
+			case <-finished:
+			case finished <- struct{}{}:
+			}
+		}
+	}
+	return nil
+}
+
 func (st *stmt) Close() (err error) {
 	if st.closed {
 		return nil
@@ -1223,7 +1249,28 @@ func (st *stmt) Close() (err error) {
 	return nil
 }
 
+func (st *stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	list := make([]driver.Value, len(args))
+	for i, nv := range args {
+		list[i] = nv.Value
+	}
+	finish := st.watchCancel(ctx)
+	r, err := st.query(list)
+	if err != nil {
+		if finish != nil {
+			finish()
+		}
+		return nil, err
+	}
+	r.finish = finish
+	return r, nil
+}
+
 func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) {
+	return st.query(v)
+}
+
+func (st *stmt) query(v []driver.Value) (r *rows, err error) {
 	if st.cn.bad {
 		return nil, driver.ErrBadConn
 	}
@@ -1236,6 +1283,19 @@ func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) {
 		colTyps:  st.colTyps,
 		colFmts:  st.colFmts,
 	}, nil
+}
+
+func (st *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	list := make([]driver.Value, len(args))
+	for i, nv := range args {
+		list[i] = nv.Value
+	}
+
+	if finish := st.watchCancel(ctx); finish != nil {
+		defer finish()
+	}
+
+	return st.Exec(list)
 }
 
 func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {

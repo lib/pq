@@ -43,6 +43,14 @@ func (cn *conn) ExecContext(ctx context.Context, query string, args []driver.Nam
 	return cn.Exec(query, list)
 }
 
+// Implement the "ConnPrepareContext" interface
+func (cn *conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
+	if finish := cn.watchCancel(ctx); finish != nil {
+		defer finish()
+	}
+	return cn.Prepare(query)
+}
+
 // Implement the "ConnBeginTx" interface
 func (cn *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	var mode string
