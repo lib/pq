@@ -38,8 +38,20 @@ func TestCopyInSchemaStmt(t *testing.T) {
 	}
 
 	stmt = CopyInSchema(`schema " name """`, `table " name """`, `co"lumn""`)
-	if stmt != `COPY "schema "" name """"""".`+
+	if stmt != `COPY "schema "" name """"""".` +
 		`"table "" name """"""" ("co""lumn""""") FROM STDIN` {
+		t.Fatal(stmt)
+	}
+}
+
+func TestCopyInWithNull(t *testing.T) {
+	stmt := CopyInWithNull("", "table name")
+	if stmt != `COPY "table name" () FROM STDIN NULL ''` {
+		t.Fatal(stmt)
+	}
+
+	stmt = CopyInWithNull("\\N", "table name", "column 1", "column 2")
+	if stmt != `COPY "table name" ("column 1", "column 2") FROM STDIN NULL '\N'` {
 		t.Fatal(stmt)
 	}
 }
