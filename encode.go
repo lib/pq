@@ -601,3 +601,15 @@ func (nt NullTime) Value() (driver.Value, error) {
 	}
 	return nt.Time, nil
 }
+
+// Equal compares two NullTime values and returns true if they are both null or
+// if they are both non-null and the underlying Time values are equal
+func (nt NullTime) Equal(other NullTime) bool {
+	if nt.Valid != other.Valid {
+		return false
+	}
+	if nt.Valid {
+		return nt.Time.Equal(other.Time)
+	}
+	return true
+}
