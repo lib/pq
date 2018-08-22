@@ -19,7 +19,7 @@ func TestInet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inet.Valid {
+	if inet.Inet != nil {
 		t.Fatalf("expected null result")
 	}
 
@@ -28,7 +28,7 @@ func TestInet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-query null value failed: %s", err.Error())
 	}
-	if inet.Valid {
+	if inet.Inet != nil {
 		t.Fatalf("expected null result")
 	}
 
@@ -38,7 +38,7 @@ func TestInet(t *testing.T) {
 		if err != nil {
 			t.Fatalf("re-query %s inet failed: %s", label, err.Error())
 		}
-		if !inet.Valid {
+		if inet.Inet == nil {
 			t.Fatalf("expected non-null value, got null for %s", label)
 		}
 		if bytes.Compare(i.Inet, inet.Inet) != 0 {
@@ -46,9 +46,9 @@ func TestInet(t *testing.T) {
 		}
 	}
 
-	testBidirectional(Inet{Inet: net.ParseIP("192.168.0.1"), Valid: true}, "Simple IPv4")
-	testBidirectional(Inet{Inet: net.ParseIP("::1"), Valid: true}, "Loopback IPv6")
-	testBidirectional(Inet{Inet: net.ParseIP("abcd:2345::"), Valid: true}, "Loopback IPv6")
+	testBidirectional(Inet{Inet: net.ParseIP("192.168.0.1")}, "Simple IPv4")
+	testBidirectional(Inet{Inet: net.ParseIP("::1")}, "Loopback IPv6")
+	testBidirectional(Inet{Inet: net.ParseIP("abcd:2345::")}, "Loopback IPv6")
 
 	// Bad argument
 	inet = Inet{}
