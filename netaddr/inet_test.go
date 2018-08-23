@@ -62,7 +62,7 @@ func TestInet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected error for empty string - %s", err.Error())
 	}
-	if inet.Valid {
+	if inet.Inet == nil {
 		t.Fatalf("Unexpected not null for empty/non-IP string string")
 	}
 }
