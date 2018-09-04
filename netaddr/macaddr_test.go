@@ -41,7 +41,7 @@ func TestMacaddr(t *testing.T) {
 		if !macaddr.Valid {
 			t.Fatalf("expected non-null value, got null for %s", label)
 		}
-		if bytes.Compare(m.Macaddr, macaddr.Macaddr) != 0 {
+		if !bytes.Equal(m.Macaddr, macaddr.Macaddr) {
 			t.Fatalf("expected MAC addresses to match, but did not for %s", label)
 		}
 	}

@@ -6,7 +6,7 @@ import (
 	"net"
 )
 
-// A wrapper for transferring Cidr values back and forth easily.
+// Cidr is a wrapper for transferring CIDR values back and forth easily.
 type Cidr struct {
 	Cidr  net.IPNet
 	Valid bool
@@ -38,7 +38,7 @@ func (c *Cidr) Scan(value interface{}) error {
 // Value implements the driver Valuer interface. Note if c.Valid is false
 // or c.Cidr.IP is nil the database column value will be set to NULL.
 func (c Cidr) Value() (driver.Value, error) {
-	if c.Valid == false || c.Cidr.IP == nil {
+	if !c.Valid || c.Cidr.IP == nil {
 		return nil, nil
 	}
 	return []byte(c.Cidr.String()), nil

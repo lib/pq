@@ -1,7 +1,6 @@
 package netaddr
 
 import (
-	"bytes"
 	"net"
 	"testing"
 
@@ -41,7 +40,7 @@ func TestInet(t *testing.T) {
 		if inet.Inet == nil {
 			t.Fatalf("expected non-null value, got null for %s", label)
 		}
-		if bytes.Compare(i.Inet, inet.Inet) != 0 {
+		if !net.IP.Equal(i.Inet, inet.Inet) {
 			t.Fatalf("expected IP addresses to match, but did not for %s - %s %s", label, i.Inet.String(), inet.Inet.String())
 		}
 	}

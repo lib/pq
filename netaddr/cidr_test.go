@@ -41,10 +41,10 @@ func TestCidr(t *testing.T) {
 		if !cidr.Valid {
 			t.Fatalf("expected non-null value, got null for %s", label)
 		}
-		if bytes.Compare(c.Cidr.IP, cidr.Cidr.IP) != 0 {
+		if !net.IP.Equal(c.Cidr.IP, cidr.Cidr.IP) {
 			t.Fatalf("expected IP addresses to match, but did not for %s - %s %s", label, c.Cidr.IP.String(), cidr.Cidr.IP.String())
 		}
-		if bytes.Compare(c.Cidr.Mask, cidr.Cidr.Mask) != 0 {
+		if !bytes.Equal(c.Cidr.Mask, cidr.Cidr.Mask) {
 			t.Fatalf("expected net masks to match, but did not for %s", label)
 		}
 	}

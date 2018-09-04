@@ -6,7 +6,7 @@ import (
 	"net"
 )
 
-// A wrapper for transferring Macaddr values back and forth easily.
+// Macaddr is a wrapper for transferring Macaddr values back and forth easily.
 type Macaddr struct {
 	Macaddr net.HardwareAddr
 	Valid   bool
@@ -36,7 +36,7 @@ func (m *Macaddr) Scan(value interface{}) error {
 // Value implements the driver Valuer interface. Note if m.Valid is false
 // or m.Macaddr is nil the database column value will be set to NULL.
 func (m Macaddr) Value() (driver.Value, error) {
-	if m.Valid == false || m.Macaddr == nil {
+	if !m.Valid || m.Macaddr == nil {
 		return nil, nil
 	}
 	return []byte(m.Macaddr.String()), nil

@@ -6,7 +6,7 @@ import (
 	"net"
 )
 
-// A wrapper for transferring Inet values back and forth easily.
+// Inet is a wrapper for transferring Inet values back and forth easily.
 type Inet struct {
 	Inet net.IP
 }
