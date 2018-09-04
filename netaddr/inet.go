@@ -14,6 +14,9 @@ type Inet struct {
 // Scan implements the Scanner interface.
 func (i *Inet) Scan(value interface{}) error {
 	i.Inet = nil
+	if value == nil {
+		return nil
+	}
 	ipAsBytes, ok := value.([]byte)
 	if !ok {
 		return errors.New("Could not convert scanned value to bytes")
@@ -26,8 +29,8 @@ func (i *Inet) Scan(value interface{}) error {
 	return nil
 }
 
-// Value implements the driver Valuer interface. Note if i.Valid is false
-// or i.IP is nil the database column value will be set to NULL.
+// Value implements the driver Valuer interface. Note if
+// i.IP is nil the database column value will be set to NULL.
 func (i Inet) Value() (driver.Value, error) {
 	if i.Inet == nil {
 		return nil, nil
