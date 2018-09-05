@@ -1552,9 +1552,16 @@ func (cn *conn) processParameterStatus(r *readBuf) {
 		var major1 int
 		var major2 int
 		var minor int
-		_, err = fmt.Sscanf(r.string(), "%d.%d.%d", &major1, &major2, &minor)
-		if err == nil {
-			cn.parameterStatus.serverVersion = major1*10000 + major2*100 + minor
+		// if the version string contains at least major1, set the server version
+		n, _ := fmt.Sscanf(r.string(), "%d.%d.%d", &major1, &major2, &minor)
+		if n > 0 {
+			// server version changed to two-part version in 10+, instead of three-part version
+			// details here: https://www.postgresql.org/docs/current/static/libpq-status.html
+			if major1 >= 10 {
+				cn.parameterStatus.serverVersion = major1*10000 + major2
+			} else {
+				cn.parameterStatus.serverVersion = major1*10000 + major2*100 + minor
+			}
 		}
 
 	case "TimeZone":
