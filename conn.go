@@ -1163,6 +1163,12 @@ func (cn *conn) auth(r *readBuf, o values) {
 		if r.int32() != 0 {
 			errorf("unexpected authentication response: %q", t)
 		}
+	case 10:
+		s := r.string()
+		if s != "SCRAM-SHA-256" {
+			errorf("unknown sasl mechanism: %q", s)
+		}
+		cn.doScramAuth(o["password"])
 	default:
 		errorf("unknown authentication response: %d", code)
 	}
