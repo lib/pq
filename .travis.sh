@@ -15,6 +15,7 @@ pgdg_repository() {
 }
 
 postgresql_configure() {
+	SCRAM=
 	if [ "$PGVERSION" = "10" ] || [ "$PGVERSION" = "11" ]; then
 		read -r -d eoscram SCRAM <<-scram
 		host      all         pqgomd5u1   all                   md5
