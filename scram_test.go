@@ -104,4 +104,3 @@ func TestSCRAMStrangePasswords(t *testing.T) {
 	}
 	db2.Close()
 }
-
