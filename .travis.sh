@@ -15,21 +15,27 @@ pgdg_repository() {
 }
 
 postgresql_configure() {
+	if [ "$PGVERSION" = "10" ] || [ "$PGVERSION" = "11" ]; then
+		read -r -d eoscram SCRAM <<-scram
+		host      all         pqgomd5u1   all                   md5
+		host      all         pqgomd5u2   all                   scram-sha-256
+		host      all         pqgoscramu1 all                   md5
+		host      all         pqgoscramu2 all                   scram-sha-256
+		eoscram
+		scram
+	fi
 	sudo tee /etc/postgresql/$PGVERSION/main/pg_hba.conf > /dev/null <<-config
 		local     all         all                               trust
 		hostnossl all         pqgossltest 127.0.0.1/32          reject
 		hostnossl all         pqgosslcert 127.0.0.1/32          reject
 		hostssl   all         pqgossltest 127.0.0.1/32          trust
 		hostssl   all         pqgosslcert 127.0.0.1/32          cert
+		$SCRAM
 		host      all         all         127.0.0.1/32          trust
 		hostnossl all         pqgossltest ::1/128               reject
 		hostnossl all         pqgosslcert ::1/128               reject
 		hostssl   all         pqgossltest ::1/128               trust
 		hostssl   all         pqgosslcert ::1/128               cert
-		host      all         pqgomd5u1   all                   md5
-		host      all         pqgomd5u2   all                   scram-sha-256
-		host      all         pqgoscramu1 all                   md5
-		host      all         pqgoscramu2 all                   scram-sha-256
 		host      all         all         ::1/128               trust
 	config
 
