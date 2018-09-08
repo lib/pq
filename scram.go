@@ -168,15 +168,15 @@ func makeNonce() string {
 	return base64.StdEncoding.EncodeToString(data)
 }
 
-func computeClientProof(salted_password []byte, auth_message []byte) string {
+func computeClientProof(sp, am []byte) string {
 	// ClientKey       := HMAC(SaltedPassword, "Client Key")
 	// StoredKey       := H(ClientKey)
 	// ClientSignature := HMAC(StoredKey, AuthMessage)
 	// ClientProof     := ClientKey XOR ClientSignature
 
-	ck := computeHMAC(salted_password, []byte("Client Key"))
+	ck := computeHMAC(sp, []byte("Client Key"))
 	sk := sha256.Sum256(ck)
-	cs := computeHMAC(sk[:], auth_message)
+	cs := computeHMAC(sk[:], am)
 	proof := make([]byte, len(cs))
 	for i := 0; i < len(cs); i++ {
 		proof[i] = ck[i] ^ cs[i]
@@ -184,12 +184,12 @@ func computeClientProof(salted_password []byte, auth_message []byte) string {
 	return base64.StdEncoding.EncodeToString(proof)
 }
 
-func computeServerSignature(salted_password []byte, auth_message []byte) string {
+func computeServerSignature(sp, am []byte) string {
 	// ServerKey       := HMAC(SaltedPassword, "Server Key")
 	// ServerSignature := HMAC(ServerKey, AuthMessage)
 
-	sk := computeHMAC(salted_password, []byte("Server Key"))
-	ss := computeHMAC(sk, auth_message)
+	sk := computeHMAC(sp, []byte("Server Key"))
+	ss := computeHMAC(sk, am)
 	return base64.StdEncoding.EncodeToString(ss)
 }
 
