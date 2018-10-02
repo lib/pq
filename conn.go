@@ -134,6 +134,9 @@ type conn struct {
 
 	// If true this connection is in the middle of a COPY
 	inCopy bool
+
+	// If not nil, notices will be synchronously sent here
+	noticeHandler func(*Error)
 }
 
 // Handle driver-side settings in parsed connection string.
@@ -997,7 +1000,9 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 		case 'E':
 			panic(parseError(r))
 		case 'N':
-			// ignore
+			if n := cn.noticeHandler; n != nil {
+				n(parseError(r))
+			}
 		default:
 			return
 		}
@@ -1014,8 +1019,12 @@ func (cn *conn) recv1Buf(r *readBuf) byte {
 		}
 
 		switch t {
-		case 'A', 'N':
+		case 'A':
 			// ignore
+		case 'N':
+			if n := cn.noticeHandler; n != nil {
+				n(parseError(r))
+			}
 		case 'S':
 			cn.processParameterStatus(r)
 		default:
