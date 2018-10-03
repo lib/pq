@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	_ "github.com/lib/pq"
+	_ "github.com/JoinCAD/pq"
 )
 
 type Fatalistic interface {

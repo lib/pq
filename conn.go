@@ -19,7 +19,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/lib/pq/oid"
+	"github.com/JoinCAD/pq/oid"
 )
 
 // Common error types
