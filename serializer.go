@@ -18,7 +18,13 @@ func Dump(driverRows driver.Rows) ([]byte, error) {
 			}
 		}()
 		values := make([]driver.Value, len(rs.colNames))
+		first := true
 		for err = rs.Next(values); err == nil; err = rs.Next(values) {
+			if !first {
+				builder.Write([]byte(",\n"))
+			} else {
+				first = false
+			}
 			builder.Write([]byte("("))
 			last := len(values) - 1
 			for i, v := range values {
@@ -47,7 +53,7 @@ func Dump(driverRows driver.Rows) ([]byte, error) {
 					builder.Write([]byte(", "))
 				}
 			}
-			builder.Write([]byte("),\n"))
+			builder.Write([]byte(")"))
 		}
 		if err != io.EOF {
 			return nil, err
