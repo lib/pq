@@ -17,15 +17,35 @@ func Dump(driverRows driver.Rows) ([]byte, error) {
 				panic(err)
 			}
 		}()
-		values := make([]driver.Value, len(rs.Columns()))
-		for err = nil; err == nil; err = rs.Next(values) {
+		values := make([]driver.Value, len(rs.colNames))
+		for err = rs.Next(values); err == nil; err = rs.Next(values) {
 			builder.Write([]byte("("))
+			last := len(values) - 1
 			for i, v := range values {
-				_, err = builder.Write(encode(&rs.cn.parameterStatus, v, rs.colTyps[i].OID))
-				if err != nil {
-					return nil, err
+				if v != nil {
+					var needsQuote bool
+					switch v.(type) {
+					case string:
+						needsQuote = true
+					case []byte:
+						needsQuote = true
+					}
+					if needsQuote {
+						builder.Write([]byte("'"))
+					}
+					_, err = builder.Write(encode(&rs.cn.parameterStatus, v, rs.colTyps[i].OID))
+					if err != nil {
+						return nil, err
+					}
+					if needsQuote {
+						builder.Write([]byte("'"))
+					}
+				} else {
+					builder.Write([]byte("NULL"))
 				}
-				builder.Write([]byte(", "))
+				if i != last {
+					builder.Write([]byte(", "))
+				}
 			}
 			builder.Write([]byte("),\n"))
 		}
