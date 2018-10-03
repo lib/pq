@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"io"
+	"time"
 )
 
 func Dump(driverRows driver.Rows) ([]byte, error) {
@@ -34,6 +35,8 @@ func Dump(driverRows driver.Rows) ([]byte, error) {
 					case string:
 						needsQuote = true
 					case []byte:
+						needsQuote = true
+					case time.Time:
 						needsQuote = true
 					}
 					if needsQuote {
