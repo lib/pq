@@ -1657,3 +1657,24 @@ func TestQuickClose(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestParamterStatusServerVersions(t *testing.T) {
+	// test cases derived from libpq status documentation (see section on PQserverVersion)
+	// https://www.postgresql.org/docs/current/static/libpq-status.html
+	versionMap := map[string]int{}
+	versionMap["9.2.0"] = 90200
+	versionMap["10.5"] = 100005
+
+	for versionStr, version := range versionMap {
+		c := &conn{}
+		writer := &writeBuf{}
+		writer.string("server_version")
+		writer.string(versionStr)
+		reader := readBuf(writer.buf)
+		c.processParameterStatus(&reader)
+		expectedVersionNum := version
+		if c.parameterStatus.serverVersion != expectedVersionNum {
+			t.Fatalf("server version num %d does not match expected value %d", c.parameterStatus.serverVersion, expectedVersionNum)
+		}
+	}
+}
