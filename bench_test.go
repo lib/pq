@@ -83,7 +83,7 @@ func (r *circularConn) Close() error { return nil }
 
 func fakeConn(content string, prefixLen int) *conn {
 	c := &circularConn{content: content, prefixLen: prefixLen}
-	return &conn{buf: bufio.NewReader(c), c: c}
+	return &conn{buf: bufio.NewReader(c), c: c, scratch: make([]byte, 512)}
 }
 
 // This benchmark is meant to be the same as BenchmarkSelectString, but takes
