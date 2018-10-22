@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// Dump formats a SQL-dump compatible representation of the given rows.
 func Dump(driverRows driver.Rows) ([]byte, error) {
 	var err error
 	var builder bytes.Buffer
@@ -42,7 +43,8 @@ func Dump(driverRows driver.Rows) ([]byte, error) {
 					if needsQuote {
 						builder.Write([]byte("'"))
 					}
-					_, err = builder.Write(encode(&rs.cn.parameterStatus, v, rs.colTyps[i].OID))
+					ve := encode(&rs.cn.parameterStatus, v, rs.colTyps[i].OID)
+					_, err = builder.Write(escapeSingleQuotes(ve))
 					if err != nil {
 						return nil, err
 					}
@@ -64,4 +66,19 @@ func Dump(driverRows driver.Rows) ([]byte, error) {
 		return builder.Bytes(), nil
 	}
 	return nil, errors.New("not a postgres rows struct")
+}
+
+const singleQuote = '\''
+
+func escapeSingleQuotes(s []byte) []byte {
+	out := make([]byte, 0, 2*len(s))
+	for i := range s {
+		switch c := s[i]; c {
+		case singleQuote:
+			out = append(out, singleQuote, singleQuote)
+		default:
+			out = append(out, c)
+		}
+	}
+	return out
 }
