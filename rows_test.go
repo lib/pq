@@ -16,6 +16,8 @@ func TestDataTypeName(t *testing.T) {
 		{oid.T_int8, "INT8"},
 		{oid.T_int4, "INT4"},
 		{oid.T_int2, "INT2"},
+		{oid.T_float4, "FLOAT4"},
+		{oid.T_float8, "FLOAT8"},
 		{oid.T_varchar, "VARCHAR"},
 		{oid.T_text, "TEXT"},
 		{oid.T_bool, "BOOL"},
@@ -44,6 +46,8 @@ func TestDataType(t *testing.T) {
 		{oid.T_int8, reflect.Int64},
 		{oid.T_int4, reflect.Int32},
 		{oid.T_int2, reflect.Int16},
+		{oid.T_float4, reflect.Float32},
+		{oid.T_float8, reflect.Float64},
 		{oid.T_varchar, reflect.String},
 		{oid.T_text, reflect.String},
 		{oid.T_bool, reflect.Bool},
@@ -148,6 +152,26 @@ func TestRowsColumnTypes(t *testing.T) {
 			},
 			ScanType: reflect.TypeOf(int32(0)),
 		}, {
+			Name:     "f32",
+			TypeName: "FLOAT4",
+			Length: struct {
+				Len int64
+				OK  bool
+			}{
+				Len: 0,
+				OK:  false,
+			},
+			DecimalSize: struct {
+				Precision int64
+				Scale     int64
+				OK        bool
+			}{
+				Precision: 0,
+				Scale:     0,
+				OK:        false,
+			},
+			ScanType: reflect.TypeOf(float32(0)),
+		}, {
 			Name:     "bar",
 			TypeName: "TEXT",
 			Length: struct {
@@ -173,7 +197,7 @@ func TestRowsColumnTypes(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	rows, err := db.Query("SELECT 1 AS a, text 'bar' AS bar, 1.28::numeric(9, 2) AS dec")
+	rows, err := db.Query("SELECT 1 AS a, 2::real AS f32, text 'bar' AS bar, 1.28::numeric(9, 2) AS dec")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,8 +206,8 @@ func TestRowsColumnTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(columns) != 3 {
-		t.Errorf("expected 3 columns found %d", len(columns))
+	if len(columns) != 4 {
+		t.Errorf("expected 4 columns found %d", len(columns))
 	}
 
 	for i, tt := range columnTypesTests {
