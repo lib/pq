@@ -19,8 +19,9 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/lib/pq/oid"
 	"regexp"
+
+	"github.com/lib/pq/oid"
 )
 
 // Common error types
@@ -116,7 +117,7 @@ type conn struct {
 	secretKey int
 
 	parameterStatus parameterStatus
-	importRows int64
+	importRows      int64
 
 	saveMessageType   byte
 	saveMessageBuffer []byte
