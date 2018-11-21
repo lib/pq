@@ -23,11 +23,27 @@ A benchmark suite can be run as part of the tests:
 Run a postgres container:
 
 ```
-docker run --expose 5432:5432 postgres
+docker run -p 5432:5432 postgres
 ```
 
 Run tests:
 
 ```
 PGHOST=localhost PGPORT=5432 PGUSER=postgres PGSSLMODE=disable PGDATABASE=postgres go test
+```
+
+
+## Running tests that require a read-only postgres
+
+Run a writeable postgres instance on 5432 as well as an additional, read-only postgres container on port 54321
+
+```
+docker run -p 5432:5432 postgres
+docker run -p 54321:5432 -d postgres -c 'default_transaction_read_only=true'
+```
+
+Run tests, including those that require a read-only postgres instance
+
+```
+TEST_READONLY=true go test
 ```

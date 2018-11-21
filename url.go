@@ -55,12 +55,19 @@ func ParseURL(url string) (string, error) {
 		accrue("password", v)
 	}
 
-	if host, port, err := net.SplitHostPort(u.Host); err != nil {
-		accrue("host", u.Host)
-	} else {
-		accrue("host", host)
-		accrue("port", port)
+	hostports := strings.Split(u.Host, ",")
+	hosts := make([]string, 0, len(hostports))
+	ports := make([]string, 0, len(hostports))
+	for _, hostport := range hostports {
+		if host, port, err := net.SplitHostPort(hostport); err != nil {
+			hosts = append(hosts, hostport)
+		} else {
+			hosts = append(hosts, host)
+			ports = append(ports, port)
+		}
 	}
+	accrue("host", strings.Join(hosts, ","))
+	accrue("port", strings.Join(ports, ","))
 
 	if u.Path != "" {
 		accrue("dbname", u.Path[1:])

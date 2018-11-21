@@ -64,3 +64,36 @@ func TestMinimalURL(t *testing.T) {
 		t.Fatalf("expected blank connection string, got: %q", cs)
 	}
 }
+
+func TestParseURLMultipleHosts(t *testing.T) {
+	expected := "host=host1,host2"
+	str, err := ParseURL("postgres://host1,host2/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if str != expected {
+		t.Fatalf("unexpected result from ParseURL:\n+ %v\n- %v", str, expected)
+	}
+}
+func TestParseURLMultipleHostsMultiplePorts(t *testing.T) {
+	expected := "host=host1,host2 port=15432,25432"
+	str, err := ParseURL("postgres://host1:15432,host2:25432/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if str != expected {
+		t.Fatalf("unexpected result from ParseURL:\n+ %v\n- %v", str, expected)
+	}
+}
+func TestParseURLMultipleHostsSinglePort(t *testing.T) {
+	expected := "host=host1,host2 port=5432"
+	for _, input := range []string{"postgres://host1,host2:5432/", "postgres://host1:5432,host2/"} {
+		str, err := ParseURL(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if str != expected {
+			t.Fatalf("unexpected result from ParseURL:\n+ %v\n- %v", str, expected)
+		}
+	}
+}

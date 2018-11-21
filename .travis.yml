@@ -21,15 +21,13 @@ env:
     - PGVERSION=9.5
     - PGVERSION=9.4
     - PGVERSION=9.3
-    - PGVERSION=9.2
-    - PGVERSION=9.1
-    - PGVERSION=9.0
 
 before_install:
   - ./.travis.sh postgresql_uninstall
   - ./.travis.sh pgdg_repository
   - ./.travis.sh postgresql_install
-  - ./.travis.sh postgresql_configure
+  - ./.travis.sh postgresql_configure primary
+  - ./.travis.sh postgresql_configure secondary
   - ./.travis.sh client_configure
   - ./.travis.sh megacheck_install
   - ./.travis.sh golint_install
