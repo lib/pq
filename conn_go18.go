@@ -137,3 +137,60 @@ func (cn *conn) cancel() error {
 		return err
 	}
 }
+
+// Implement the "StmtQueryContext" interface
+func (st *stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	list := make([]driver.Value, len(args))
+	for i, nv := range args {
+		list[i] = nv.Value
+	}
+	finish := st.watchCancel(ctx)
+	r, err := st.query(list)
+	if err != nil {
+		if finish != nil {
+			finish()
+		}
+		return nil, err
+	}
+	r.finish = finish
+	return r, nil
+}
+
+// Implement the "StmtExecContext" interface
+func (st *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	list := make([]driver.Value, len(args))
+	for i, nv := range args {
+		list[i] = nv.Value
+	}
+
+	if finish := st.watchCancel(ctx); finish != nil {
+		defer finish()
+	}
+
+	return st.Exec(list)
+}
+
+func (st *stmt) watchCancel(ctx context.Context) func() {
+	if done := ctx.Done(); done != nil {
+		finished := make(chan struct{})
+		go func() {
+			select {
+			case <-done:
+				_ = st.cancel()
+				finished <- struct{}{}
+			case <-finished:
+			}
+		}()
+		return func() {
+			select {
+			case <-finished:
+			case finished <- struct{}{}:
+			}
+		}
+	}
+	return nil
+}
+
+func (st *stmt) cancel() error {
+	return st.cn.cancel()
+}
