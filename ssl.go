@@ -99,7 +99,6 @@ func sslClientCertificates(tlsConf *tls.Config, o values) error {
 		return nil
 	}
 
-
 	// user.Current() might fail when cross-compiling. We have to ignore the
 	// error and continue without home directory defaults, since we wouldn't
 	// know from where to load them.
