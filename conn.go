@@ -557,6 +557,7 @@ func (cn *conn) begin(mode string) (_ driver.Tx, err error) {
 
 func (cn *conn) closeTxn() {
 	if finish := cn.txnFinish; finish != nil {
+		cn.txnFinish = nil
 		finish()
 	}
 }
