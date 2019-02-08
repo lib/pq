@@ -106,7 +106,11 @@ func TestCommitInFailedTransaction(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	txn, err := db.Begin()
+	// Provide a context with a Done channel to check that the Commit does not hang in that case (https://github.com/lib/pq/issues/731).
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	txn, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
