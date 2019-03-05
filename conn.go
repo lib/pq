@@ -1171,7 +1171,7 @@ func (cn *conn) auth(r *readBuf, o values) {
 			errorf("SCRAM-SHA-256 error: %s", sc.Err().Error())
 		}
 		scOut := sc.Out()
-		
+
 		w := cn.writeBuf('p')
 		w.string("SCRAM-SHA-256")
 		w.int32(len(scOut))
@@ -1192,7 +1192,7 @@ func (cn *conn) auth(r *readBuf, o values) {
 		if sc.Err() != nil {
 			errorf("SCRAM-SHA-256 error: %s", sc.Err().Error())
 		}
-		
+
 		scOut = sc.Out()
 		w = cn.writeBuf('p')
 		w.bytes(scOut)
@@ -1206,7 +1206,7 @@ func (cn *conn) auth(r *readBuf, o values) {
 		if r.int32() != 12 {
 			errorf("unexpected authentication response: %q", t)
 		}
-		
+
 		nextStep = r.next(len(*r))
 		sc.Step(nextStep)
 		if sc.Err() != nil {
