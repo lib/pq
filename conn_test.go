@@ -1657,3 +1657,49 @@ func TestQuickClose(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMultipleResult(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	rows, err := db.Query(`
+		begin;
+			select * from information_schema.tables limit 1;
+			select * from information_schema.columns limit 2;
+		commit;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type set struct {
+		cols     []string
+		rowCount int
+	}
+	buf := []*set{}
+	for {
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := &set{
+			cols: cols,
+		}
+		buf = append(buf, s)
+
+		for rows.Next() {
+			s.rowCount++
+		}
+		if !rows.NextResultSet() {
+			break
+		}
+	}
+	if len(buf) != 2 {
+		t.Fatalf("got %d sets, expected 2", len(buf))
+	}
+	if len(buf[0].cols) == len(buf[1].cols) || len(buf[1].cols) == 0 {
+		t.Fatal("invalid cols size, expected different column count and greater then zero")
+	}
+	if buf[0].rowCount != 1 || buf[1].rowCount != 2 {
+		t.Fatal("incorrect number of rows returned")
+	}
+}
