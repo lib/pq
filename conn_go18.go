@@ -74,6 +74,18 @@ func (cn *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, 
 	return tx, nil
 }
 
+func (cn *conn) Ping(ctx context.Context) error {
+	if finish := cn.watchCancel(ctx); finish != nil {
+		defer finish()
+	}
+	rows, err := cn.simpleQuery("SELECT 'lib/pq ping test';")
+	if err != nil {
+		return driver.ErrBadConn // https://golang.org/pkg/database/sql/driver/#Pinger
+	}
+	rows.Close()
+	return nil
+}
+
 func (cn *conn) watchCancel(ctx context.Context) func() {
 	if done := ctx.Done(); done != nil {
 		finished := make(chan struct{})
