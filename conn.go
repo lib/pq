@@ -2,6 +2,7 @@ package pq
 
 import (
 	"bufio"
+	"context"
 	"crypto/md5"
 	"database/sql"
 	"database/sql/driver"
@@ -89,13 +90,24 @@ type Dialer interface {
 	DialTimeout(network, address string, timeout time.Duration) (net.Conn, error)
 }
 
-type defaultDialer struct{}
-
-func (d defaultDialer) Dial(ntw, addr string) (net.Conn, error) {
-	return net.Dial(ntw, addr)
+type DialerContext interface {
+	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }
-func (d defaultDialer) DialTimeout(ntw, addr string, timeout time.Duration) (net.Conn, error) {
-	return net.DialTimeout(ntw, addr, timeout)
+
+type defaultDialer struct {
+	d net.Dialer
+}
+
+func (d defaultDialer) Dial(network, address string) (net.Conn, error) {
+	return d.d.Dial(network, address)
+}
+func (d defaultDialer) DialTimeout(network, address string, timeout time.Duration) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return d.DialContext(ctx, network, address)
+}
+func (d defaultDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	return d.d.DialContext(ctx, network, address)
 }
 
 type conn struct {
@@ -244,90 +256,35 @@ func (cn *conn) writeBuf(b byte) *writeBuf {
 	}
 }
 
-// Open opens a new connection to the database. name is a connection string.
+// Open opens a new connection to the database. dsn is a connection string.
 // Most users should only use it through database/sql package from the standard
 // library.
-func Open(name string) (_ driver.Conn, err error) {
-	return DialOpen(defaultDialer{}, name)
+func Open(dsn string) (_ driver.Conn, err error) {
+	return DialOpen(defaultDialer{}, dsn)
 }
 
 // DialOpen opens a new connection to the database using a dialer.
-func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
+func DialOpen(d Dialer, dsn string) (_ driver.Conn, err error) {
+	c, err := NewConnector(dsn)
+	if err != nil {
+		return nil, err
+	}
+	c.dialer = d
+	return c.open(context.Background())
+}
+
+func (c *Connector) open(ctx context.Context) (cn *conn, err error) {
 	// Handle any panics during connection initialization.  Note that we
 	// specifically do *not* want to use errRecover(), as that would turn any
 	// connection errors into ErrBadConns, hiding the real error message from
 	// the user.
 	defer errRecoverNoErrBadConn(&err)
 
-	o := make(values)
+	o := c.opts
 
-	// A number of defaults are applied here, in this order:
-	//
-	// * Very low precedence defaults applied in every situation
-	// * Environment variables
-	// * Explicitly passed connection information
-	o["host"] = "localhost"
-	o["port"] = "5432"
-	// N.B.: Extra float digits should be set to 3, but that breaks
-	// Postgres 8.4 and older, where the max is 2.
-	o["extra_float_digits"] = "2"
-	for k, v := range parseEnviron(os.Environ()) {
-		o[k] = v
-	}
-
-	if strings.HasPrefix(name, "postgres://") || strings.HasPrefix(name, "postgresql://") {
-		name, err = ParseURL(name)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if err := parseOpts(name, o); err != nil {
-		return nil, err
-	}
-
-	// Use the "fallback" application name if necessary
-	if fallback, ok := o["fallback_application_name"]; ok {
-		if _, ok := o["application_name"]; !ok {
-			o["application_name"] = fallback
-		}
-	}
-
-	// We can't work with any client_encoding other than UTF-8 currently.
-	// However, we have historically allowed the user to set it to UTF-8
-	// explicitly, and there's no reason to break such programs, so allow that.
-	// Note that the "options" setting could also set client_encoding, but
-	// parsing its value is not worth it.  Instead, we always explicitly send
-	// client_encoding as a separate run-time parameter, which should override
-	// anything set in options.
-	if enc, ok := o["client_encoding"]; ok && !isUTF8(enc) {
-		return nil, errors.New("client_encoding must be absent or 'UTF8'")
-	}
-	o["client_encoding"] = "UTF8"
-	// DateStyle needs a similar treatment.
-	if datestyle, ok := o["datestyle"]; ok {
-		if datestyle != "ISO, MDY" {
-			panic(fmt.Sprintf("setting datestyle must be absent or %v; got %v",
-				"ISO, MDY", datestyle))
-		}
-	} else {
-		o["datestyle"] = "ISO, MDY"
-	}
-
-	// If a user is not provided by any other means, the last
-	// resort is to use the current operating system provided user
-	// name.
-	if _, ok := o["user"]; !ok {
-		u, err := userCurrent()
-		if err != nil {
-			return nil, err
-		}
-		o["user"] = u
-	}
-
-	cn := &conn{
+	cn = &conn{
 		opts:   o,
-		dialer: d,
+		dialer: c.dialer,
 	}
 	err = cn.handleDriverSettings(o)
 	if err != nil {
@@ -335,7 +292,7 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	}
 	cn.handlePgpass(o)
 
-	cn.c, err = dial(d, o)
+	cn.c, err = dial(ctx, c.dialer, o)
 	if err != nil {
 		return nil, err
 	}
@@ -364,10 +321,10 @@ func DialOpen(d Dialer, name string) (_ driver.Conn, err error) {
 	return cn, err
 }
 
-func dial(d Dialer, o values) (net.Conn, error) {
-	ntw, addr := network(o)
+func dial(ctx context.Context, d Dialer, o values) (net.Conn, error) {
+	network, address := network(o)
 	// SSL is not necessary or supported over UNIX domain sockets
-	if ntw == "unix" {
+	if network == "unix" {
 		o["sslmode"] = "disable"
 	}
 
@@ -378,19 +335,30 @@ func dial(d Dialer, o values) (net.Conn, error) {
 			return nil, fmt.Errorf("invalid value for parameter connect_timeout: %s", err)
 		}
 		duration := time.Duration(seconds) * time.Second
+
 		// connect_timeout should apply to the entire connection establishment
 		// procedure, so we both use a timeout for the TCP connection
 		// establishment and set a deadline for doing the initial handshake.
 		// The deadline is then reset after startup() is done.
 		deadline := time.Now().Add(duration)
-		conn, err := d.DialTimeout(ntw, addr, duration)
+		var conn net.Conn
+		if dctx, ok := d.(DialerContext); ok {
+			ctx, cancel := context.WithTimeout(ctx, duration)
+			defer cancel()
+			conn, err = dctx.DialContext(ctx, network, address)
+		} else {
+			conn, err = d.DialTimeout(network, address, duration)
+		}
 		if err != nil {
 			return nil, err
 		}
 		err = conn.SetDeadline(deadline)
 		return conn, err
 	}
-	return d.Dial(ntw, addr)
+	if dctx, ok := d.(DialerContext); ok {
+		return dctx.DialContext(ctx, network, address)
+	}
+	return d.Dial(network, address)
 }
 
 func network(o values) (string, string) {

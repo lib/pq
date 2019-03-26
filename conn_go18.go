@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"time"
 )
 
 // Implement the "QueryerContext" interface
@@ -92,7 +93,14 @@ func (cn *conn) watchCancel(ctx context.Context) func() {
 		go func() {
 			select {
 			case <-done:
-				_ = cn.cancel()
+				// At this point the function level context is canceled,
+				// so it must not be used for the additional network
+				// request to cancel the query.
+				// Create a new context to pass into the dial.
+				ctxCancel, cancel := context.WithTimeout(context.Background(), time.Second*10)
+				defer cancel()
+
+				_ = cn.cancel(ctxCancel)
 				finished <- struct{}{}
 			case <-finished:
 			}
@@ -107,8 +115,8 @@ func (cn *conn) watchCancel(ctx context.Context) func() {
 	return nil
 }
 
-func (cn *conn) cancel() error {
-	c, err := dial(cn.dialer, cn.opts)
+func (cn *conn) cancel(ctx context.Context) error {
+	c, err := dial(ctx, cn.dialer, cn.opts)
 	if err != nil {
 		return err
 	}
