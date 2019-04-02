@@ -299,6 +299,7 @@ func (c *Connector) open(ctx context.Context) (cn *conn, err error) {
 
 	err = cn.ssl(o)
 	if err != nil {
+		cn.c.Close()
 		return nil, err
 	}
 
