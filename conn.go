@@ -455,6 +455,9 @@ func parseOpts(name string, o values) error {
 						return fmt.Errorf(`missing character after backslash`)
 					}
 				}
+				if r == '=' {
+					return fmt.Errorf(`missing character after "=" in %q connection info string`, string(keyRunes))
+				}
 				valRunes = append(valRunes, r)
 
 				if r, ok = s.Next(); !ok {
