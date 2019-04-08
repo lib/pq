@@ -455,9 +455,6 @@ func parseOpts(name string, o values) error {
 						return fmt.Errorf(`missing character after backslash`)
 					}
 				}
-				if r == '=' {
-					return fmt.Errorf(`missing character after "=" in %q connection info string`, string(keyRunes))
-				}
 				valRunes = append(valRunes, r)
 
 				if r, ok = s.Next(); !ok {
@@ -482,10 +479,40 @@ func parseOpts(name string, o values) error {
 			}
 		}
 
-		o[string(keyRunes)] = string(valRunes)
+		if exist, valRunesKey, valRunesVal := checkEqualInVal(valRunes); exist {
+			o[string(valRunesKey)] = string(valRunesVal)
+			o[string(keyRunes)] = ""
+		} else {
+			o[string(keyRunes)] = string(valRunes)
+		}
 	}
 
 	return nil
+}
+
+// checkEqualInVal check if valRunes contains "=" or not
+func checkEqualInVal(valRunes []rune) (bool, []rune, []rune) {
+	var valRunesKey, valRunesVal []rune
+	equalExist := false
+
+	for i := 0; i < len(valRunes); i++ {
+		if valRunes[i] == '=' {
+			equalExist = true
+			// To skip '='
+			i = i + 1
+		}
+
+		if equalExist {
+			valRunesVal = append(valRunesVal, valRunes[i])
+		} else {
+			valRunesKey = append(valRunesKey, valRunes[i])
+		}
+	}
+
+	if equalExist == false {
+		valRunesKey = []rune{}
+	}
+	return equalExist, valRunesKey, valRunesVal
 }
 
 func (cn *conn) isInTransaction() bool {
