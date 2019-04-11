@@ -1703,3 +1703,239 @@ func TestMultipleResult(t *testing.T) {
 		t.Fatal("incorrect number of rows returned")
 	}
 }
+
+func TestQueryWithNamedParams(t *testing.T) {
+	var err error
+	var rows *sql.Rows
+
+	var val1, val2, val3 string
+	var val4 []int64
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	rows, err = db.Query("SELECT :firstName, :lastName, :firstName, '{1}'::int[]", sql.Named("firstName", "John"), sql.Named("lastName", "Rambo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !rows.Next() {
+		t.Fatal("expect to have one result, got none")
+	}
+
+	err = rows.Scan(&val1, &val2, &val3, Array(&val4))
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if val1 != "John" && val1 != val3 {
+		t.Fatalf("expect %s and %s to be equals to %s", val1, val3, "John")
+	}
+
+	if val2 != "Rambo" {
+		t.Fatalf("expect %s to equal %s", val2, "Rambo")
+	}
+
+	if len(val4) != 1 {
+		t.Fatalf("expect %d got %d", 1, len(val4))
+	}
+}
+
+func TestQueryWithNamedParamsMixed(t *testing.T) {
+	var err error
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err = db.Query("SELECT :firstName, :lastName, :firstName, $3", sql.Named("firstName", "John"), sql.Named("lastName", "Rambo"))
+
+	if err == nil {
+		t.Fatal("expect an error, got nil")
+	}
+}
+
+func TestQueryWithDuplicatedNamedParams(t *testing.T) {
+	var err error
+	errMsg := "Expect firstName param to be only present one time"
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err = db.Query("SELECT :firstName, :lastName, :age", sql.Named("firstName", "John"), sql.Named("firstName", "Rambo"), sql.Named("age", "42"))
+
+	if err == nil {
+		t.Fatal("expect an error, got nil")
+	}
+
+	if err.Error() != errMsg {
+		t.Fatalf("expect %s, got %s", errMsg, err.Error())
+	}
+}
+
+func TestQueryWithUnknownNamedParams(t *testing.T) {
+	var err error
+	errMsg := "name param is unknown"
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err = db.Query("SELECT :firstName, :lastName, :age", sql.Named("firstName", "John"), sql.Named("name", "Rambo"), sql.Named("age", "42"))
+
+	if err == nil {
+		t.Fatal("expect an error, got nil")
+	}
+
+	if err.Error() != errMsg {
+		t.Fatalf("expect %s, got %s", errMsg, err.Error())
+	}
+}
+
+func TestQueryWithMissingNamedParams(t *testing.T) {
+	var err error
+	errMsg := "Expect 3 named parameter(s)"
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err = db.Query("SELECT :firstName, :lastName, :age", sql.Named("firstName", "John"), sql.Named("lastName", "Rambo"))
+
+	if err == nil {
+		t.Fatal("expect an error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), errMsg) {
+		t.Fatalf("expect %s to be included in %s", errMsg, err.Error())
+	}
+}
+
+func TestExecWithNamedParams(t *testing.T) {
+	var err error
+	var r sql.Result
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err = db.Exec("CREATE TEMP TABLE temp (a text, b text, c text, d int[])")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, err = db.Exec(
+		`INSERT INTO temp (a, b, c, d) VALUES (:firstName, :lastName, :firstName, '{1}'::int[])`,
+		sql.Named("firstName", "John"),
+		sql.Named("lastName", "Rambo"),
+	)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if n, _ := r.RowsAffected(); n != 1 {
+		t.Fatalf("expected 1 row affected, not %d", n)
+	}
+}
+
+func TestExecWithNamedParamsMixed(t *testing.T) {
+	var err error
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err = db.Exec("CREATE TEMP TABLE temp (a text, b text, c text, d int[])")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec(
+		`INSERT INTO temp (a, b, c, d) VALUES (:firstName, :lastName, $3, '{1}'::int[])`,
+		sql.Named("firstName", "John"),
+		sql.Named("lastName", "Rambo"),
+	)
+
+	if err == nil {
+		t.Fatal("expect an error, got nil")
+	}
+}
+
+func TestExecWithDuplicatedNamedParams(t *testing.T) {
+	var err error
+	errMsg := "Expect firstName param to be only present one time"
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err = db.Exec("CREATE TEMP TABLE temp (a text, b text, c text, d int[])")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec(
+		`INSERT INTO temp (a, b, c, d) VALUES (:firstName, :lastName, '{1}'::int[])`,
+		sql.Named("firstName", "John"),
+		sql.Named("firstName", "Rambo"),
+	)
+
+	if err == nil {
+		t.Fatal("expect an error, got nil")
+	}
+
+	if err.Error() != errMsg {
+		t.Fatalf("expect %s, got %s", errMsg, err.Error())
+	}
+}
+
+func TestExecWithUnknownNamedParams(t *testing.T) {
+	var err error
+	errMsg := "name param is unknown"
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err = db.Exec("CREATE TEMP TABLE temp (a text, b text, c text, d int[])")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec(
+		`INSERT INTO temp (a, b, c, d) VALUES (:firstName, :lastName, '{1}'::int[])`,
+		sql.Named("firstName", "John"),
+		sql.Named("name", "Rambo"),
+	)
+
+	if err == nil {
+		t.Fatal("expect an error, got nil")
+	}
+
+	if err.Error() != errMsg {
+		t.Fatalf("expect %s, got %s", errMsg, err.Error())
+	}
+}
+
+func TestExecWithMissingNamedParams(t *testing.T) {
+	var err error
+	errMsg := "Expect 2 named parameter(s)"
+
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err = db.Exec("CREATE TEMP TABLE temp (a text, b text, c text, d int[])")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec(
+		`INSERT INTO temp (a, b, c, d) VALUES (:firstName, :lastName, '{1}'::int[])`,
+		sql.Named("firstName", "John"),
+	)
+
+	if err == nil {
+		t.Fatal("expect an error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), errMsg) {
+		t.Fatalf("expect %s to be included in %s", errMsg, err.Error())
+	}
+}
+
+// TODO duplicate tests for exec, preparedStatement.Exec and preparedStatement.Query
