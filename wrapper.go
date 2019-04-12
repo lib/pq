@@ -18,7 +18,6 @@ type requestWrapper struct {
 	namedParamMapping map[string]int
 }
 
-// TODO bench tests !
 // newRequestWrapper setup a queryWrapper. During the process, the query is analyzed
 // to determine if named parameters (alphabetical labels prefixed by ':') are used.
 // If so the request is updated to replace named parameters by ordinal parameters and the mapping is stored.

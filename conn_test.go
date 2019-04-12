@@ -1714,7 +1714,7 @@ func TestQueryWithNamedParams(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	rows, err = db.Query("SELECT :firstName, :lastName, :firstName, '{1}'::int[]", sql.Named("firstName", "John"), sql.Named("lastName", "Rambo"))
+	rows, err = db.Query("SELECT :firstName::text, :lastName::text, :firstName::text, '{1}'::int[]", sql.Named("firstName", "John"), sql.Named("lastName", "Rambo"))
 	if err != nil {
 		t.Fatal(err)
 	}
