@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/md5"
+	"crypto/sha256"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/binary"
@@ -21,6 +22,7 @@ import (
 	"unicode"
 
 	"github.com/lib/pq/oid"
+	"github.com/lib/pq/scram"
 )
 
 // Common error types
@@ -958,7 +960,6 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 		if err != nil {
 			panic(err)
 		}
-
 		switch t {
 		case 'E':
 			panic(parseError(r))
@@ -1129,6 +1130,55 @@ func (cn *conn) auth(r *readBuf, o values) {
 		if r.int32() != 0 {
 			errorf("unexpected authentication response: %q", t)
 		}
+	case 10:
+		sc := scram.NewClient(sha256.New, o["user"], o["password"])
+		sc.Step(nil)
+		if sc.Err() != nil {
+			errorf("SCRAM-SHA-256 error: %s", sc.Err().Error())
+		}
+		scOut := sc.Out()
+
+		w := cn.writeBuf('p')
+		w.string("SCRAM-SHA-256")
+		w.int32(len(scOut))
+		w.bytes(scOut)
+		cn.send(w)
+
+		t, r := cn.recv()
+		if t != 'R' {
+			errorf("unexpected password response: %q", t)
+		}
+
+		if r.int32() != 11 {
+			errorf("unexpected authentication response: %q", t)
+		}
+
+		nextStep := r.next(len(*r))
+		sc.Step(nextStep)
+		if sc.Err() != nil {
+			errorf("SCRAM-SHA-256 error: %s", sc.Err().Error())
+		}
+
+		scOut = sc.Out()
+		w = cn.writeBuf('p')
+		w.bytes(scOut)
+		cn.send(w)
+
+		t, r = cn.recv()
+		if t != 'R' {
+			errorf("unexpected password response: %q", t)
+		}
+
+		if r.int32() != 12 {
+			errorf("unexpected authentication response: %q", t)
+		}
+
+		nextStep = r.next(len(*r))
+		sc.Step(nextStep)
+		if sc.Err() != nil {
+			errorf("SCRAM-SHA-256 error: %s", sc.Err().Error())
+		}
+
 	default:
 		errorf("unknown authentication response: %d", code)
 	}
