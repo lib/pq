@@ -301,6 +301,9 @@ func (c *Connector) open(ctx context.Context) (cn *conn, err error) {
 
 	err = cn.ssl(o)
 	if err != nil {
+		if cn.c != nil {
+			cn.c.Close()
+		}
 		return nil, err
 	}
 
