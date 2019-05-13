@@ -155,6 +155,9 @@ type conn struct {
 
 	// If not nil, notifications will be synchronously sent here
 	notificationHandler func(*Notification)
+
+	// GSSAPI context
+	gss Gss
 }
 
 // Handle driver-side settings in parsed connection string.
@@ -1071,7 +1074,10 @@ func isDriverSetting(key string) bool {
 		return true
 	case "binary_parameters":
 		return true
-
+	case "service":
+		return true
+	case "spn":
+		return true
 	default:
 		return false
 	}
@@ -1151,6 +1157,56 @@ func (cn *conn) auth(r *readBuf, o values) {
 		if r.int32() != 0 {
 			errorf("unexpected authentication response: %q", t)
 		}
+	case 7: // GSSAPI, startup
+		cli, err := NewGSS()
+		if err != nil {
+			errorf("kerberos error: %s", err.Error())
+		}
+
+		var token []byte
+
+		if spn, ok := o["spn"]; ok {
+			// Use the supplied SPN if provided..
+			token, err = cli.GetInitTokenFromSpn(spn)
+		} else {
+			// Allow the kerberos service name to be overridden
+			service := "postgres"
+			if val, ok := o["service"]; ok {
+				service = val
+			}
+
+			token, err = cli.GetInitToken(o["host"], service)
+		}
+
+		if err != nil {
+			errorf("failed to get Kerberos ticket: %q", err)
+		}
+
+		w := cn.writeBuf('p')
+		w.bytes(token)
+		cn.send(w)
+
+		// Store for GSSAPI continue message
+		cn.gss = cli
+
+	case 8: // GSSAPI continue
+
+		if cn.gss == nil {
+			errorf("GSSAPI protocol error")
+		}
+
+		b := []byte(*r)
+
+		done, tokOut, err := cn.gss.Continue(b)
+		if err == nil && !done {
+			w := cn.writeBuf('p')
+			w.bytes(tokOut)
+			cn.send(w)
+		}
+
+		// Errors fall through and read the more detailed message
+		// from the server..
+
 	case 10:
 		sc := scram.NewClient(sha256.New, o["user"], o["password"])
 		sc.Step(nil)
