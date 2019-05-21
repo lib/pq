@@ -1876,7 +1876,9 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("user")
 		case "PGPASSWORD":
 			accrue("password")
-		case "PGSERVICE", "PGSERVICEFILE", "PGREALM":
+		case "PGSERVICE":
+			accrue("service")
+		case "PGREALM":
 			unsupported()
 		case "PGOPTIONS":
 			accrue("options")
@@ -1912,6 +1914,62 @@ func parseEnviron(env []string) (out map[string]string) {
 	}
 
 	return out
+}
+
+// parseServiceFile parses the options from a service file and adds them to the values.
+//
+// The parsing code is based on parseServiceInfo from libpq's fe-connect.c
+func parseServiceFile(service string, o values) error {
+	filename := os.Getenv("PGSERVICEFILE")
+	if filename == "" {
+		// XXX this code doesn't work on Windows where the default filename is
+		// XXX %APPDATA%\postgresql\.pg_service.conf
+		// Prefer $HOME over user.Current due to glibc bug: golang.org/issue/13470
+		userHome := os.Getenv("HOME")
+		if userHome == "" {
+			user, err := user.Current()
+			if err != nil {
+				return err
+			}
+			userHome = user.HomeDir
+		}
+		filename = filepath.Join(userHome, ".pg_service.conf")
+	}
+
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// once we find the header of our section, we can start reading
+		if line == fmt.Sprintf("[%s]", service) {
+			for scanner.Scan() {
+				line = strings.TrimSpace(scanner.Text())
+				// once we find the next section, we're done
+				if strings.HasPrefix(line, "[") {
+					return nil
+				} else if line != "" {
+					if err := parseOpts(line, o); err != nil {
+						return err
+					}
+				}
+			}
+			// EOF means we're done
+			return nil
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	// if we end up here, we didn't find the service that was explicitly provided
+	return fmt.Errorf(`definition of service "%s" not found`, service)
 }
 
 // isUTF8 returns whether name is a fuzzy variation of the string "UTF-8".
