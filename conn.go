@@ -600,7 +600,7 @@ func (cn *conn) gname() string {
 func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err error) {
 	b := cn.writeBuf('Q')
 	b.string(q)
-	cn.send(b)
+	cn.mustSendRetryable(b)
 
 	for {
 		t, r := cn.recv1()
@@ -632,7 +632,7 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 
 	b := cn.writeBuf('Q')
 	b.string(q)
-	cn.send(b)
+	cn.mustSendRetryable(b)
 
 	for {
 		t, r := cn.recv1()
@@ -765,7 +765,7 @@ func (cn *conn) prepareTo(q, stmtName string) *stmt {
 	b.string(st.name)
 
 	b.next('S')
-	cn.send(b)
+	cn.mustSendRetryable(b)
 
 	cn.readParseResponse()
 	st.paramTyps, st.colNames, st.colTyps = cn.readStatementDescribeResponse()
@@ -882,9 +882,24 @@ func (cn *conn) Exec(query string, args []driver.Value) (res driver.Result, err 
 	return r, err
 }
 
-func (cn *conn) send(m *writeBuf) {
+func (cn *conn) send(m *writeBuf) error {
 	_, err := cn.c.Write(m.wrap())
+	return err
+}
+
+func (cn *conn) mustSend(m *writeBuf) {
+	err := cn.send(m)
 	if err != nil {
+		panic(err)
+	}
+}
+
+func (cn *conn) mustSendRetryable(m *writeBuf) {
+	err := cn.send(m)
+	if err != nil {
+		if _, ok := err.(*net.OpError); ok {
+			err = &netErrorNoWrite{err}
+		}
 		panic(err)
 	}
 }
@@ -1109,7 +1124,7 @@ func (cn *conn) auth(r *readBuf, o values) {
 	case 3:
 		w := cn.writeBuf('p')
 		w.string(o["password"])
-		cn.send(w)
+		cn.mustSend(w)
 
 		t, r := cn.recv()
 		if t != 'R' {
@@ -1123,7 +1138,7 @@ func (cn *conn) auth(r *readBuf, o values) {
 		s := string(r.next(4))
 		w := cn.writeBuf('p')
 		w.string("md5" + md5s(md5s(o["password"]+o["user"])+s))
-		cn.send(w)
+		cn.mustSend(w)
 
 		t, r := cn.recv()
 		if t != 'R' {
@@ -1145,7 +1160,7 @@ func (cn *conn) auth(r *readBuf, o values) {
 		w.string("SCRAM-SHA-256")
 		w.int32(len(scOut))
 		w.bytes(scOut)
-		cn.send(w)
+		cn.mustSend(w)
 
 		t, r := cn.recv()
 		if t != 'R' {
@@ -1165,7 +1180,7 @@ func (cn *conn) auth(r *readBuf, o values) {
 		scOut = sc.Out()
 		w = cn.writeBuf('p')
 		w.bytes(scOut)
-		cn.send(w)
+		cn.mustSend(w)
 
 		t, r = cn.recv()
 		if t != 'R' {
@@ -1219,9 +1234,9 @@ func (st *stmt) Close() (err error) {
 	w := st.cn.writeBuf('C')
 	w.byte('S')
 	w.string(st.name)
-	st.cn.send(w)
+	st.cn.mustSend(w)
 
-	st.cn.send(st.cn.writeBuf('S'))
+	st.cn.mustSend(st.cn.writeBuf('S'))
 
 	t, _ := st.cn.recv1()
 	if t != '3' {
@@ -1299,7 +1314,7 @@ func (st *stmt) exec(v []driver.Value) {
 	w.int32(0)
 
 	w.next('S')
-	cn.send(w)
+	cn.mustSend(w)
 
 	cn.readBindResponse()
 	cn.postExecuteWorkaround()
@@ -1601,7 +1616,7 @@ func (cn *conn) sendBinaryModeQuery(query string, args []driver.Value) {
 	b.int32(0)
 
 	b.next('S')
-	cn.send(b)
+	cn.mustSendRetryable(b)
 }
 
 func (cn *conn) processParameterStatus(r *readBuf) {

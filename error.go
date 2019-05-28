@@ -460,6 +460,18 @@ func errorf(s string, args ...interface{}) {
 	panic(fmt.Errorf("pq: %s", fmt.Sprintf(s, args...)))
 }
 
+// NetErrorNoWrite is a network error that occured before a message that
+// indicates the operation to execute was transfered to the server.
+// These operations are safe to retry. This error should be replaced with
+// driver.ErrBadConn before it's passed to the caller.
+type netErrorNoWrite struct {
+	Err error
+}
+
+func (e *netErrorNoWrite) Error() string {
+	return "netErrorNoWrite: " + e.Err.Error()
+}
+
 // TODO(ainar-g) Rename to errorf after removing panics.
 func fmterrorf(s string, args ...interface{}) error {
 	return fmt.Errorf("pq: %s", fmt.Sprintf(s, args...))
@@ -492,6 +504,9 @@ func (c *conn) errRecover(err *error) {
 		} else {
 			*err = v
 		}
+	case *netErrorNoWrite:
+		c.bad = true
+		*err = driver.ErrBadConn
 	case *net.OpError:
 		c.bad = true
 		*err = v
