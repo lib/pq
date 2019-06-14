@@ -882,23 +882,24 @@ func (cn *conn) Exec(query string, args []driver.Value) (res driver.Result, err 
 	return r, err
 }
 
-func (cn *conn) send(m *writeBuf) error {
-	_, err := cn.c.Write(m.wrap())
-	return err
+func (cn *conn) send(m *writeBuf) (int, error) {
+	return cn.c.Write(m.wrap())
 }
 
 func (cn *conn) mustSend(m *writeBuf) {
-	err := cn.send(m)
+	_, err := cn.send(m)
 	if err != nil {
 		panic(err)
 	}
 }
 
 func (cn *conn) mustSendRetryable(m *writeBuf) {
-	err := cn.send(m)
+	sentBytes, err := cn.send(m)
 	if err != nil {
 		if _, ok := err.(*net.OpError); ok {
-			err = &netErrorNoWrite{err}
+			if sentBytes == 0 {
+				err = &netErrorNoWrite{err}
+			}
 		}
 		panic(err)
 	}
