@@ -104,9 +104,24 @@ func TestArrayScanner(t *testing.T) {
 		t.Errorf("Expected *Int64Array, got %T", s)
 	}
 
+	s = Array(&[]float32{})
+	if _, ok := s.(*Float32Array); !ok {
+		t.Errorf("Expected *Float32Array, got %T", s)
+	}
+
+	s = Array(&[]int32{})
+	if _, ok := s.(*Int32Array); !ok {
+		t.Errorf("Expected *Int32Array, got %T", s)
+	}
+
 	s = Array(&[]string{})
 	if _, ok := s.(*StringArray); !ok {
 		t.Errorf("Expected *StringArray, got %T", s)
+	}
+
+	s = Array(&[][]byte{})
+	if _, ok := s.(*ByteaArray); !ok {
+		t.Errorf("Expected *ByteaArray, got %T", s)
 	}
 
 	for _, tt := range []interface{}{
@@ -114,6 +129,8 @@ func TestArrayScanner(t *testing.T) {
 		&[][]bool{},
 		&[][]float64{},
 		&[][]int64{},
+		&[][]float32{},
+		&[][]int32{},
 		&[][]string{},
 	} {
 		s = Array(tt)
@@ -139,9 +156,24 @@ func TestArrayValuer(t *testing.T) {
 		t.Errorf("Expected *Int64Array, got %T", v)
 	}
 
+	v = Array([]float32{})
+	if _, ok := v.(*Float32Array); !ok {
+		t.Errorf("Expected *Float32Array, got %T", v)
+	}
+
+	v = Array([]int32{})
+	if _, ok := v.(*Int32Array); !ok {
+		t.Errorf("Expected *Int32Array, got %T", v)
+	}
+
 	v = Array([]string{})
 	if _, ok := v.(*StringArray); !ok {
 		t.Errorf("Expected *StringArray, got %T", v)
+	}
+
+	v = Array([][]byte{})
+	if _, ok := v.(*ByteaArray); !ok {
+		t.Errorf("Expected *ByteaArray, got %T", v)
 	}
 
 	for _, tt := range []interface{}{
@@ -150,6 +182,8 @@ func TestArrayValuer(t *testing.T) {
 		[][]bool{},
 		[][]float64{},
 		[][]int64{},
+		[][]float32{},
+		[][]int32{},
 		[][]string{},
 	} {
 		v = Array(tt)
@@ -767,6 +801,313 @@ func BenchmarkInt64ArrayValue(b *testing.B) {
 		x[i] = rand.Int63()
 	}
 	a := Int64Array(x)
+
+	for i := 0; i < b.N; i++ {
+		a.Value()
+	}
+}
+
+func TestFloat32ArrayScanUnsupported(t *testing.T) {
+	var arr Float32Array
+	err := arr.Scan(true)
+
+	if err == nil {
+		t.Fatal("Expected error when scanning from bool")
+	}
+	if !strings.Contains(err.Error(), "bool to Float32Array") {
+		t.Errorf("Expected type to be mentioned when scanning, got %q", err)
+	}
+}
+
+func TestFloat32ArrayScanEmpty(t *testing.T) {
+	var arr Float32Array
+	err := arr.Scan(`{}`)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if arr == nil || len(arr) != 0 {
+		t.Errorf("Expected empty, got %#v", arr)
+	}
+}
+
+func TestFloat32ArrayScanNil(t *testing.T) {
+	arr := Float32Array{5, 5, 5}
+	err := arr.Scan(nil)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if arr != nil {
+		t.Errorf("Expected nil, got %+v", arr)
+	}
+}
+
+var Float32ArrayStringTests = []struct {
+	str string
+	arr Float32Array
+}{
+	{`{}`, Float32Array{}},
+	{`{1.2}`, Float32Array{1.2}},
+	{`{3.456,7.89}`, Float32Array{3.456, 7.89}},
+	{`{3,1,2}`, Float32Array{3, 1, 2}},
+}
+
+func TestFloat32ArrayScanBytes(t *testing.T) {
+	for _, tt := range Float32ArrayStringTests {
+		bytes := []byte(tt.str)
+		arr := Float32Array{5, 5, 5}
+		err := arr.Scan(bytes)
+
+		if err != nil {
+			t.Fatalf("Expected no error for %q, got %v", bytes, err)
+		}
+		if !reflect.DeepEqual(arr, tt.arr) {
+			t.Errorf("Expected %+v for %q, got %+v", tt.arr, bytes, arr)
+		}
+	}
+}
+
+func BenchmarkFloat32ArrayScanBytes(b *testing.B) {
+	var a Float32Array
+	var x interface{} = []byte(`{1.2,3.4,5.6,7.8,9.01,2.34,5.67,8.90,1.234,5.678}`)
+
+	for i := 0; i < b.N; i++ {
+		a = Float32Array{}
+		a.Scan(x)
+	}
+}
+
+func TestFloat32ArrayScanString(t *testing.T) {
+	for _, tt := range Float32ArrayStringTests {
+		arr := Float32Array{5, 5, 5}
+		err := arr.Scan(tt.str)
+
+		if err != nil {
+			t.Fatalf("Expected no error for %q, got %v", tt.str, err)
+		}
+		if !reflect.DeepEqual(arr, tt.arr) {
+			t.Errorf("Expected %+v for %q, got %+v", tt.arr, tt.str, arr)
+		}
+	}
+}
+
+func TestFloat32ArrayScanError(t *testing.T) {
+	for _, tt := range []struct {
+		input, err string
+	}{
+		{``, "unable to parse array"},
+		{`{`, "unable to parse array"},
+		{`{{5.6},{7.8}}`, "cannot convert ARRAY[2][1] to Float32Array"},
+		{`{NULL}`, "parsing array element index 0:"},
+		{`{a}`, "parsing array element index 0:"},
+		{`{5.6,a}`, "parsing array element index 1:"},
+		{`{5.6,7.8,a}`, "parsing array element index 2:"},
+	} {
+		arr := Float32Array{5, 5, 5}
+		err := arr.Scan(tt.input)
+
+		if err == nil {
+			t.Fatalf("Expected error for %q, got none", tt.input)
+		}
+		if !strings.Contains(err.Error(), tt.err) {
+			t.Errorf("Expected error to contain %q for %q, got %q", tt.err, tt.input, err)
+		}
+		if !reflect.DeepEqual(arr, Float32Array{5, 5, 5}) {
+			t.Errorf("Expected destination not to change for %q, got %+v", tt.input, arr)
+		}
+	}
+}
+
+func TestFloat32ArrayValue(t *testing.T) {
+	result, err := Float32Array(nil).Value()
+
+	if err != nil {
+		t.Fatalf("Expected no error for nil, got %v", err)
+	}
+	if result != nil {
+		t.Errorf("Expected nil, got %q", result)
+	}
+
+	result, err = Float32Array([]float32{}).Value()
+
+	if err != nil {
+		t.Fatalf("Expected no error for empty, got %v", err)
+	}
+	if expected := `{}`; !reflect.DeepEqual(result, expected) {
+		t.Errorf("Expected empty, got %q", result)
+	}
+
+	result, err = Float32Array([]float32{1.2, 3.4, 5.6}).Value()
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if expected := `{1.2,3.4,5.6}`; !reflect.DeepEqual(result, expected) {
+		t.Errorf("Expected %q, got %q", expected, result)
+	}
+}
+
+func BenchmarkFloat32ArrayValue(b *testing.B) {
+	rand.Seed(1)
+	x := make([]float32, 10)
+	for i := 0; i < len(x); i++ {
+		x[i] = rand.Float32()
+	}
+	a := Float32Array(x)
+
+	for i := 0; i < b.N; i++ {
+		a.Value()
+	}
+}
+
+func TestInt32ArrayScanUnsupported(t *testing.T) {
+	var arr Int32Array
+	err := arr.Scan(true)
+
+	if err == nil {
+		t.Fatal("Expected error when scanning from bool")
+	}
+	if !strings.Contains(err.Error(), "bool to Int32Array") {
+		t.Errorf("Expected type to be mentioned when scanning, got %q", err)
+	}
+}
+
+func TestInt32ArrayScanEmpty(t *testing.T) {
+	var arr Int32Array
+	err := arr.Scan(`{}`)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if arr == nil || len(arr) != 0 {
+		t.Errorf("Expected empty, got %#v", arr)
+	}
+}
+
+func TestInt32ArrayScanNil(t *testing.T) {
+	arr := Int32Array{5, 5, 5}
+	err := arr.Scan(nil)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if arr != nil {
+		t.Errorf("Expected nil, got %+v", arr)
+	}
+}
+
+var Int32ArrayStringTests = []struct {
+	str string
+	arr Int32Array
+}{
+	{`{}`, Int32Array{}},
+	{`{12}`, Int32Array{12}},
+	{`{345,678}`, Int32Array{345, 678}},
+}
+
+func TestInt32ArrayScanBytes(t *testing.T) {
+	for _, tt := range Int32ArrayStringTests {
+		bytes := []byte(tt.str)
+		arr := Int32Array{5, 5, 5}
+		err := arr.Scan(bytes)
+
+		if err != nil {
+			t.Fatalf("Expected no error for %q, got %v", bytes, err)
+		}
+		if !reflect.DeepEqual(arr, tt.arr) {
+			t.Errorf("Expected %+v for %q, got %+v", tt.arr, bytes, arr)
+		}
+	}
+}
+
+func BenchmarkInt32ArrayScanBytes(b *testing.B) {
+	var a Int32Array
+	var x interface{} = []byte(`{1,2,3,4,5,6,7,8,9,0}`)
+
+	for i := 0; i < b.N; i++ {
+		a = Int32Array{}
+		a.Scan(x)
+	}
+}
+
+func TestInt32ArrayScanString(t *testing.T) {
+	for _, tt := range Int32ArrayStringTests {
+		arr := Int32Array{5, 5, 5}
+		err := arr.Scan(tt.str)
+
+		if err != nil {
+			t.Fatalf("Expected no error for %q, got %v", tt.str, err)
+		}
+		if !reflect.DeepEqual(arr, tt.arr) {
+			t.Errorf("Expected %+v for %q, got %+v", tt.arr, tt.str, arr)
+		}
+	}
+}
+
+func TestInt32ArrayScanError(t *testing.T) {
+	for _, tt := range []struct {
+		input, err string
+	}{
+		{``, "unable to parse array"},
+		{`{`, "unable to parse array"},
+		{`{{5},{6}}`, "cannot convert ARRAY[2][1] to Int32Array"},
+		{`{NULL}`, "parsing array element index 0:"},
+		{`{a}`, "parsing array element index 0:"},
+		{`{5,a}`, "parsing array element index 1:"},
+		{`{5,6,a}`, "parsing array element index 2:"},
+	} {
+		arr := Int32Array{5, 5, 5}
+		err := arr.Scan(tt.input)
+
+		if err == nil {
+			t.Fatalf("Expected error for %q, got none", tt.input)
+		}
+		if !strings.Contains(err.Error(), tt.err) {
+			t.Errorf("Expected error to contain %q for %q, got %q", tt.err, tt.input, err)
+		}
+		if !reflect.DeepEqual(arr, Int32Array{5, 5, 5}) {
+			t.Errorf("Expected destination not to change for %q, got %+v", tt.input, arr)
+		}
+	}
+}
+
+func TestInt32ArrayValue(t *testing.T) {
+	result, err := Int32Array(nil).Value()
+
+	if err != nil {
+		t.Fatalf("Expected no error for nil, got %v", err)
+	}
+	if result != nil {
+		t.Errorf("Expected nil, got %q", result)
+	}
+
+	result, err = Int32Array([]int32{}).Value()
+
+	if err != nil {
+		t.Fatalf("Expected no error for empty, got %v", err)
+	}
+	if expected := `{}`; !reflect.DeepEqual(result, expected) {
+		t.Errorf("Expected empty, got %q", result)
+	}
+
+	result, err = Int32Array([]int32{1, 2, 3}).Value()
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if expected := `{1,2,3}`; !reflect.DeepEqual(result, expected) {
+		t.Errorf("Expected %q, got %q", expected, result)
+	}
+}
+
+func BenchmarkInt32ArrayValue(b *testing.B) {
+	rand.Seed(1)
+	x := make([]int32, 10)
+	for i := 0; i < len(x); i++ {
+		x[i] = rand.Int31()
+	}
+	a := Int32Array(x)
 
 	for i := 0; i < b.N; i++ {
 		a.Value()
