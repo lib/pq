@@ -549,7 +549,7 @@ func (cn *conn) Commit() (err error) {
 	// would get the same behaviour if you issued a COMMIT in a failed
 	// transaction, so it's also the least surprising thing to do here.
 	if cn.txnStatus == txnStatusInFailedTransaction {
-		if err := cn.Rollback(); err != nil {
+		if err := cn.rollback(); err != nil {
 			return err
 		}
 		return ErrInFailedTransaction
@@ -576,7 +576,10 @@ func (cn *conn) Rollback() (err error) {
 		return driver.ErrBadConn
 	}
 	defer cn.errRecover(&err)
+	return cn.rollback()
+}
 
+func (cn *conn) rollback() (err error) {
 	cn.checkIsInTransaction(true)
 	_, commandTag, err := cn.simpleExec("ROLLBACK")
 	if err != nil {
