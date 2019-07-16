@@ -92,6 +92,7 @@ type Dialer interface {
 	DialTimeout(network, address string, timeout time.Duration) (net.Conn, error)
 }
 
+// DialerContext is the context-aware dialer interface.
 type DialerContext interface {
 	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }
