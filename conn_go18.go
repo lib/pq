@@ -12,12 +12,23 @@ import (
 
 // Implement the "QueryerContext" interface
 func (cn *conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	list := make([]driver.Value, len(args))
-	for i, nv := range args {
-		list[i] = nv.Value
+	var err error
+	var wrapper *requestWrapper
+	var list []driver.Value
+	var r *rows
+
+	wrapper, err = newRequestWrapper(query)
+	if err != nil {
+		return nil, err
 	}
+
+	list, err = wrapper.buildParamsList(args)
+	if err != nil {
+		return nil, err
+	}
+
 	finish := cn.watchCancel(ctx)
-	r, err := cn.query(query, list)
+	r, err = cn.query(wrapper.request, list)
 	if err != nil {
 		if finish != nil {
 			finish()
@@ -30,16 +41,25 @@ func (cn *conn) QueryContext(ctx context.Context, query string, args []driver.Na
 
 // Implement the "ExecerContext" interface
 func (cn *conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	list := make([]driver.Value, len(args))
-	for i, nv := range args {
-		list[i] = nv.Value
+	var err error
+	var wrapper *requestWrapper
+	var list []driver.Value
+
+	wrapper, err = newRequestWrapper(query)
+	if err != nil {
+		return nil, err
+	}
+
+	list, err = wrapper.buildParamsList(args)
+	if err != nil {
+		return nil, err
 	}
 
 	if finish := cn.watchCancel(ctx); finish != nil {
 		defer finish()
 	}
 
-	return cn.Exec(query, list)
+	return cn.Exec(wrapper.request, list)
 }
 
 // Implement the "ConnBeginTx" interface
