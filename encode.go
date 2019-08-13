@@ -102,8 +102,10 @@ func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interfa
 		return b
 	case oid.T_timestamptz:
 		return parseTs(parameterStatus.currentLocation, string(s))
-	case oid.T_timestamp, oid.T_date:
+	case oid.T_timestamp:
 		return parseTs(nil, string(s))
+	case oid.T_date:
+		return string(s)
 	case oid.T_time:
 		return mustParse("15:04:05", typ, s)
 	case oid.T_timetz:

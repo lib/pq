@@ -456,6 +456,24 @@ func TestByteSliceToText(t *testing.T) {
 	}
 }
 
+func TestDateToString(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	value := "2019-08-13"
+	row := db.QueryRow("SELECT $1::Date", value)
+
+	var result string
+	err := row.Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result != value {
+		t.Fatalf("expected %v but got %v", value, result)
+	}
+}
+
 func TestStringToBytea(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
