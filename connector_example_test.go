@@ -17,10 +17,6 @@ func ExampleNewConnector() {
 		return
 	}
 	db := sql.OpenDB(connector)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
 	defer db.Close()
 
 	// Use the DB
