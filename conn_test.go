@@ -1739,3 +1739,31 @@ func TestMultipleResult(t *testing.T) {
 		t.Fatal("incorrect number of rows returned")
 	}
 }
+
+func TestCopyInStmtAffectedRows(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TEMP TABLE temp (a int)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	txn, err := db.BeginTx(context.TODO(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	copyStmt, err := txn.Prepare(CopyIn("temp", "a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := copyStmt.Exec()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res.RowsAffected()
+	res.LastInsertId()
+}
