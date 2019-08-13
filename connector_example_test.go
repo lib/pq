@@ -4,30 +4,25 @@ package pq_test
 
 import (
 	"database/sql"
-	"fmt"
+	"flag"
+	"log"
 
 	"github.com/lib/pq"
 )
 
 func ExampleNewConnector() {
-	name := ""
-	connector, err := pq.NewConnector(name)
+	dsn := flag.String("dsn", "postgres://", "connection data source name")
+	c, err := pq.NewConnector(*dsn)
 	if err != nil {
-		fmt.Println(err)
-		return
+		log.Fatalf("could not create connector: %v", err)
 	}
-	db := sql.OpenDB(connector)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+	db := sql.OpenDB(c)
 	defer db.Close()
 
 	// Use the DB
 	txn, err := db.Begin()
 	if err != nil {
-		fmt.Println(err)
-		return
+		log.Fatalf("could not start transaction: %v", err)
 	}
 	txn.Rollback()
 }
