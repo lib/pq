@@ -42,7 +42,7 @@ func testConninfo(conninfo string) string {
 	if forceBinaryParameters() &&
 		!strings.HasPrefix(conninfo, "postgres://") &&
 		!strings.HasPrefix(conninfo, "postgresql://") {
-		conninfo = conninfo + " binary_parameters=yes"
+		conninfo += " binary_parameters=yes"
 	}
 	return conninfo
 }
