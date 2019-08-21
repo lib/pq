@@ -4,6 +4,7 @@ package pq
 
 import (
 	"bytes"
+	"context"
 	_ "crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -13,6 +14,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -375,6 +377,110 @@ func TestSNISupport(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDefaultRootCert(t *testing.T) {
+	homeDir, err := setupHomeWithRootCRT(t)
+	if err != nil {
+		t.Fatalf("setup mock $HOME: %v", err)
+	}
+
+	testUser = &user.User{
+		// no leading slash to we can be sure that $HOME/.postgresql/root.crt
+		// does not exist
+		HomeDir: homeDir,
+	}
+	defer func() { testUser = nil }()
+
+	o := values{"sslmode": "verify-ca"}
+
+	upgrade, err := ssl(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	addr, handshakeErr := mockTLSServer(t, "certs/server.crt", "certs/server.key")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	if _, err := upgrade(conn); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case err := <-handshakeErr:
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func setupHomeWithRootCRT(t *testing.T) (string, error) {
+	t.Helper()
+
+	homeDir, err := os.MkdirTemp("", "lib-pg-ssl-test-*")
+	if err != nil {
+		return "", err
+	}
+	t.Cleanup(func() { os.RemoveAll(homeDir) })
+
+	err = os.MkdirAll(filepath.Join(homeDir, ".postgresql"), 0700)
+	if err != nil {
+		return "", err
+	}
+
+	b, err := os.ReadFile("certs/root.crt")
+	if err != nil {
+		return "", err
+	}
+
+	err = os.WriteFile(filepath.Join(homeDir, ".postgresql", "root.crt"), b, 0600)
+	if err != nil {
+		return "", err
+	}
+
+	return homeDir, nil
+}
+
+func mockTLSServer(t *testing.T, certFile, keyFile string) (string, chan error) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+
+	serverCert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverConf := &tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+	}
+
+	handshakeErr := make(chan error, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			t.Logf("mockTLSServer: cannot Accept: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		handshakeErr <- tls.Server(conn, serverConf).Handshake()
+	}()
+
+	return ln.Addr().String(), handshakeErr
 }
 
 // Make a postgres mock server to test TLS SNI
