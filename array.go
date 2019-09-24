@@ -341,7 +341,7 @@ func (a GenericArray) Scan(src interface{}) error {
 
 func (a GenericArray) scanBytes(src []byte, dv reflect.Value) error {
 	dtype, assign, del := a.evaluateDestination(dv.Type().Elem())
-	dims, elems, err := parseArray(src, []byte(del))
+	dims, elems, err := ParseArray(src, []byte(del))
 	if err != nil {
 		return err
 	}
@@ -633,13 +633,13 @@ func appendValue(b []byte, v driver.Value) ([]byte, error) {
 	return append(b, encode(nil, v, 0)...), nil
 }
 
-// parseArray extracts the dimensions and elements of an array represented in
+// ParseArray extracts the dimensions and elements of an array represented in
 // text format. Only representations emitted by the backend are supported.
 // Notably, whitespace around brackets and delimiters is significant, and NULL
 // is case-sensitive.
 //
 // See http://www.postgresql.org/docs/current/static/arrays.html#ARRAYS-IO
-func parseArray(src, del []byte) (dims []int, elems [][]byte, err error) {
+func ParseArray(src, del []byte) (dims []int, elems [][]byte, err error) {
 	var depth, i int
 
 	if len(src) < 1 || src[0] != '{' {
@@ -745,7 +745,7 @@ Close:
 }
 
 func scanLinearArray(src, del []byte, typ string) (elems [][]byte, err error) {
-	dims, elems, err := parseArray(src, del)
+	dims, elems, err := ParseArray(src, del)
 	if err != nil {
 		return nil, err
 	}
