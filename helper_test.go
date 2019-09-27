@@ -1,6 +1,7 @@
 package pq
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/lib/pq/internal/pqtest"
@@ -10,6 +11,14 @@ import (
 func init() { pqtest.DSN("") }
 
 const cancelErrorCode ErrorCode = "57014"
+
+func errCanceled(err error) bool {
+	pgErr := new(Error)
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return pgErr.Code == cancelErrorCode
+}
 
 // pqError converts an error to *pq.Error, calling t.Fatal() if the error is nil
 // or if this fails.

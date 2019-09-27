@@ -58,13 +58,12 @@ func TestIssue1046(t *testing.T) {
 	}
 }
 
+// Ensure that cancelling a QueryRowContext does not result in an ErrBadConn.
 func TestIssue1062(t *testing.T) {
 	if !pqtest.Pgpool() {
 		t.Parallel()
 	}
 	db := pqtest.MustDB(t)
-
-	// Ensure that cancelling a QueryRowContext does not result in an ErrBadConn.
 
 	for i := 0; i < 100; i++ {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -73,10 +72,11 @@ func TestIssue1062(t *testing.T) {
 
 		var v int
 		err := row.Scan(&v)
-		if pgErr := (*Error)(nil); err != nil &&
-			err != context.Canceled &&
-			!(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
-			t.Fatalf("Scan resulted in unexpected error %v for canceled QueryRowContext at attempt %d", err, i+1)
+		if err == nil {
+			t.Fatal("no error")
+		}
+		if !errors.Is(err, context.Canceled) && !errCanceled(err) {
+			t.Fatalf("wrong error %T: %[1]s", err)
 		}
 	}
 }

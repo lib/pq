@@ -82,7 +82,6 @@ func TestNewConnector(t *testing.T) {
 			t.Fatalf("wrong option for pgassfile: %q", have)
 		}
 	})
-
 	t.Run("WithConfig", func(t *testing.T) {
 		cfg, err := NewConfig("")
 		if err != nil {
@@ -106,6 +105,18 @@ func TestNewConnector(t *testing.T) {
 		pqtest.SkipPgbouncer(t)
 
 		db := sql.OpenDB(c)
+		defer db.Close()
+		useConn(t, db)
+	})
+	t.Run("DriverContext", func(t *testing.T) {
+		c, err := Driver{}.OpenConnector("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		db, err := c.Connect(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
 		defer db.Close()
 		useConn(t, db)
 	})
@@ -419,4 +430,25 @@ func TestNewConfig(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestNewConnector_DriverContext(t *testing.T) {
+	name := ""
+	d := &Driver{}
+	c, err := d.OpenConnector(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := c.Connect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	// database/sql might not call our Open at all unless we do something with
+	// the connection
+	txn, err := db.(driver.ConnBeginTx).BeginTx(context.Background(), driver.TxOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	txn.Rollback()
 }
