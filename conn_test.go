@@ -724,7 +724,15 @@ func TestBadConn(t *testing.T) {
 // TestCloseBadConn tests that the underlying connection can be closed with
 // Close after an error.
 func TestCloseBadConn(t *testing.T) {
-	nc, err := net.Dial("tcp", "localhost:5432")
+	host := os.Getenv("PGHOST")
+	if host == "" {
+		host = "localhost"
+	}
+	port := os.Getenv("PGPORT")
+	if port == "" {
+		port = "5432"
+	}
+	nc, err := net.Dial("tcp", host+":"+port)
 	if err != nil {
 		t.Fatal(err)
 	}
