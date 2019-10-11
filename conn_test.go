@@ -1,6 +1,7 @@
 package pq
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
@@ -28,7 +29,7 @@ func forceBinaryParameters() bool {
 	}
 }
 
-func openTestConnConninfo(conninfo string) (*sql.DB, error) {
+func testConninfo(conninfo string) string {
 	defaultTo := func(envvar string, value string) {
 		if os.Getenv(envvar) == "" {
 			os.Setenv(envvar, value)
@@ -41,10 +42,13 @@ func openTestConnConninfo(conninfo string) (*sql.DB, error) {
 	if forceBinaryParameters() &&
 		!strings.HasPrefix(conninfo, "postgres://") &&
 		!strings.HasPrefix(conninfo, "postgresql://") {
-		conninfo = conninfo + " binary_parameters=yes"
+		conninfo += " binary_parameters=yes"
 	}
+	return conninfo
+}
 
-	return sql.Open("postgres", conninfo)
+func openTestConnConninfo(conninfo string) (*sql.DB, error) {
+	return sql.Open("postgres", testConninfo(conninfo))
 }
 
 func openTestConn(t Fatalistic) *sql.DB {
@@ -637,6 +641,57 @@ func TestErrorDuringStartup(t *testing.T) {
 	}
 }
 
+type testConn struct {
+	closed bool
+	net.Conn
+}
+
+func (c *testConn) Close() error {
+	c.closed = true
+	return c.Conn.Close()
+}
+
+type testDialer struct {
+	conns []*testConn
+}
+
+func (d *testDialer) Dial(ntw, addr string) (net.Conn, error) {
+	c, err := net.Dial(ntw, addr)
+	if err != nil {
+		return nil, err
+	}
+	tc := &testConn{Conn: c}
+	d.conns = append(d.conns, tc)
+	return tc, nil
+}
+
+func (d *testDialer) DialTimeout(ntw, addr string, timeout time.Duration) (net.Conn, error) {
+	c, err := net.DialTimeout(ntw, addr, timeout)
+	if err != nil {
+		return nil, err
+	}
+	tc := &testConn{Conn: c}
+	d.conns = append(d.conns, tc)
+	return tc, nil
+}
+
+func TestErrorDuringStartupClosesConn(t *testing.T) {
+	// Don't use the normal connection setup, this is intended to
+	// blow up in the startup packet from a non-existent user.
+	var d testDialer
+	c, err := DialOpen(&d, testConninfo("user=thisuserreallydoesntexist"))
+	if err == nil {
+		c.Close()
+		t.Fatal("expected dial error")
+	}
+	if len(d.conns) != 1 {
+		t.Fatalf("got len(d.conns) = %d, want = %d", len(d.conns), 1)
+	}
+	if !d.conns[0].closed {
+		t.Error("connection leaked")
+	}
+}
+
 func TestBadConn(t *testing.T) {
 	var err error
 
@@ -1072,10 +1127,11 @@ func TestReadFloatPrecision(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	row := db.QueryRow("SELECT float4 '0.10000122', float8 '35.03554004971999'")
+	row := db.QueryRow("SELECT float4 '0.10000122', float8 '35.03554004971999', float4 '1.2'")
 	var float4val float32
 	var float8val float64
-	err := row.Scan(&float4val, &float8val)
+	var float4val2 float64
+	err := row.Scan(&float4val, &float8val, &float4val2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1084,6 +1140,9 @@ func TestReadFloatPrecision(t *testing.T) {
 	}
 	if float8val != float64(35.03554004971999) {
 		t.Errorf("Expected float8 fidelity to be maintained; got no match")
+	}
+	if float4val2 != float64(1.2) {
+		t.Errorf("Expected float4 fidelity into a float64 to be maintained; got no match")
 	}
 }
 
@@ -1209,8 +1268,8 @@ func TestParseComplete(t *testing.T) {
 
 // Test interface conformance.
 var (
-	_ driver.Execer  = (*conn)(nil)
-	_ driver.Queryer = (*conn)(nil)
+	_ driver.ExecerContext  = (*conn)(nil)
+	_ driver.QueryerContext = (*conn)(nil)
 )
 
 func TestNullAfterNonNull(t *testing.T) {
@@ -1495,6 +1554,38 @@ func TestQuoteIdentifier(t *testing.T) {
 	}
 }
 
+func TestQuoteLiteral(t *testing.T) {
+	var cases = []struct {
+		input string
+		want  string
+	}{
+		{`foo`, `'foo'`},
+		{`foo bar baz`, `'foo bar baz'`},
+		{`foo'bar`, `'foo''bar'`},
+		{`foo\bar`, ` E'foo\\bar'`},
+		{`foo\ba'r`, ` E'foo\\ba''r'`},
+		{`foo"bar`, `'foo"bar'`},
+		{`foo\x00bar`, ` E'foo\\x00bar'`},
+		{`\x00foo`, ` E'\\x00foo'`},
+		{`'`, `''''`},
+		{`''`, `''''''`},
+		{`\`, ` E'\\'`},
+		{`'abc'; DROP TABLE users;`, `'''abc''; DROP TABLE users;'`},
+		{`\'`, ` E'\\'''`},
+		{`E'\''`, ` E'E''\\'''''`},
+		{`e'\''`, ` E'e''\\'''''`},
+		{`E'\'abc\'; DROP TABLE users;'`, ` E'E''\\''abc\\''; DROP TABLE users;'''`},
+		{`e'\'abc\'; DROP TABLE users;'`, ` E'e''\\''abc\\''; DROP TABLE users;'''`},
+	}
+
+	for _, test := range cases {
+		got := QuoteLiteral(test.input)
+		if got != test.want {
+			t.Errorf("QuoteLiteral(%q) = %v want %v", test.input, got, test.want)
+		}
+	}
+}
+
 func TestRowsResultTag(t *testing.T) {
 	type ResultTag interface {
 		Result() driver.Result
@@ -1555,10 +1646,10 @@ func TestRowsResultTag(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	q := conn.(driver.Queryer)
+	q := conn.(driver.QueryerContext)
 
 	for _, test := range tests {
-		if rows, err := q.Query(test.query, nil); err != nil {
+		if rows, err := q.QueryContext(context.Background(), test.query, nil); err != nil {
 			t.Fatalf("%s: %s", test.query, err)
 		} else {
 			r := rows.(ResultTag)
@@ -1601,4 +1692,78 @@ func TestQuickClose(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestMultipleResult(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	rows, err := db.Query(`
+		begin;
+			select * from information_schema.tables limit 1;
+			select * from information_schema.columns limit 2;
+		commit;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type set struct {
+		cols     []string
+		rowCount int
+	}
+	buf := []*set{}
+	for {
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := &set{
+			cols: cols,
+		}
+		buf = append(buf, s)
+
+		for rows.Next() {
+			s.rowCount++
+		}
+		if !rows.NextResultSet() {
+			break
+		}
+	}
+	if len(buf) != 2 {
+		t.Fatalf("got %d sets, expected 2", len(buf))
+	}
+	if len(buf[0].cols) == len(buf[1].cols) || len(buf[1].cols) == 0 {
+		t.Fatal("invalid cols size, expected different column count and greater then zero")
+	}
+	if buf[0].rowCount != 1 || buf[1].rowCount != 2 {
+		t.Fatal("incorrect number of rows returned")
+	}
+}
+
+func TestCopyInStmtAffectedRows(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TEMP TABLE temp (a int)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	txn, err := db.BeginTx(context.TODO(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	copyStmt, err := txn.Prepare(CopyIn("temp", "a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := copyStmt.Exec()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res.RowsAffected()
+	res.LastInsertId()
 }
