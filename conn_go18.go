@@ -194,7 +194,7 @@ func (st *stmt) watchCancel(ctx context.Context) func() {
 		go func() {
 			select {
 			case <-done:
-				_ = st.cancel()
+				_ = st.cancel(ctx)
 				finished <- struct{}{}
 			case <-finished:
 			}
@@ -209,6 +209,6 @@ func (st *stmt) watchCancel(ctx context.Context) func() {
 	return nil
 }
 
-func (st *stmt) cancel() error {
-	return st.cn.cancel()
+func (st *stmt) cancel(ctx context.Context) error {
+	return st.cn.cancel(ctx)
 }
