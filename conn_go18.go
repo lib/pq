@@ -194,7 +194,14 @@ func (st *stmt) watchCancel(ctx context.Context) func() {
 		go func() {
 			select {
 			case <-done:
-				_ = st.cancel()
+				// At this point the function level context is canceled,
+				// so it must not be used for the additional network
+				// request to cancel the query.
+				// Create a new context to pass into the dial.
+				ctxCancel, cancel := context.WithTimeout(context.Background(), time.Second*10)
+				defer cancel()
+
+				_ = st.cancel(ctxCancel)
 				finished <- struct{}{}
 			case <-finished:
 			}
@@ -209,6 +216,6 @@ func (st *stmt) watchCancel(ctx context.Context) func() {
 	return nil
 }
 
-func (st *stmt) cancel() error {
-	return st.cn.cancel()
+func (st *stmt) cancel(ctx context.Context) error {
+	return st.cn.cancel(ctx)
 }
