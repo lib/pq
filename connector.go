@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
 	"strings"
 )
 
@@ -99,11 +100,11 @@ func NewConnector(dsn string) (*Connector, error) {
 	// resort is to use the current operating system provided user
 	// name.
 	if _, ok := o["user"]; !ok {
-		u, err := userCurrent()
+		u, err := user.Current()
 		if err != nil {
 			return nil, err
 		}
-		o["user"] = u
+		o["user"] = u.Username
 	}
 
 	return &Connector{opts: o, dialer: defaultDialer{}}, nil
