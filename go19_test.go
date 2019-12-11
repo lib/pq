@@ -55,6 +55,13 @@ func TestPing(t *testing.T) {
 	if rows.Err() != nil {
 		t.Fatal(err)
 	}
+	// Fail the transaction and make sure we can still ping.
+	if _, err := tx.Query("INVALID SQL"); err == nil {
+		t.Fatal("expected error")
+	}
+	if err := conn.PingContext(ctx); err != nil {
+		t.Fatal(err)
+	}
 	if err := tx.Rollback(); err != nil {
 		t.Fatal(err)
 	}
