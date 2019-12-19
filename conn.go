@@ -21,6 +21,8 @@ import (
 	"time"
 	"unicode"
 
+	"regexp"
+
 	"github.com/lib/pq/oid"
 	"github.com/lib/pq/scram"
 )
@@ -130,6 +132,7 @@ type conn struct {
 	secretKey int
 
 	parameterStatus parameterStatus
+	importRows      int64
 
 	saveMessageType   byte
 	saveMessageBuffer []byte
@@ -989,11 +992,39 @@ func (cn *conn) recv1Buf(r *readBuf) byte {
 
 		switch t {
 		case 'A', 'N':
-			// ignore
+			cn.processInfoData(r)
 		case 'S':
 			cn.processParameterStatus(r)
 		default:
 			return t
+		}
+	}
+}
+
+// processInfoData process sinfo data response from Redshift COPY command
+func (cn *conn) processInfoData(r *readBuf) {
+	param := r.string()
+
+	body := r.string()
+	rowsCount := int64(0)
+
+	switch strings.ToLower(param) {
+	case "sinfo":
+		for len(body) > 0 {
+			re := regexp.MustCompile(`([0-9]+) record.*success`)
+			res := re.FindAllString(body, -1)
+			if len(res) > 0 {
+				rowSuccessStr := strings.Split(res[0], " ")
+				if len(rowSuccessStr) > 0 {
+					rowsCount, _ = strconv.ParseInt(rowSuccessStr[0], 10, 64)
+				}
+			}
+			if rowsCount > 0 {
+				cn.importRows = rowsCount
+				break
+			}
+
+			body = r.string()
 		}
 	}
 }
@@ -1351,6 +1382,12 @@ func (cn *conn) parseComplete(commandTag string) (driver.Result, string) {
 		affectedRows = &parts[len(parts)-1]
 		commandTag = "INSERT"
 	}
+
+	// Redshift returns COPY without inserted rows count
+	if affectedRows == nil && strings.HasPrefix(commandTag, "COPY") {
+		return driver.RowsAffected(cn.importRows), commandTag
+	}
+
 	// There should be no affected rows attached to the tag, just return it
 	if affectedRows == nil {
 		return driver.RowsAffected(0), commandTag
