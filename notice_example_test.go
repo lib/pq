@@ -20,7 +20,7 @@ func ExampleConnectorWithNoticeHandler() {
 	// Wrap the connector to simply print out the message
 	connector = pq.ConnectorWithNoticeHandler(connector, func(notice *pq.Error) {
 		fmt.Println("Notice sent: " + notice.Message)
-	})
+	}).(*pq.Connector)
 	db := sql.OpenDB(connector)
 	defer db.Close()
 	// Raise a notice

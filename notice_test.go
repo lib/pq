@@ -15,14 +15,14 @@ func TestConnectorWithNoticeHandler_Simple(t *testing.T) {
 	}
 	var notice *Error
 	// Make connector w/ handler to set the local var
-	c = ConnectorWithNoticeHandler(c, func(n *Error) { notice = n })
+	c = ConnectorWithNoticeHandler(c, func(n *Error) { notice = n }).(*Connector)
 	raiseNotice(c, t, "Test notice #1")
 	if notice == nil || notice.Message != "Test notice #1" {
 		t.Fatalf("Expected notice w/ message, got %v", notice)
 	}
 	// Unset the handler on the same connector
 	prevC := c
-	if c = ConnectorWithNoticeHandler(c, nil); c != prevC {
+	if c = ConnectorWithNoticeHandler(c, nil).(*Connector); c != prevC {
 		t.Fatalf("Expected to not create new connector but did")
 	}
 	raiseNotice(c, t, "Test notice #2")
@@ -30,7 +30,7 @@ func TestConnectorWithNoticeHandler_Simple(t *testing.T) {
 		t.Fatalf("Expected notice to not change, got %v", notice)
 	}
 	// Set it back on the same connector
-	if c = ConnectorWithNoticeHandler(c, func(n *Error) { notice = n }); c != prevC {
+	if c = ConnectorWithNoticeHandler(c, func(n *Error) { notice = n }).(*Connector); c != prevC {
 		t.Fatal("Expected to not create new connector but did")
 	}
 	raiseNotice(c, t, "Test notice #3")
