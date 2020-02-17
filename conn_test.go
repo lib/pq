@@ -732,6 +732,9 @@ func TestCloseBadConn(t *testing.T) {
 	if host == "" {
 		host = "localhost"
 	}
+	if host[0] == '/' {
+		t.Skip("cannot test bad connection close with a Unix-domain PGHOST")
+	}
 	port := os.Getenv("PGPORT")
 	if port == "" {
 		port = "5432"
