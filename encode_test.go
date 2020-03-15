@@ -691,7 +691,7 @@ func TestBinaryByteSliceToInt(t *testing.T) {
 func TestTextDecodeIntoString(t *testing.T) {
 	input := []byte("hello world")
 	want := string(input)
-	for _, typ := range []oid.Oid{oid.T_char, oid.T_varchar, oid.T_text} {
+	for _, typ := range []oid.Oid{oid.T_char, oid.T_bpchar, oid.T_varchar, oid.T_text} {
 		got := decode(&parameterStatus{}, input, typ, formatText)
 		if got != want {
 			t.Errorf("invalid string decoding output for %T(%+v), got %v but expected %v", typ, typ, got, want)
