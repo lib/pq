@@ -484,7 +484,7 @@ func FormatTimestamp(t time.Time) []byte {
 		t = t.AddDate((-t.Year())*2+1, 0, 0)
 		bc = true
 	}
-	b := []byte(t.Format("2006-01-02 15:04:05.999999999Z07:00"))
+	b := []byte(t.Truncate(time.Microsecond).Format("2006-01-02 15:04:05.999999999Z07:00"))
 
 	_, offset := t.Zone()
 	offset %= 60
