@@ -393,6 +393,7 @@ func ParseTimestamp(currentLocation *time.Location, str string) (time.Time, erro
 
 	nanoSec := 0
 	tzOff := 0
+	loc := time.UTC
 
 	if remainderIdx < len(str) && str[remainderIdx] == '.' {
 		fracStart := remainderIdx + 1
@@ -428,6 +429,7 @@ func ParseTimestamp(currentLocation *time.Location, str string) (time.Time, erro
 			remainderIdx += 3
 		}
 		tzOff = tzSign * ((tzHours * 60 * 60) + (tzMin * 60) + tzSec)
+		loc = globalLocationCache.getLocation(tzOff)
 	}
 	var isoYear int
 
@@ -442,7 +444,7 @@ func ParseTimestamp(currentLocation *time.Location, str string) (time.Time, erro
 	}
 	t := time.Date(isoYear, time.Month(month), day,
 		hour, minute, second, nanoSec,
-		globalLocationCache.getLocation(tzOff))
+		loc)
 
 	if currentLocation != nil {
 		// Set the location of the returned Time based on the session's
