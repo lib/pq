@@ -1132,14 +1132,15 @@ func TestIssue282(t *testing.T) {
 }
 
 func TestNoTimezone(t *testing.T) {
-	// types without timezone information should not be unmarshled
-	// a time.Time with timezone information.
+	// To match the standard library's time package (e.g., time.Parse), we should
+	// unmarshal types without timezones as though they were in UTC. See #329 for
+	// details.
 	db := openTestConn(t)
 	defer db.Close()
 
 	var (
 		actual   time.Time
-		expected = time.Date(2015, 2, 13, 0, 0, 0, 0, &time.Location{})
+		expected = time.Date(2015, 2, 13, 0, 0, 0, 0, time.UTC)
 	)
 
 	if err := db.QueryRow(`SELECT '2015-02-13'::date;`).Scan(&actual); err != nil {
