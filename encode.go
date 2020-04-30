@@ -116,7 +116,7 @@ func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interfa
 			errorf("%s", err)
 		}
 		return i
-	case oid.T_float4, oid.T_float8:
+	case oid.T_float4, oid.T_float8, oid.T_numeric:
 		// We always use 64 bit parsing, regardless of whether the input text is for
 		// a float4 or float8, because clients expect float64s for all float datatypes
 		// and returning a 32-bit parsed float64 produces lossy results.
