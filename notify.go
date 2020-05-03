@@ -4,6 +4,7 @@ package pq
 // This module contains support for Postgres LISTEN/NOTIFY.
 
 import (
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"sync"
@@ -27,6 +28,16 @@ func recvNotification(r *readBuf) *Notification {
 	extra := r.string()
 
 	return &Notification{bePid, channel, extra}
+}
+
+// SetNotificationHandler sets the given notification handler on the given
+// connection. A runtime panic occurs if c is not a pq connection. A nil handler
+// may be used to unset it.
+//
+// Note: Notification handlers are executed synchronously by pq meaning commands
+// won't continue to be processed until the handler returns.
+func SetNotificationHandler(c driver.Conn, handler func(*Notification)) {
+	c.(*conn).notificationHandler = handler
 }
 
 const (
