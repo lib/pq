@@ -152,6 +152,9 @@ type conn struct {
 
 	// If not nil, notices will be synchronously sent here
 	noticeHandler func(*Error)
+
+	// If not nil, notifications will be synchronously sent here
+	notificationHandler func(*Notification)
 }
 
 // Handle driver-side settings in parsed connection string.
@@ -977,6 +980,10 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 			if n := cn.noticeHandler; n != nil {
 				n(parseError(r))
 			}
+		case 'A':
+			if n := cn.notificationHandler; n != nil {
+				n(recvNotification(r))
+			}
 		default:
 			return
 		}
@@ -994,7 +1001,9 @@ func (cn *conn) recv1Buf(r *readBuf) byte {
 
 		switch t {
 		case 'A':
-			// ignore
+			if n := cn.notificationHandler; n != nil {
+				n(recvNotification(r))
+			}
 		case 'N':
 			if n := cn.noticeHandler; n != nil {
 				n(parseError(r))
