@@ -335,10 +335,6 @@ func (c *Connector) open(ctx context.Context) (cn *conn, err error) {
 
 func dial(ctx context.Context, d Dialer, o values) (net.Conn, error) {
 	network, address := network(o)
-	// SSL is not necessary or supported over UNIX domain sockets
-	if network == "unix" {
-		o["sslmode"] = "disable"
-	}
 
 	// Zero or not specified means wait indefinitely.
 	if timeout, ok := o["connect_timeout"]; ok && timeout != "0" {
