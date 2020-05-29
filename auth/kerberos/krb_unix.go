@@ -1,6 +1,6 @@
 // +build !windows
 
-package pq
+package kerberos
 
 import (
 	"fmt"
@@ -12,6 +12,7 @@ import (
 	"github.com/jcmturner/gokrb5/v8/config"
 	"github.com/jcmturner/gokrb5/v8/credentials"
 	"github.com/jcmturner/gokrb5/v8/spnego"
+	"github.com/lib/pq"
 )
 
 /*
@@ -24,7 +25,7 @@ type gss struct {
 	cli *client.Client
 }
 
-func NewGSS() (Gss, error) {
+func NewGSS() (pq.Gss, error) {
 	g := &gss{}
 	err := g.init()
 
@@ -120,4 +121,8 @@ func (g *gss) Continue(inToken []byte) (done bool, outToken []byte, err error) {
 	}
 
 	return true, nil, nil
+}
+
+func init() {
+	pq.RegisterNewGSSFunc(NewGSS)
 }

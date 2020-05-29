@@ -1158,7 +1158,10 @@ func (cn *conn) auth(r *readBuf, o values) {
 			errorf("unexpected authentication response: %q", t)
 		}
 	case 7: // GSSAPI, startup
-		cli, err := NewGSS()
+		if newGss == nil {
+			errorf("kerberos error: no GSSAPI provider registered (import github.com/lib/pq/auth/kerberos if you need Kerberos support)")
+		}
+		cli, err := newGss()
 		if err != nil {
 			errorf("kerberos error: %s", err.Error())
 		}

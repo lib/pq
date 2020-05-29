@@ -1,10 +1,11 @@
 // +build windows
 
-package pq
+package kerberos
 
 import (
 	"github.com/alexbrainman/sspi"
 	"github.com/alexbrainman/sspi/negotiate"
+	"github.com/lib/pq"
 )
 
 type gss struct {
@@ -12,7 +13,7 @@ type gss struct {
 	ctx   *negotiate.ClientContext
 }
 
-func NewGSS() (Gss, error) {
+func NewGSS() (pq.Gss, error) {
 	g := &gss{}
 	err := g.init()
 
@@ -58,4 +59,8 @@ func (g *gss) GetInitTokenFromSpn(spn string) ([]byte, error) {
 
 func (g *gss) Continue(inToken []byte) (done bool, outToken []byte, err error) {
 	return g.ctx.Update(inToken)
+}
+
+func init() {
+	pq.RegisterNewGSSFunc(NewGSS)
 }
