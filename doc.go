@@ -247,10 +247,14 @@ https://godoc.org/github.com/lib/pq/example/listen.
 Kerberos Support
 
 
-If you need support for Kerberos authentication, add the following import
-statement to your program:
+If you need support for Kerberos authentication, add the following to your main
+package:
 
-import _ "github.com/lib/pq/auth/kerberos"
+	import "github.com/lib/pq/auth/kerberos"
+
+	func init() {
+		pq.RegisterGSSProvider(func() (pq.Gss, error) { return kerberos.NewGSS() })
+	}
 
 This package is in a separate module so that users who don't need Kerberos
 don't have to download unnecessary dependencies.

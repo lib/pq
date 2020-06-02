@@ -22,7 +22,7 @@
 
 ## Optional Features
 
-* GSS (Kerberos) auth (to use, import `github.com/lib/pq/auth/kerberos`)
+* GSS (Kerberos) auth (to use, see GoDoc)
 
 ## Tests
 
