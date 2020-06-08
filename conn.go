@@ -157,7 +157,7 @@ type conn struct {
 	notificationHandler func(*Notification)
 
 	// GSSAPI context
-	gss Gss
+	gss GSS
 }
 
 // Handle driver-side settings in parsed connection string.
