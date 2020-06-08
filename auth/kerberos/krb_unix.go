@@ -19,13 +19,14 @@ import (
  * implementation
  */
 
-// Implements the pq.Gss interface
-type Gss struct {
+// GSS implements the pq.GSS interface.
+type GSS struct {
 	cli *client.Client
 }
 
-func NewGSS() (*Gss, error) {
-	g := &Gss{}
+// NewGSS creates a new GSS provider.
+func NewGSS() (*GSS, error) {
+	g := &GSS{}
 	err := g.init()
 
 	if err != nil {
@@ -35,7 +36,7 @@ func NewGSS() (*Gss, error) {
 	return g, nil
 }
 
-func (g *Gss) init() error {
+func (g *GSS) init() error {
 	cfgPath, ok := os.LookupEnv("KRB5_CONFIG")
 	if !ok {
 		cfgPath = "/etc/krb5.conf"
@@ -75,7 +76,8 @@ func (g *Gss) init() error {
 	return nil
 }
 
-func (g *Gss) GetInitToken(host string, service string) ([]byte, error) {
+// GetInitToken implements the GSS interface.
+func (g *GSS) GetInitToken(host string, service string) ([]byte, error) {
 
 	// Resolve the hostname down to an 'A' record, if required (usually, it is)
 	if g.cli.Config.LibDefaults.DNSCanonicalizeHostname {
@@ -91,7 +93,8 @@ func (g *Gss) GetInitToken(host string, service string) ([]byte, error) {
 	return g.GetInitTokenFromSpn(spn)
 }
 
-func (g *Gss) GetInitTokenFromSpn(spn string) ([]byte, error) {
+// GetInitTokenFromSpn implements the GSS interface.
+func (g *GSS) GetInitTokenFromSpn(spn string) ([]byte, error) {
 	s := spnego.SPNEGOClient(g.cli, spn)
 
 	st, err := s.InitSecContext()
@@ -107,7 +110,8 @@ func (g *Gss) GetInitTokenFromSpn(spn string) ([]byte, error) {
 	return b, nil
 }
 
-func (g *Gss) Continue(inToken []byte) (done bool, outToken []byte, err error) {
+// Continue implements the GSS interface.
+func (g *GSS) Continue(inToken []byte) (done bool, outToken []byte, err error) {
 	t := &spnego.SPNEGOToken{}
 	err = t.Unmarshal(inToken)
 	if err != nil {

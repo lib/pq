@@ -7,14 +7,15 @@ import (
 	"github.com/alexbrainman/sspi/negotiate"
 )
 
-// Implements the pq.Gss interface
+// GSS implements the pq.GSS interface.
 type Gss struct {
 	creds *sspi.Credentials
 	ctx   *negotiate.ClientContext
 }
 
-func NewGSS() (*Gss, error) {
-	g := &Gss{}
+// NewGSS creates a new GSS provider.
+func NewGSS() (*GSS, error) {
+	g := &GSS{}
 	err := g.init()
 
 	if err != nil {
@@ -24,7 +25,7 @@ func NewGSS() (*Gss, error) {
 	return g, nil
 }
 
-func (g *Gss) init() error {
+func (g *GSS) init() error {
 	creds, err := negotiate.AcquireCurrentUserCredentials()
 	if err != nil {
 		return err
@@ -34,7 +35,8 @@ func (g *Gss) init() error {
 	return nil
 }
 
-func (g *Gss) GetInitToken(host string, service string) ([]byte, error) {
+// GetInitToken implements the GSS interface.
+func (g *GSS) GetInitToken(host string, service string) ([]byte, error) {
 
 	host, err := canonicalizeHostname(host)
 	if err != nil {
@@ -46,7 +48,8 @@ func (g *Gss) GetInitToken(host string, service string) ([]byte, error) {
 	return g.GetInitTokenFromSpn(spn)
 }
 
-func (g *Gss) GetInitTokenFromSpn(spn string) ([]byte, error) {
+// GetInitTokenFromSpn implements the GSS interface.
+func (g *GSS) GetInitTokenFromSpn(spn string) ([]byte, error) {
 	ctx, token, err := negotiate.NewClientContext(g.creds, spn)
 	if err != nil {
 		return nil, err
@@ -57,6 +60,7 @@ func (g *Gss) GetInitTokenFromSpn(spn string) ([]byte, error) {
 	return token, nil
 }
 
-func (g *Gss) Continue(inToken []byte) (done bool, outToken []byte, err error) {
+// Continue implements the GSS interface.
+func (g *GSS) Continue(inToken []byte) (done bool, outToken []byte, err error) {
 	return g.ctx.Update(inToken)
 }
