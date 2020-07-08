@@ -49,7 +49,7 @@ type copyin struct {
 	buffer  []byte
 	rowData chan []byte
 	done    chan bool
-	result 	driver.Result
+	driver.Result
 
 	closed bool
 
@@ -206,13 +206,13 @@ func (ci *copyin) setError(err error) {
 
 func (ci *copyin) setResult(result driver.Result) {
 	ci.Lock()
-	ci.result = result
+	ci.Result = result
 	ci.Unlock()
 }
 
 func (ci *copyin) getResult() driver.Result {
 	ci.Lock()
-	result := ci.result
+	result := ci.Result
 	if result == nil {
 		return driver.RowsAffected(0)
 	}
