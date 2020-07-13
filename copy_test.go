@@ -73,9 +73,18 @@ func TestCopyInMultipleValues(t *testing.T) {
 		}
 	}
 
-	_, err = stmt.Exec()
+	result, err := stmt.Exec()
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rowsAffected != 500 {
+		t.Fatalf("expected 500 rows affected, not %d", rowsAffected)
 	}
 
 	err = stmt.Close()
