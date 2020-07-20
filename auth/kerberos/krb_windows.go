@@ -8,7 +8,7 @@ import (
 )
 
 // GSS implements the pq.GSS interface.
-type Gss struct {
+type GSS struct {
 	creds *sspi.Credentials
 	ctx   *negotiate.ClientContext
 }
