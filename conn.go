@@ -33,6 +33,11 @@ var (
 	ErrSSLKeyHasWorldPermissions = errors.New("pq: Private key file has group or world access. Permissions should be u=rw (0600) or less")
 	ErrCouldNotDetectUsername    = errors.New("pq: Could not detect default username. Please provide one explicitly")
 
+	// GetMD5Hash is a function that's presented as a variable so it can be changed as needed.
+	GetMD5Hash = func(user, password, salt string) (string, error) {
+		return md5s(md5s(password+user)+salt), nil
+	}
+
 	errUnexpectedReady = errors.New("unexpected ReadyForQuery")
 	errNoRowsAffected  = errors.New("no RowsAffected available after the empty statement")
 	errNoLastInsertID  = errors.New("no LastInsertId available after the empty statement")
@@ -1146,7 +1151,11 @@ func (cn *conn) auth(r *readBuf, o values) {
 	case 5:
 		s := string(r.next(4))
 		w := cn.writeBuf('p')
-		w.string("md5" + md5s(md5s(o["password"]+o["user"])+s))
+		hash, err := GetMD5Hash(o["user"], o["password"], s)
+		if err != nil {
+			errorf("couldn't get md5 hash: %s", err)
+		}
+		w.string("md5" + hash)
 		cn.send(w)
 
 		t, r := cn.recv()
