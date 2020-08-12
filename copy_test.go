@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"database/sql"
 	"database/sql/driver"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCopyInStmt(t *testing.T) {
@@ -130,7 +132,7 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 
 	_, err = txn.Exec(`
 			CREATE OR REPLACE FUNCTION pg_temp.temptest()
-			RETURNS trigger AS 
+			RETURNS trigger AS
 			$BODY$ begin
 				raise notice 'Hello world';
 				return new;
@@ -143,7 +145,7 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 	_, err = txn.Exec(`
 			CREATE TRIGGER temptest_trigger
 			BEFORE INSERT
-			ON temp 
+			ON temp
 			FOR EACH ROW
 			EXECUTE PROCEDURE pg_temp.temptest()`)
 	if err != nil {
@@ -406,10 +408,13 @@ func TestCopyRespLoopConnectionError(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, err = stmt.Exec()
-	if err == nil {
-		t.Fatalf("expected error")
-	}
+	retry(t, time.Second*5, func() error {
+		_, err = stmt.Exec()
+		if err == nil {
+			return fmt.Errorf("expected error")
+		}
+		return nil
+	})
 	switch pge := err.(type) {
 	case *Error:
 		if pge.Code.Name() != "admin_shutdown" {
@@ -420,12 +425,32 @@ func TestCopyRespLoopConnectionError(t *testing.T) {
 	default:
 		if err == driver.ErrBadConn {
 			// likely an EPIPE
+		} else if err == errCopyInClosed {
+			// ignore
 		} else {
 			t.Fatalf("unexpected error, got %+#v", err)
 		}
 	}
 
 	_ = stmt.Close()
+}
+
+// retry executes f in a backoff loop until it doesn't return an error. If this
+// doesn't happen within duration, t.Fatal is called with the latest error.
+func retry(t *testing.T, duration time.Duration, f func() error) {
+	start := time.Now()
+	next := time.Millisecond * 100
+	for {
+		err := f()
+		if err == nil {
+			return
+		}
+		if time.Since(start) > duration {
+			t.Fatal(err)
+		}
+		time.Sleep(next)
+		next *= 2
+	}
 }
 
 func BenchmarkCopyIn(b *testing.B) {
