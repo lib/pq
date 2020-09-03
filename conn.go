@@ -1317,6 +1317,14 @@ func (st *stmt) Close() (err error) {
 	return nil
 }
 
+func (st *stmt) QueryContext(ctx context.Context, v []driver.NamedValue) (r driver.Rows, err error) {
+	list := make([]driver.Value, len(v))
+	for i, nv := range v {
+		list[i] = nv.Value
+	}
+	return st.Query(list)
+}
+
 func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) {
 	if st.cn.bad {
 		return nil, driver.ErrBadConn
@@ -1328,6 +1336,14 @@ func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) {
 		cn:         st.cn,
 		rowsHeader: st.rowsHeader,
 	}, nil
+}
+
+func (st *stmt) ExecContext(ctx context.Context, v []driver.NamedValue) (res driver.Result, err error) {
+	list := make([]driver.Value, len(v))
+	for i, nv := range v {
+		list[i] = nv.Value
+	}
+	return st.Exec(list)
 }
 
 func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
