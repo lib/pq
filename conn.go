@@ -784,6 +784,9 @@ func (cn *conn) prepareTo(q, stmtName string) *stmt {
 }
 
 func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
+	if strings.Contains(q, "$65535") {
+		return nil, errors.New("number of parameters is more then allowed")
+	}
 	if cn.bad {
 		return nil, driver.ErrBadConn
 	}
