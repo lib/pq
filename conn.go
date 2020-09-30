@@ -1068,6 +1068,8 @@ func isDriverSetting(key string) bool {
 		return true
 	case "fallback_application_name":
 		return true
+	case "keepalives", "keepalives_interval":
+		return true
 	case "connect_timeout":
 		return true
 	case "disable_prepared_binary_result":

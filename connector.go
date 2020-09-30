@@ -5,8 +5,11 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Connector represents a fixed configuration for the pq driver with a given
@@ -107,9 +110,41 @@ func NewConnector(dsn string) (*Connector, error) {
 	}
 
 	// SSL is not necessary or supported over UNIX domain sockets
-	if network, _ := network(o); network == "unix" {
+	ntw, _ := network(o)
+	if ntw == "unix" {
 		o["sslmode"] = "disable"
 	}
 
-	return &Connector{opts: o, dialer: defaultDialer{}}, nil
+	var d net.Dialer
+	if ntw == "tcp" {
+		d.KeepAlive, err = keepalive(o)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &Connector{opts: o, dialer: defaultDialer{d}}, nil
+}
+
+// keepalive returns the interval between keep-alive probes controlled by keepalives_interval.
+// If zero, keep-alive probes are sent with a default value (see net.Dialer).
+// If negative, keep-alive probes are disabled.
+//
+// The keepalives parameter controls whether client-side TCP keepalives are used.
+// The default value is 1, meaning on, but you can change this to 0, meaning off, if keepalives are not wanted.
+func keepalive(o values) (time.Duration, error) {
+	v, ok := o["keepalives"]
+	if ok && v == "0" {
+		return -1, nil
+	}
+
+	if v, ok = o["keepalives_interval"]; !ok {
+		return 0, nil
+	}
+
+	keepintvl, err := strconv.ParseInt(v, 10, 0)
+	if err != nil {
+		return 0, fmt.Errorf("invalid value for parameter keepalives_interval: %w", err)
+	}
+	return time.Duration(keepintvl) * time.Second, nil
 }
