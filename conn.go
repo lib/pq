@@ -48,6 +48,12 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 	return Open(name)
 }
 
+// OpenConnector parses the name in the same format that Driver.Open
+// parses the name parameter.
+func (d *Driver) OpenConnector(name string) (driver.Connector, error) {
+	return NewConnector(name)
+}
+
 func init() {
 	sql.Register("postgres", &Driver{})
 }

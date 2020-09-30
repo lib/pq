@@ -14,6 +14,17 @@ import (
 	"time"
 )
 
+// testDriver is the Postgres database driver that doesn't implement DriverContext interface.
+type testDriver struct{}
+
+func (d *testDriver) Open(name string) (driver.Conn, error) {
+	return Open(name)
+}
+
+func init() {
+	sql.Register("postgres-test", &testDriver{})
+}
+
 type Fatalistic interface {
 	Fatal(args ...interface{})
 }
@@ -48,7 +59,7 @@ func testConninfo(conninfo string) string {
 }
 
 func openTestConnConninfo(conninfo string) (*sql.DB, error) {
-	return sql.Open("postgres", testConninfo(conninfo))
+	return sql.Open("postgres-test", testConninfo(conninfo))
 }
 
 func openTestConn(t Fatalistic) *sql.DB {
