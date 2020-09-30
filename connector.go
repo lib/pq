@@ -144,7 +144,7 @@ func keepalive(o values) (time.Duration, error) {
 
 	keepintvl, err := strconv.ParseInt(v, 10, 0)
 	if err != nil {
-		return 0, fmt.Errorf("invalid value for parameter keepalives_interval: %w", err)
+		return 0, fmt.Errorf("invalid value for parameter keepalives_interval: %v", err)
 	}
 	return time.Duration(keepintvl) * time.Second, nil
 }

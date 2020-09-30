@@ -6,8 +6,8 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"errors"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -129,7 +129,7 @@ func TestKeepaliveError(t *testing.T) {
 	for name, tc := range tt {
 		t.Run(name, func(t *testing.T) {
 			_, err := keepalive(tc.input)
-			if !errors.Is(err, tc.want) {
+			if !strings.HasSuffix(err.Error(), tc.want.Error()) {
 				t.Fatalf("expected: %v, got: %v", tc.want, err)
 			}
 		})
