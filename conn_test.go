@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -695,7 +696,9 @@ func TestErrorDuringStartupClosesConn(t *testing.T) {
 func TestBadConn(t *testing.T) {
 	var err error
 
-	cn := conn{}
+	bad := &atomic.Value{}
+	bad.Store(false)
+	cn := conn{bad: bad}
 	func() {
 		defer cn.errRecover(&err)
 		panic(io.EOF)
@@ -703,11 +706,13 @@ func TestBadConn(t *testing.T) {
 	if err != driver.ErrBadConn {
 		t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
 	}
-	if !cn.bad {
+	if !cn.getBad() {
 		t.Fatalf("expected cn.bad")
 	}
 
-	cn = conn{}
+	badd := &atomic.Value{}
+	badd.Store(false)
+	cn = conn{bad: badd}
 	func() {
 		defer cn.errRecover(&err)
 		e := &Error{Severity: Efatal}
@@ -716,7 +721,7 @@ func TestBadConn(t *testing.T) {
 	if err != driver.ErrBadConn {
 		t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
 	}
-	if !cn.bad {
+	if !cn.getBad() {
 		t.Fatalf("expected cn.bad")
 	}
 }
