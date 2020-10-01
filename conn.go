@@ -48,12 +48,6 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 	return Open(name)
 }
 
-// OpenConnector parses the name in the same format that Driver.Open
-// parses the name parameter.
-func (d *Driver) OpenConnector(name string) (driver.Connector, error) {
-	return NewConnector(name)
-}
-
 func init() {
 	sql.Register("postgres", &Driver{})
 }
@@ -278,7 +272,11 @@ func (cn *conn) writeBuf(b byte) *writeBuf {
 // Most users should only use it through database/sql package from the standard
 // library.
 func Open(dsn string) (_ driver.Conn, err error) {
-	return DialOpen(defaultDialer{}, dsn)
+	c, err := NewConnector(dsn)
+	if err != nil {
+		return nil, err
+	}
+	return c.open(context.Background())
 }
 
 // DialOpen opens a new connection to the database using a dialer.

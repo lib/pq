@@ -14,17 +14,6 @@ import (
 	"time"
 )
 
-// testDriver is the Postgres database driver that doesn't implement DriverContext interface.
-type testDriver struct{}
-
-func (d *testDriver) Open(name string) (driver.Conn, error) {
-	return Open(name)
-}
-
-func init() {
-	sql.Register("postgres-test", &testDriver{})
-}
-
 type Fatalistic interface {
 	Fatal(args ...interface{})
 }
@@ -59,7 +48,7 @@ func testConninfo(conninfo string) string {
 }
 
 func openTestConnConninfo(conninfo string) (*sql.DB, error) {
-	return sql.Open("postgres-test", testConninfo(conninfo))
+	return sql.Open("postgres", testConninfo(conninfo))
 }
 
 func openTestConn(t Fatalistic) *sql.DB {
@@ -149,6 +138,46 @@ func TestOpenURL(t *testing.T) {
 	}
 	testURL("postgres://")
 	testURL("postgresql://")
+}
+
+func TestOpen(t *testing.T) {
+	dsn := "keepalives_interval=10"
+	c, err := Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	d := c.(*conn).dialer.(defaultDialer)
+	want := 10 * time.Second
+	if want != d.d.KeepAlive {
+		t.Fatalf("expected: %v, got: %v", want, d.d.KeepAlive)
+	}
+}
+
+func TestSQLOpen(t *testing.T) {
+	dsn := "keepalives_interval=10"
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = db.Ping(); err != nil {
+		t.Fatal(err)
+	}
+
+	drv := db.Driver()
+	c, err := drv.Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	d := c.(*conn).dialer.(defaultDialer)
+	want := 10 * time.Second
+	if want != d.d.KeepAlive {
+		t.Fatalf("expected: %v, got: %v", want, d.d.KeepAlive)
+	}
 }
 
 const pgpassFile = "/tmp/pqgotest_pgpass"
