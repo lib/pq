@@ -1748,6 +1748,36 @@ func TestMultipleResult(t *testing.T) {
 	}
 }
 
+func TestMultipleEmptyResult(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	rows, err := db.Query("select 1 where false; select 2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		t.Fatal("unexpected row")
+	}
+	if !rows.NextResultSet() {
+		t.Fatal("expected more result sets", rows.Err())
+	}
+	for rows.Next() {
+		var i int
+		if err := rows.Scan(&i); err != nil {
+			t.Fatal(err)
+		}
+		if i != 2 {
+			t.Fatalf("expected 2, got %d", i)
+		}
+	}
+	if rows.NextResultSet() {
+		t.Fatal("unexpected result set")
+	}
+}
+
 func TestCopyInStmtAffectedRows(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
