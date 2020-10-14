@@ -1640,10 +1640,6 @@ func TestRowsResultTag(t *testing.T) {
 		{
 			query: "CREATE TEMP TABLE t (a int); DROP TABLE t; SELECT 1",
 		},
-		// Verify that an no-results query doesn't set the tag.
-		{
-			query: "CREATE TEMP TABLE t (a int); SELECT 1 WHERE FALSE; DROP TABLE t;",
-		},
 	}
 
 	// If this is the only test run, this will correct the connection string.

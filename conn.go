@@ -666,7 +666,6 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 			if t == 'C' {
 				res.result, res.tag = cn.parseComplete(r.string())
 				if res.colNames != nil {
-					res.tag = ""
 					return
 				}
 			}
