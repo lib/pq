@@ -38,13 +38,18 @@ var (
 	errNoLastInsertID  = errors.New("no LastInsertId available after the empty statement")
 )
 
+// Compile time validation that our types implement the expected interfaces
+var (
+	_ driver.Driver = Driver{}
+)
+
 // Driver is the Postgres database driver.
 type Driver struct{}
 
 // Open opens a new connection to the database. name is a connection string.
 // Most users should only use it through database/sql package from the standard
 // library.
-func (d *Driver) Open(name string) (driver.Conn, error) {
+func (d Driver) Open(name string) (driver.Conn, error) {
 	return Open(name)
 }
 
