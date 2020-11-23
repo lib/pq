@@ -663,8 +663,11 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 			// Set the result and tag to the last command complete if there wasn't a
 			// query already run. Although queries usually return from here and cede
 			// control to Next, a query with zero results does not.
-			if t == 'C' && res.colNames == nil {
+			if t == 'C' {
 				res.result, res.tag = cn.parseComplete(r.string())
+				if res.colNames != nil {
+					return
+				}
 			}
 			res.done = true
 		case 'Z':
