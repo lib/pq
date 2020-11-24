@@ -496,7 +496,7 @@ func (cn *conn) errRecover(err *error) {
 		cn.setBad()
 		*err = v
 	case *safeRetryError:
-		cn.bad = true
+		cn.setBad()
 		*err = driver.ErrBadConn
 	case error:
 		if v == io.EOF || v.(error).Error() == "remote error: handshake failure" {
