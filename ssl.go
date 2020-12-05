@@ -13,6 +13,11 @@ import (
 // ssl generates a function to upgrade a net.Conn based on the "sslmode" and
 // related settings. The function is nil when no upgrade should take place.
 func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
+	// user.Current() might fail when cross-compiling. We have to ignore the
+	// error and continue without home directory defaults, since we wouldn't
+	// know from where to load them.
+	user, _ := user.Current()
+
 	verifyCaOnly := false
 	tlsConf := tls.Config{}
 	switch mode := o["sslmode"]; mode {
@@ -30,12 +35,15 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 		// server certificate is validated against the CA. Relying on this
 		// behavior is discouraged, and applications that need certificate
 		// validation should always use verify-ca or verify-full.
-		if sslrootcert, ok := o["sslrootcert"]; ok {
-			if _, err := os.Stat(sslrootcert); err == nil {
-				verifyCaOnly = true
-			} else {
-				delete(o, "sslrootcert")
-			}
+		sslrootcert := o["sslrootcert"]
+		if len(sslrootcert) == 0 && user != nil {
+			sslrootcert = filepath.Join(user.HomeDir, ".postgresql", "root.crt")
+		}
+
+		if _, err := os.Stat(sslrootcert); err == nil {
+			verifyCaOnly = true
+		} else {
+			delete(o, "sslrootcert")
 		}
 	case "verify-ca":
 		// We must skip TLS's own verification since it requires full
@@ -50,11 +58,11 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 		return nil, fmterrorf(`unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`, mode)
 	}
 
-	err := sslClientCertificates(&tlsConf, o)
+	err := sslClientCertificates(&tlsConf, o, user)
 	if err != nil {
 		return nil, err
 	}
-	err = sslCertificateAuthority(&tlsConf, o)
+	err = sslCertificateAuthority(&tlsConf, o, user)
 	if err != nil {
 		return nil, err
 	}
@@ -82,12 +90,7 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 // "sslkey" settings, or if they aren't set, from the .postgresql directory
 // in the user's home directory. The configured files must exist and have
 // the correct permissions.
-func sslClientCertificates(tlsConf *tls.Config, o values) error {
-	// user.Current() might fail when cross-compiling. We have to ignore the
-	// error and continue without home directory defaults, since we wouldn't
-	// know from where to load them.
-	user, _ := user.Current()
-
+func sslClientCertificates(tlsConf *tls.Config, o values, user *user.User) error {
 	// In libpq, the client certificate is only loaded if the setting is not blank.
 	//
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1036-L1037
@@ -130,11 +133,22 @@ func sslClientCertificates(tlsConf *tls.Config, o values) error {
 }
 
 // sslCertificateAuthority adds the RootCA specified in the "sslrootcert" setting.
-func sslCertificateAuthority(tlsConf *tls.Config, o values) error {
+func sslCertificateAuthority(tlsConf *tls.Config, o values, user *user.User) error {
 	// In libpq, the root certificate is only loaded if the setting is not blank.
 	//
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L950-L951
-	if sslrootcert := o["sslrootcert"]; len(sslrootcert) > 0 {
+	sslrootcert := o["sslrootcert"]
+	if len(sslrootcert) == 0 && user != nil {
+		sslrootcert = filepath.Join(user.HomeDir, ".postgresql", "root.crt")
+
+		if _, err := os.Stat(sslrootcert); os.IsNotExist(err) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+	}
+
+	if len(sslrootcert) > 0 {
 		tlsConf.RootCAs = x509.NewCertPool()
 
 		cert, err := ioutil.ReadFile(sslrootcert)
