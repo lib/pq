@@ -6,7 +6,14 @@ import (
 	nurl "net/url"
 	"sort"
 	"strings"
+	"sync"
 )
+
+var escaperOnce sync.Once
+var escaper *strings.Replacer
+
+var parsedURLCache map[string]string
+var parsedURLMu sync.Mutex
 
 // ParseURL no longer needs to be used by clients of this library since supplying a URL as a
 // connection string to sql.Open() is now supported:
@@ -30,6 +37,12 @@ import (
 //
 // This will be blank, causing driver.Open to use all of the defaults
 func ParseURL(url string) (string, error) {
+	parsedURLMu.Lock()
+	cachedVal, ok := parsedURLCache[url]
+	parsedURLMu.Unlock()
+	if ok {
+		return cachedVal, nil
+	}
 	u, err := nurl.Parse(url)
 	if err != nil {
 		return "", err
@@ -40,7 +53,9 @@ func ParseURL(url string) (string, error) {
 	}
 
 	var kvs []string
-	escaper := strings.NewReplacer(` `, `\ `, `'`, `\'`, `\`, `\\`)
+	escaperOnce.Do(func() {
+		escaper = strings.NewReplacer(` `, `\ `, `'`, `\'`, `\`, `\\`)
+	})
 	accrue := func(k, v string) {
 		if v != "" {
 			kvs = append(kvs, k+"="+escaper.Replace(v))
@@ -72,5 +87,15 @@ func ParseURL(url string) (string, error) {
 	}
 
 	sort.Strings(kvs) // Makes testing easier (not a performance concern)
-	return strings.Join(kvs, " "), nil
+	result := strings.Join(kvs, " ")
+	parsedURLMu.Lock()
+	if parsedURLCache == nil {
+		parsedURLCache = make(map[string]string)
+	}
+	// don't take up an unbounded amount of memory
+	if len(parsedURLCache) < 100 {
+		parsedURLCache[url] = result
+	}
+	parsedURLMu.Unlock()
+	return result, nil
 }
