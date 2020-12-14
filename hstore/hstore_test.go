@@ -36,7 +36,7 @@ func TestHstore(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
 
-	// quitely create hstore if it doesn't exist
+	// quietly create hstore if it doesn't exist
 	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS hstore")
 	if err != nil {
 		t.Skipf("Skipping hstore tests - hstore extension create failed: %s", err.Error())
