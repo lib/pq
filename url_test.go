@@ -5,7 +5,7 @@ import (
 )
 
 func TestSimpleParseURL(t *testing.T) {
-	expected := "host=hostname.remote"
+	expected := "host='hostname.remote'"
 	str, err := ParseURL("postgres://hostname.remote")
 	if err != nil {
 		t.Fatal(err)
@@ -17,7 +17,7 @@ func TestSimpleParseURL(t *testing.T) {
 }
 
 func TestIPv6LoopbackParseURL(t *testing.T) {
-	expected := "host=::1 port=1234"
+	expected := "host='::1' port='1234'"
 	str, err := ParseURL("postgres://[::1]:1234")
 	if err != nil {
 		t.Fatal(err)
@@ -29,7 +29,7 @@ func TestIPv6LoopbackParseURL(t *testing.T) {
 }
 
 func TestFullParseURL(t *testing.T) {
-	expected := `dbname=database host=hostname.remote password=top\ secret port=1234 user=username`
+	expected := `dbname='database' host='hostname.remote' password='top secret' port='1234' user='username'`
 	str, err := ParseURL("postgres://username:top%20secret@hostname.remote:1234/database")
 	if err != nil {
 		t.Fatal(err)
