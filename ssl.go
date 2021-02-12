@@ -87,7 +87,7 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 // the correct permissions.
 func sslClientCertificates(tlsConf *tls.Config, o values) error {
 	sslinline := o["sslinline"]
-	if "true" == sslinline {
+	if sslinline == "true" {
 		cert, err := tls.X509KeyPair([]byte(o["sslcert"]), []byte(o["sslkey"]))
 		// Clear out these params, in case they were to be sent to the PostgreSQL server by mistake
 		o["sslcert"] = ""
@@ -156,7 +156,7 @@ func sslCertificateAuthority(tlsConf *tls.Config, o values) error {
 		sslinline := o["sslinline"]
 
 		var cert []byte
-		if "true" == sslinline {
+		if sslinline == "true" {
 			// // Clear out this param, in case it were to be sent to the PostgreSQL server by mistake
 			o["sslrootcert"] = ""
 			cert = []byte(sslrootcert)
