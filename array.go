@@ -641,6 +641,11 @@ func (a *StringArray) Scan(src interface{}) error {
 }
 
 func (a *StringArray) scanBytes(src []byte) error {
+	// ignore null not  “return err”
+	if string(src) == "{NULL}" {
+		*a = []string{}
+		return nil
+	}
 	elems, err := scanLinearArray(src, []byte{','}, "StringArray")
 	if err != nil {
 		return err
