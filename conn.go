@@ -16,6 +16,7 @@ import (
 	"os/user"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -393,6 +394,23 @@ func network(o values) (string, string) {
 }
 
 type values map[string]string
+
+// Hash returns a deterministic hash of values.
+func (v values) Hash() []byte {
+	keys := make([]string, len(v))
+	i := 0
+	for key := range v {
+		keys[i] = key
+		i++
+	}
+	sort.Strings(keys)
+	h := sha256.New()
+	for _, key := range keys {
+		h.Write([]byte(key))
+		h.Write([]byte(v[key]))
+	}
+	return h.Sum(nil)
+}
 
 // scanner implements a tokenizer for libpq-style option strings.
 type scanner struct {

@@ -8,12 +8,34 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"sync"
 )
 
-// ssl generates a function to upgrade a net.Conn based on the "sslmode" and
-// related settings. The function is nil when no upgrade should take place.
-func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
+// To avoid allocating the map if we never use ssl
+var configMapOnce sync.Once
+var configMapMu sync.Mutex
+var configMap map[string]*ssldata
+
+type ssldata struct {
+	Conf         *tls.Config
+	VerifyCAOnly bool
+}
+
+func getTLSConf(o values) (*ssldata, error) {
 	verifyCaOnly := false
+	configMapOnce.Do(func() {
+		configMap = make(map[string]*ssldata)
+	})
+	// this function modifies o, so take the hash before any modifications are
+	// made
+	hash := string(o.Hash())
+	// This pseudo-parameter is not recognized by the PostgreSQL server, so let's delete it after use.
+	configMapMu.Lock()
+	conf, ok := configMap[hash]
+	configMapMu.Unlock()
+	if ok {
+		return conf, nil
+	}
 	tlsConf := tls.Config{}
 	switch mode := o["sslmode"]; mode {
 	// "require" is the default.
@@ -69,10 +91,27 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 	// also initiates renegotiations and cannot be reconfigured.
 	tlsConf.Renegotiation = tls.RenegotiateFreelyAsClient
 
+	data := &ssldata{&tlsConf, verifyCaOnly}
+	configMapMu.Lock()
+	configMap[hash] = data
+	configMapMu.Unlock()
+	return data, nil
+}
+
+// ssl generates a function to upgrade a net.Conn based on the "sslmode" and
+// related settings. The function is nil when no upgrade should take place.
+func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
+	data, err := getTLSConf(o)
+	if data == nil && err == nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	return func(conn net.Conn) (net.Conn, error) {
-		client := tls.Client(conn, &tlsConf)
-		if verifyCaOnly {
-			err := sslVerifyCertificateAuthority(client, &tlsConf)
+		client := tls.Client(conn, data.Conf)
+		if data.VerifyCAOnly {
+			err := sslVerifyCertificateAuthority(client, data.Conf)
 			if err != nil {
 				return nil, err
 			}
@@ -86,8 +125,7 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 // in the user's home directory. The configured files must exist and have
 // the correct permissions.
 func sslClientCertificates(tlsConf *tls.Config, o values) error {
-	sslinline := o["sslinline"]
-	if sslinline == "true" {
+	if o["sslinline"] == "true" {
 		cert, err := tls.X509KeyPair([]byte(o["sslcert"]), []byte(o["sslkey"]))
 		// Clear out these params, in case they were to be sent to the PostgreSQL server by mistake
 		o["sslcert"] = ""
@@ -98,7 +136,6 @@ func sslClientCertificates(tlsConf *tls.Config, o values) error {
 		tlsConf.Certificates = []tls.Certificate{cert}
 		return nil
 	}
-
 	// user.Current() might fail when cross-compiling. We have to ignore the
 	// error and continue without home directory defaults, since we wouldn't
 	// know from where to load them.
