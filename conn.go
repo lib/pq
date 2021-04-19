@@ -1106,7 +1106,7 @@ func isDriverSetting(key string) bool {
 		return true
 	case "password":
 		return true
-	case "sslmode", "sslcert", "sslkey", "sslrootcert":
+	case "sslmode", "sslcert", "sslkey", "sslrootcert", "sslinline":
 		return true
 	case "fallback_application_name":
 		return true
