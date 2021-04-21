@@ -298,7 +298,13 @@ func (c *Connector) open(ctx context.Context) (cn *conn, err error) {
 	// the user.
 	defer errRecoverNoErrBadConn(&err)
 
-	o := c.opts
+	// Create a new values map (copy). This makes it so maps in different
+	// connections do not reference the same underlying data structure, so it
+	// is safe for multiple connections to concurrently write to their opts.
+	o := make(values)
+	for k, v := range c.opts {
+		o[k] = v
+	}
 
 	bad := &atomic.Value{}
 	bad.Store(false)
@@ -1100,7 +1106,7 @@ func isDriverSetting(key string) bool {
 		return true
 	case "password":
 		return true
-	case "sslmode", "sslcert", "sslkey", "sslrootcert":
+	case "sslmode", "sslcert", "sslkey", "sslrootcert", "sslinline":
 		return true
 	case "fallback_application_name":
 		return true
