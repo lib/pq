@@ -4,11 +4,6 @@
 
 package pq
 
-import (
-	"os"
-	"os/user"
-)
-
 func userCurrent() (string, error) {
 	return "", ErrCouldNotDetectUsername
 }
