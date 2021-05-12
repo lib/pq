@@ -81,7 +81,10 @@ func TestSSLVerifyFull(t *testing.T) {
 	}
 	_, ok := err.(x509.UnknownAuthorityError)
 	if !ok {
-		t.Fatalf("expected x509.UnknownAuthorityError, got %#+v", err)
+		_, ok := err.(x509.HostnameError)
+		if !ok {
+			t.Fatalf("expected x509.UnknownAuthorityError or x509.HostnameError, got %#+v", err)
+		}
 	}
 
 	rootCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "root.crt")

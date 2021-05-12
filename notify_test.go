@@ -1,6 +1,8 @@
 package pq
 
 import (
+	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"io"
@@ -566,5 +568,45 @@ func TestListenerPing(t *testing.T) {
 	err = l.Ping()
 	if err != errListenerClosed {
 		t.Fatalf("expected errListenerClosed; got %v", err)
+	}
+}
+
+func TestConnectorWithNotificationHandler_Simple(t *testing.T) {
+	b, err := NewConnector("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var notification *Notification
+	// Make connector w/ handler to set the local var
+	c := ConnectorWithNotificationHandler(b, func(n *Notification) { notification = n })
+	sendNotification(c, t, "Test notification #1")
+	if notification == nil || notification.Extra != "Test notification #1" {
+		t.Fatalf("Expected notification w/ message, got %v", notification)
+	}
+	// Unset the handler on the same connector
+	prevC := c
+	if c = ConnectorWithNotificationHandler(c, nil); c != prevC {
+		t.Fatalf("Expected to not create new connector but did")
+	}
+	sendNotification(c, t, "Test notification #2")
+	if notification == nil || notification.Extra != "Test notification #1" {
+		t.Fatalf("Expected notification to not change, got %v", notification)
+	}
+	// Set it back on the same connector
+	if c = ConnectorWithNotificationHandler(c, func(n *Notification) { notification = n }); c != prevC {
+		t.Fatal("Expected to not create new connector but did")
+	}
+	sendNotification(c, t, "Test notification #3")
+	if notification == nil || notification.Extra != "Test notification #3" {
+		t.Fatalf("Expected notification w/ message, got %v", notification)
+	}
+}
+
+func sendNotification(c driver.Connector, t *testing.T, escapedNotification string) {
+	db := sql.OpenDB(c)
+	defer db.Close()
+	sql := fmt.Sprintf("LISTEN foo; NOTIFY foo, '%s';", escapedNotification)
+	if _, err := db.Exec(sql); err != nil {
+		t.Fatal(err)
 	}
 }

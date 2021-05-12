@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -695,7 +696,9 @@ func TestErrorDuringStartupClosesConn(t *testing.T) {
 func TestBadConn(t *testing.T) {
 	var err error
 
-	cn := conn{}
+	bad := &atomic.Value{}
+	bad.Store(false)
+	cn := conn{bad: bad}
 	func() {
 		defer cn.errRecover(&err)
 		panic(io.EOF)
@@ -703,11 +706,13 @@ func TestBadConn(t *testing.T) {
 	if err != driver.ErrBadConn {
 		t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
 	}
-	if !cn.bad {
+	if !cn.getBad() {
 		t.Fatalf("expected cn.bad")
 	}
 
-	cn = conn{}
+	badd := &atomic.Value{}
+	badd.Store(false)
+	cn = conn{bad: badd}
 	func() {
 		defer cn.errRecover(&err)
 		e := &Error{Severity: Efatal}
@@ -716,7 +721,7 @@ func TestBadConn(t *testing.T) {
 	if err != driver.ErrBadConn {
 		t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
 	}
-	if !cn.bad {
+	if !cn.getBad() {
 		t.Fatalf("expected cn.bad")
 	}
 }
@@ -724,7 +729,15 @@ func TestBadConn(t *testing.T) {
 // TestCloseBadConn tests that the underlying connection can be closed with
 // Close after an error.
 func TestCloseBadConn(t *testing.T) {
-	nc, err := net.Dial("tcp", "localhost:5432")
+	host := os.Getenv("PGHOST")
+	if host == "" {
+		host = "localhost"
+	}
+	port := os.Getenv("PGPORT")
+	if port == "" {
+		port = "5432"
+	}
+	nc, err := net.Dial("tcp", host+":"+port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1632,10 +1645,6 @@ func TestRowsResultTag(t *testing.T) {
 		{
 			query: "CREATE TEMP TABLE t (a int); DROP TABLE t; SELECT 1",
 		},
-		// Verify that an no-results query doesn't set the tag.
-		{
-			query: "CREATE TEMP TABLE t (a int); SELECT 1 WHERE FALSE; DROP TABLE t;",
-		},
 	}
 
 	// If this is the only test run, this will correct the connection string.
@@ -1737,6 +1746,36 @@ func TestMultipleResult(t *testing.T) {
 	}
 	if buf[0].rowCount != 1 || buf[1].rowCount != 2 {
 		t.Fatal("incorrect number of rows returned")
+	}
+}
+
+func TestMultipleEmptyResult(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	rows, err := db.Query("select 1 where false; select 2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		t.Fatal("unexpected row")
+	}
+	if !rows.NextResultSet() {
+		t.Fatal("expected more result sets", rows.Err())
+	}
+	for rows.Next() {
+		var i int
+		if err := rows.Scan(&i); err != nil {
+			t.Fatal(err)
+		}
+		if i != 2 {
+			t.Fatalf("expected 2, got %d", i)
+		}
+	}
+	if rows.NextResultSet() {
+		t.Fatal("unexpected result set")
 	}
 }
 
