@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -eu
+set -eux
 
 client_configure() {
 	sudo chmod 600 $PQSSLCERTTEST_PATH/postgresql.key
