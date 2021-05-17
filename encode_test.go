@@ -59,6 +59,8 @@ var timeTests = []struct {
 		time.FixedZone("", -(7*60*60+42*60)))},
 	{"2001-02-03 04:05:06-07:30:09", time.Date(2001, time.February, 3, 4, 5, 6, 0,
 		time.FixedZone("", -(7*60*60+30*60+9)))},
+	{"2001-02-03 04:05:06+07:30:09", time.Date(2001, time.February, 3, 4, 5, 6, 0,
+		time.FixedZone("", +(7*60*60+30*60+9)))},
 	{"2001-02-03 04:05:06+07", time.Date(2001, time.February, 3, 4, 5, 6, 0,
 		time.FixedZone("", 7*60*60))},
 	{"0011-02-03 04:05:06 BC", time.Date(-10, time.February, 3, 4, 5, 6, 0, time.FixedZone("", 0))},
@@ -251,6 +253,8 @@ func TestTimeWithTimezone(t *testing.T) {
 	}{
 		{"11:59:59+00:00", time.Date(0, 1, 1, 11, 59, 59, 0, time.UTC)},
 		{"11:59:59+04:00", time.Date(0, 1, 1, 11, 59, 59, 0, time.FixedZone("+04", 4*60*60))},
+		{"11:59:59+04:01:02", time.Date(0, 1, 1, 11, 59, 59, 0, time.FixedZone("+04:01:02", 4*60*60+1*60+2))},
+		{"11:59:59-04:01:02", time.Date(0, 1, 1, 11, 59, 59, 0, time.FixedZone("-04:01:02", -(4*60*60+1*60+2)))},
 		{"24:00+00", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
 		{"24:00Z", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
 		{"24:00-04:00", time.Date(0, 1, 2, 0, 0, 0, 0, time.FixedZone("-04", -4*60*60))},
