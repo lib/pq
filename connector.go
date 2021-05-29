@@ -47,6 +47,7 @@ func NewConnector(dsn string) (*Connector, error) {
 	//
 	// * Very low precedence defaults applied in every situation
 	// * Environment variables
+	// * Service name variables
 	// * Explicitly passed connection information
 	o["host"] = "localhost"
 	o["port"] = "5432"
@@ -66,6 +67,24 @@ func NewConnector(dsn string) (*Connector, error) {
 
 	if err := parseOpts(dsn, o); err != nil {
 		return nil, err
+	}
+
+	// whenever a service is specified, we will need to parse the connection service file
+	// and override the defaults with the parameters specified for that service.
+	// See https://www.postgresql.org/docs/current/libpq-pgservice.html
+	if service, ok := o["service"]; ok {
+		if err := parseServiceFile(service, o); err != nil {
+			return nil, err
+		}
+
+		// By overwriting the options with the service parameters we may have masked some
+		// explicitly passed connection information, e.g. "service=staging user=read_only".
+		// By repeating the parseOpts we overcome this issue.
+		if err := parseOpts(dsn, o); err != nil {
+			return nil, err
+		}
+		// "service" itself should not be passed down as a connection parameter
+		delete(o, "service")
 	}
 
 	// Use the "fallback" application name if necessary
