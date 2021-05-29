@@ -65,3 +65,24 @@ func TestNewConnector_Driver(t *testing.T) {
 	}
 	txn.Rollback()
 }
+
+func TestNewConnector_DriverContext(t *testing.T) {
+	name := ""
+	d := &Driver{}
+	c, err := d.OpenConnector(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := c.Connect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	// database/sql might not call our Open at all unless we do something with
+	// the connection
+	txn, err := db.(driver.ConnBeginTx).BeginTx(context.Background(), driver.TxOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	txn.Rollback()
+}

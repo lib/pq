@@ -54,6 +54,15 @@ func (d Driver) Open(name string) (driver.Conn, error) {
 	return Open(name)
 }
 
+// OpenConnector sets up a new Connector, ready to create connections. name is
+// a connection string. Most users should only use it through database/sql
+// package from the standard library.
+//
+// Implements `database/sql/driver.DriverContext`.
+func (d *Driver) OpenConnector(name string) (driver.Connector, error) {
+	return NewConnector(name)
+}
+
 func init() {
 	sql.Register("postgres", &Driver{})
 }
