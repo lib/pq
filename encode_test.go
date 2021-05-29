@@ -31,6 +31,30 @@ func TestScanNilTimestamp(t *testing.T) {
 	}
 }
 
+func TestNullTimeEqual(t *testing.T) {
+	now := time.Now()
+	empty := time.Time{}
+
+	nullTimeTests := []struct {
+		nt             NullTime
+		other          NullTime
+		expectedEquals bool
+	}{
+		{NullTime{now, true}, NullTime{now, true}, true},
+		{NullTime{now, true}, NullTime{empty, false}, false},
+		{NullTime{empty, false}, NullTime{now, true}, false},
+		{NullTime{empty, false}, NullTime{empty, false}, true},
+		{NullTime{now, true}, NullTime{now.Add(time.Second), true}, false},
+	}
+	for _, ntt := range nullTimeTests {
+		actual := ntt.nt.Equal(ntt.other)
+		if actual != ntt.expectedEquals {
+			t.Errorf("expected %v (valid %v) == %v (valid %v) to be %v; got %v",
+				ntt.nt.Time, ntt.nt.Valid, ntt.other.Time, ntt.other.Valid, ntt.expectedEquals, actual)
+		}
+	}
+}
+
 var timeTests = []struct {
 	str     string
 	timeval time.Time
