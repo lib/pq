@@ -264,5 +264,7 @@ When imported, additional connection string parameters are supported:
 	  to form the full SPN: `krbsrvname/host`.
 	* krbspn - GSS (Kerberos) SPN. This takes priority over
 	  `krbsrvname` if present.
+
+Deprecated: This package is effectively in maintenance mode and is not actively developed. Small patches and features are only rarely reviewed and merged. We recommend using jackc/pgx which is actively maintained.
 */
 package pq
