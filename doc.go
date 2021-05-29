@@ -51,6 +51,12 @@ supported:
 	* sslmode - Whether or not to use SSL (default is require, this is not
 	  the default for libpq)
 	* fallback_application_name - An application_name to fall back to if one isn't provided.
+	* keepalives - Whether or not to use client-side TCP keepalives
+	  (the default value is 1, meaning on, but you can change this to 0, meaning off)
+	* keepalives_interval - The number of seconds after which a TCP keepalive message
+	  that is not acknowledged by the server should be retransmitted.
+	  If zero or not specified, keep-alive probes are sent with a default value (see net.Dialer).
+	  If negative, keep-alive probes are disabled.
 	* connect_timeout - Maximum wait for connection, in seconds. Zero or
 	  not specified means wait indefinitely.
 	* sslcert - Cert file location. The file must contain PEM encoded data.
