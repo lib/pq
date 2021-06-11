@@ -15,10 +15,11 @@ env:
     - PGHOST=127.0.0.1
     - GODEBUG=x509ignoreCN=0
   matrix:
+    - PGVERSION=13
+    - PGVERSION=12
+    - PGVERSION=11
     - PGVERSION=10
     - PGVERSION=9.6
-    - PGVERSION=9.5
-    - PGVERSION=9.4
 
 before_install:
   - ./.travis.sh postgresql_uninstall
