@@ -3,18 +3,26 @@ package pq
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"io/ioutil"
 	"net"
 	"os"
 	"os/user"
 	"path/filepath"
+	"time"
 )
+
+type tlsConfWithCrl struct {
+	tls.Config
+
+	crl *pkix.CertificateList
+}
 
 // ssl generates a function to upgrade a net.Conn based on the "sslmode" and
 // related settings. The function is nil when no upgrade should take place.
 func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 	verifyCaOnly := false
-	tlsConf := tls.Config{}
+	tlsConf := tlsConfWithCrl{}
 	switch mode := o["sslmode"]; mode {
 	// "require" is the default.
 	case "", "require":
@@ -67,12 +75,9 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 	tlsConf.Renegotiation = tls.RenegotiateFreelyAsClient
 
 	return func(conn net.Conn) (net.Conn, error) {
-		client := tls.Client(conn, &tlsConf)
-		if verifyCaOnly {
-			err := sslVerifyCertificateAuthority(client, &tlsConf)
-			if err != nil {
-				return nil, err
-			}
+		client := tls.Client(conn, &tlsConf.Config)
+		if err := sslVerifyExtra(client, &tlsConf, verifyCaOnly); err != nil {
+			return nil, err
 		}
 		return client, nil
 	}, nil
@@ -82,7 +87,7 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 // "sslkey" settings, or if they aren't set, from the .postgresql directory
 // in the user's home directory. The configured files must exist and have
 // the correct permissions.
-func sslClientCertificates(tlsConf *tls.Config, o values) error {
+func sslClientCertificates(tlsConf *tlsConfWithCrl, o values) error {
 	sslinline := o["sslinline"]
 	if sslinline == "true" {
 		cert, err := tls.X509KeyPair([]byte(o["sslcert"]), []byte(o["sslkey"]))
@@ -97,6 +102,23 @@ func sslClientCertificates(tlsConf *tls.Config, o values) error {
 	// error and continue without home directory defaults, since we wouldn't
 	// know from where to load them.
 	user, _ := user.Current()
+
+	// Load CRL, https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L974
+	sslcrl := o["sslcrl"]
+	if len(sslcrl) == 0 && user != nil {
+		sslcrl = filepath.Join(user.HomeDir, ".postgresql", "root.crl")
+	}
+	if len(sslcrl) > 0 {
+		crlcontent, err := ioutil.ReadFile(sslcrl)
+		if err != nil && !os.IsNotExist(err) { // https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1002
+			return err
+		} else if err == nil {
+			tlsConf.crl, err = x509.ParseCRL(crlcontent)
+			if err != nil {
+				return err
+			}
+		}
+	}
 
 	// In libpq, the client certificate is only loaded if the setting is not blank.
 	//
@@ -140,7 +162,7 @@ func sslClientCertificates(tlsConf *tls.Config, o values) error {
 }
 
 // sslCertificateAuthority adds the RootCA specified in the "sslrootcert" setting.
-func sslCertificateAuthority(tlsConf *tls.Config, o values) error {
+func sslCertificateAuthority(tlsConf *tlsConfWithCrl, o values) error {
 	// In libpq, the root certificate is only loaded if the setting is not blank.
 	//
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L950-L951
@@ -168,26 +190,73 @@ func sslCertificateAuthority(tlsConf *tls.Config, o values) error {
 	return nil
 }
 
-// sslVerifyCertificateAuthority carries out a TLS handshake to the server and
-// verifies the presented certificate against the CA, i.e. the one specified in
-// sslrootcert or the system CA if sslrootcert was not specified.
-func sslVerifyCertificateAuthority(client *tls.Conn, tlsConf *tls.Config) error {
+// sslVerifyExtra carries out a TLS handshake to the server and
+// carries out extra verification that Go's TLS package doesn't do:
+//   * if verifyCaOnly is true, verifies the presented certificate against the CA,
+//     i.e. the one specified in sslrootcert or the system CA if sslrootcert was not specified.
+//   * verifies the PeerCertificates against CRL if sslcrl was specified
+func sslVerifyExtra(client *tls.Conn, tlsConf *tlsConfWithCrl, verifyCaOnly bool) error {
 	err := client.Handshake()
 	if err != nil {
 		return err
 	}
-	certs := client.ConnectionState().PeerCertificates
-	opts := x509.VerifyOptions{
-		DNSName:       client.ConnectionState().ServerName,
-		Intermediates: x509.NewCertPool(),
-		Roots:         tlsConf.RootCAs,
-	}
-	for i, cert := range certs {
-		if i == 0 {
-			continue
+
+	state := client.ConnectionState()
+	if verifyCaOnly {
+		opts := x509.VerifyOptions{
+			DNSName:       client.ConnectionState().ServerName,
+			Intermediates: x509.NewCertPool(),
+			Roots:         tlsConf.RootCAs,
 		}
-		opts.Intermediates.AddCert(cert)
+		for i, cert := range state.PeerCertificates {
+			if i == 0 {
+				continue
+			}
+			opts.Intermediates.AddCert(cert)
+		}
+
+		state.VerifiedChains, err = state.PeerCertificates[0].Verify(opts)
+		if err != nil {
+			return err
+		}
 	}
-	_, err = certs[0].Verify(opts)
-	return err
+
+	if crl := tlsConf.crl; crl != nil {
+		if crl.HasExpired(time.Now()) {
+			return fmterrorf("sslcrl has expired on %v", crl.TBSCertList.NextUpdate)
+		}
+
+		crlVerified := false
+		crlIssuer := crl.TBSCertList.Issuer.String()
+
+	VerifiedChainLoop:
+		for _, chain := range state.VerifiedChains {
+			for i := len(chain) - 1; i >= 0; i-- {
+				cert := chain[i]
+				if cert.Subject.ToRDNSequence().String() != crlIssuer {
+					continue
+				}
+
+				if err := cert.CheckCRLSignature(crl); err != nil {
+					return fmterrorf("sslcrl failed to verify with cert subject %s: %w", cert.Subject.String(), err)
+				}
+				crlVerified = true
+				break VerifiedChainLoop
+			}
+		}
+
+		if !crlVerified {
+			return fmterrorf("sslcrl failed to verify with all root certificates.")
+		}
+
+		for _, cert := range state.PeerCertificates {
+			for _, revoked := range crl.TBSCertList.RevokedCertificates {
+				if cert.SerialNumber.Cmp(revoked.SerialNumber) == 0 {
+					return fmterrorf("certificate %s was revoked at %v", cert.SerialNumber.String(), revoked.RevocationTime)
+				}
+			}
+		}
+	}
+
+	return nil
 }

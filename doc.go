@@ -57,6 +57,8 @@ supported:
 	* sslkey - Key file location. The file must contain PEM encoded data.
 	* sslrootcert - The location of the root certificate file. The file
 	  must contain PEM encoded data.
+	* sslcrl - The location of the CRL revocation list file. The file
+	  must contain PEM or DER encoded data.
 
 Valid values for sslmode are:
 
