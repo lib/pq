@@ -1,3 +1,4 @@
+//go:build ignore
 // +build ignore
 
 // Generate the table of OID values
