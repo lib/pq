@@ -1,5 +1,6 @@
 .PHONY: all root-ssl server-ssl client-ssl
 
+# Rebuilds self-signed root/server/client certs/keys in a consistent way
 all: root-ssl server-ssl client-ssl
 	rm -f .srl
 
