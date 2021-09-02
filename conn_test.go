@@ -1806,3 +1806,167 @@ func TestCopyInStmtAffectedRows(t *testing.T) {
 	res.RowsAffected()
 	res.LastInsertId()
 }
+
+func TestConnPrepareContext(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	tests := []struct {
+		name string
+		ctx  func() (context.Context, context.CancelFunc)
+		sql  string
+		err  error
+	}{
+		{
+			name: "context.Background",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.Background(), nil
+			},
+			sql: "SELECT 1",
+			err: nil,
+		},
+		{
+			name: "context.WithTimeout exceeded",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), time.Microsecond)
+			},
+			sql: "SELECT 1",
+			err: context.DeadlineExceeded,
+		},
+		{
+			name: "context.WithTimeout",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), time.Minute)
+			},
+			sql: "SELECT 1",
+			err: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := tt.ctx()
+			if cancel != nil {
+				defer cancel()
+			}
+			_, err := db.PrepareContext(ctx, tt.sql)
+			switch {
+			case (err != nil) != (tt.err != nil):
+				t.Fatalf("conn.PrepareContext() unexpected nil err got = %v, expected = %v", err, tt.err)
+			case (err != nil && tt.err != nil) && (err.Error() != tt.err.Error()):
+				t.Errorf("conn.PrepareContext() got = %v, expected = %v", err.Error(), tt.err.Error())
+			}
+		})
+	}
+}
+
+func TestStmtQueryContext(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	tests := []struct {
+		name string
+		ctx  func() (context.Context, context.CancelFunc)
+		sql  string
+		err  error
+	}{
+		{
+			name: "context.Background",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.Background(), nil
+			},
+			sql: "SELECT pg_sleep(1);",
+			err: nil,
+		},
+		{
+			name: "context.WithTimeout exceeded",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), 1*time.Second)
+			},
+			sql: "SELECT pg_sleep(10);",
+			err: &Error{Message: "canceling statement due to user request"},
+		},
+		{
+			name: "context.WithTimeout",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), time.Minute)
+			},
+			sql: "SELECT pg_sleep(1);",
+			err: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := tt.ctx()
+			if cancel != nil {
+				defer cancel()
+			}
+			stmt, err := db.PrepareContext(ctx, tt.sql)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = stmt.QueryContext(ctx)
+			switch {
+			case (err != nil) != (tt.err != nil):
+				t.Fatalf("stmt.QueryContext() unexpected nil err got = %v, expected = %v", err, tt.err)
+			case (err != nil && tt.err != nil) && (err.Error() != tt.err.Error()):
+				t.Errorf("stmt.QueryContext() got = %v, expected = %v", err.Error(), tt.err.Error())
+			}
+		})
+	}
+}
+
+func TestStmtExecContext(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	tests := []struct {
+		name string
+		ctx  func() (context.Context, context.CancelFunc)
+		sql  string
+		err  error
+	}{
+		{
+			name: "context.Background",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.Background(), nil
+			},
+			sql: "SELECT pg_sleep(1);",
+			err: nil,
+		},
+		{
+			name: "context.WithTimeout exceeded",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), 1*time.Second)
+			},
+			sql: "SELECT pg_sleep(10);",
+			err: &Error{Message: "canceling statement due to user request"},
+		},
+		{
+			name: "context.WithTimeout",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), time.Minute)
+			},
+			sql: "SELECT pg_sleep(1);",
+			err: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := tt.ctx()
+			if cancel != nil {
+				defer cancel()
+			}
+			stmt, err := db.PrepareContext(ctx, tt.sql)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = stmt.ExecContext(ctx)
+			switch {
+			case (err != nil) != (tt.err != nil):
+				t.Fatalf("stmt.ExecContext() unexpected nil err got = %v, expected = %v", err, tt.err)
+			case (err != nil && tt.err != nil) && (err.Error() != tt.err.Error()):
+				t.Errorf("stmt.ExecContext() got = %v, expected = %v", err.Error(), tt.err.Error())
+			}
+		})
+	}
+}
