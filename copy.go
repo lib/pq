@@ -44,6 +44,25 @@ func CopyInSchema(schema, table string, columns ...string) string {
 	return stmt
 }
 
+// CopyIn creates a COPY FROM statement which can be prepared with
+// Tx.Prepare().  The target table should be visible in search_path.
+// NULL
+// Specifies the string that represents a null value.
+// The default is \N (backslash-N) in text format, and an unquoted empty string in CSV format.
+// You might prefer an empty string even in text format for cases where you don't want to distinguish nulls from empty strings.
+// This option is not allowed when using binary format.
+func CopyInWithNull(null, table string, columns ...string) string {
+	stmt := "COPY " + QuoteIdentifier(table) + " ("
+	for i, col := range columns {
+		if i != 0 {
+			stmt += ", "
+		}
+		stmt += QuoteIdentifier(col)
+	}
+	stmt += fmt.Sprintf(") FROM STDIN NULL '%s'", null)
+	return stmt
+}
+
 type copyin struct {
 	cn      *conn
 	buffer  []byte
@@ -54,7 +73,7 @@ type copyin struct {
 	closed bool
 
 	sync.Mutex // guards err
-	err        error
+	err error
 }
 
 const ciBufferSize = 64 * 1024
