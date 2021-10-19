@@ -2,6 +2,7 @@ package pq
 
 import (
 	"context"
+	"database/sql/driver"
 	"testing"
 	"time"
 )
@@ -56,5 +57,24 @@ func TestIssue1046(t *testing.T) {
 		t.Logf("ctx.Err(): [%T]%+v\n", ctx.Err(), ctx.Err())
 		t.Logf("got err: [%T] %+v expected err: [%T] %+v", err, err, expectedErr, expectedErr)
 		t.Fail()
+	}
+}
+
+func TestIssue1062(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	// Ensure that cancelling a QueryRowContext does not result in an ErrBadConn.
+
+	for i := 0; i < 1000; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		go cancel()
+		row := db.QueryRowContext(ctx, "select 1")
+
+		var v int
+		err := row.Scan(&v)
+		if err == driver.ErrBadConn {
+			t.Fatalf("Scan resulted in ErrBadConn for canceled QueryRowContext at attempt %d", i+1)
+		}
 	}
 }
