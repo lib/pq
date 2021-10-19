@@ -66,7 +66,7 @@ func TestIssue1062(t *testing.T) {
 
 	// Ensure that cancelling a QueryRowContext does not result in an ErrBadConn.
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100; i++ {
 		ctx, cancel := context.WithCancel(context.Background())
 		go cancel()
 		row := db.QueryRowContext(ctx, "select 1")
