@@ -6,6 +6,8 @@ import (
 	"io"
 	"net"
 	"runtime"
+	"strconv"
+	"strings"
 )
 
 // Error severities
@@ -40,6 +42,9 @@ type Error struct {
 	File             string
 	Line             string
 	Routine          string
+
+	// For syntax error reporting. Not a field returned by Postgres.
+	originalQuery string
 }
 
 // ErrorCode is a five-character error code.
@@ -445,7 +450,59 @@ func (err *Error) Get(k byte) (v string) {
 }
 
 func (err Error) Error() string {
+	switch err.Code {
+	case "42601": // syntax_error
+		return err.syntaxError()
+	default:
+		return err.normalError()
+	}
+}
+
+func (err Error) normalError() string {
 	return "pq: " + err.Message
+}
+
+// syntaxError formats a syntax error the way psql does.
+func (err Error) syntaxError() string {
+	if err.Position == "" || err.originalQuery == "" {
+		return err.normalError() // not enough information, fallback
+	}
+
+	pos, e := strconv.Atoi(err.Position)
+	if e != nil {
+		return err.normalError() // Position is not a number, fallback
+	}
+	pos -= 1 // make zero-based
+
+	if pos < 0 || pos >= len(err.originalQuery) {
+		return err.normalError() // Position is out of range, fallback
+	}
+
+	lineStartPos := strings.LastIndex(err.originalQuery[:pos], "\n")
+	if lineStartPos == -1 { // error in first line?
+		lineStartPos = 0
+	} else {
+		lineStartPos += 1 // remove \n
+	}
+
+	lineEndPos := strings.Index(err.originalQuery[pos:], "\n")
+	if lineEndPos == -1 { // error in last line?
+		lineEndPos = len(err.originalQuery)
+	} else {
+		lineEndPos += pos // absolute position
+	}
+
+	lineNo := strings.Count(err.originalQuery[:lineStartPos], "\n")
+
+	queryLinePrefix := fmt.Sprintf("LINE %d: ", lineNo+1)
+	queryLine := err.originalQuery[lineStartPos:lineEndPos]
+	markerLinePrefix := strings.Repeat(" ", len(queryLinePrefix))
+	markerLine := strings.Repeat(" ", pos-lineStartPos) + "^"
+
+	return fmt.Sprintf("pq: %s\n%s%s\n%s%s",
+		err.Message,
+		queryLinePrefix, queryLine,
+		markerLinePrefix, markerLine)
 }
 
 // PGError is an interface used by previous versions of pq. It is provided
@@ -479,8 +536,20 @@ func errRecoverNoErrBadConn(err *error) {
 }
 
 func (cn *conn) errRecover(err *error) {
-	e := recover()
-	switch v := e.(type) {
+	cn.errHandleRecovered(recover(), err)
+}
+
+func (cn *conn) errRecoverWithQuery(err *error, query string) {
+	cn.errHandleRecovered(recover(), err)
+	if *err != nil {
+		if pqErr, ok := (*err).(*Error); ok {
+			pqErr.originalQuery = query
+		}
+	}
+}
+
+func (cn *conn) errHandleRecovered(recovered interface{}, err *error) {
+	switch v := recovered.(type) {
 	case nil:
 		// Do nothing
 	case runtime.Error:
@@ -507,7 +576,7 @@ func (cn *conn) errRecover(err *error) {
 
 	default:
 		cn.setBad()
-		panic(fmt.Sprintf("unknown error: %#v", e))
+		panic(fmt.Sprintf("unknown error: %#v", recovered))
 	}
 
 	// Any time we return ErrBadConn, we need to remember it since *Tx doesn't
