@@ -703,8 +703,8 @@ func TestBadConn(t *testing.T) {
 	if err != driver.ErrBadConn {
 		t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
 	}
-	if err := cn.err.get(); err == nil {
-		t.Fatalf("expected cn.bad")
+	if err := cn.err.get(); err != driver.ErrBadConn {
+		t.Fatalf("expected driver.ErrBadConn, got %#v", err)
 	}
 
 	cn = conn{}
@@ -716,8 +716,8 @@ func TestBadConn(t *testing.T) {
 	if err != driver.ErrBadConn {
 		t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
 	}
-	if err := cn.err.get(); err == nil {
-		t.Fatalf("expected cn.bad")
+	if err := cn.err.get(); err != driver.ErrBadConn {
+		t.Fatalf("expected driver.ErrBadConn, got %#v", err)
 	}
 }
 
