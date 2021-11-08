@@ -143,7 +143,7 @@ func TestContextCancelQuery(t *testing.T) {
 			cancel()
 			if err != nil {
 				t.Fatal(err)
-			} else if err := rows.Close(); err != nil && err != driver.ErrBadConn {
+			} else if err := rows.Close(); err != nil && err != driver.ErrBadConn && err != context.Canceled {
 				t.Fatal(err)
 			}
 		}()
@@ -242,7 +242,7 @@ func TestContextCancelBegin(t *testing.T) {
 				t.Fatal(err)
 			} else if err := tx.Rollback(); err != nil &&
 				err.Error() != "pq: canceling statement due to user request" &&
-				err != sql.ErrTxDone && err != driver.ErrBadConn {
+				err != sql.ErrTxDone && err != driver.ErrBadConn && err != context.Canceled {
 				t.Fatal(err)
 			}
 		}()
