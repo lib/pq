@@ -52,9 +52,11 @@ type copyin struct {
 
 	closed bool
 
-	sync.Mutex // guards err and Result
-	err        error
-	driver.Result
+	mu struct {
+		sync.Mutex
+		err error
+		driver.Result
+	}
 }
 
 const ciBufferSize = 64 * 1024
@@ -182,33 +184,33 @@ func (ci *copyin) getBad() error {
 	return ci.cn.err.get()
 }
 
-func (ci *copyin) isErrorSet() bool {
-	ci.Lock()
-	isSet := (ci.err != nil)
-	ci.Unlock()
-	return isSet
+func (ci *copyin) err() error {
+	ci.mu.Lock()
+	err := ci.mu.err
+	ci.mu.Unlock()
+	return err
 }
 
 // setError() sets ci.err if one has not been set already.  Caller must not be
 // holding ci.Mutex.
 func (ci *copyin) setError(err error) {
-	ci.Lock()
-	if ci.err == nil {
-		ci.err = err
+	ci.mu.Lock()
+	if ci.mu.err == nil {
+		ci.mu.err = err
 	}
-	ci.Unlock()
+	ci.mu.Unlock()
 }
 
 func (ci *copyin) setResult(result driver.Result) {
-	ci.Lock()
-	ci.Result = result
-	ci.Unlock()
+	ci.mu.Lock()
+	ci.mu.Result = result
+	ci.mu.Unlock()
 }
 
 func (ci *copyin) getResult() driver.Result {
-	ci.Lock()
-	result := ci.Result
-	ci.Unlock()
+	ci.mu.Lock()
+	result := ci.mu.Result
+	ci.mu.Unlock()
 	if result == nil {
 		return driver.RowsAffected(0)
 	}
@@ -240,8 +242,8 @@ func (ci *copyin) Exec(v []driver.Value) (r driver.Result, err error) {
 	}
 	defer ci.cn.errRecover(&err)
 
-	if ci.isErrorSet() {
-		return nil, ci.err
+	if err := ci.err(); err != nil {
+		return nil, err
 	}
 
 	if len(v) == 0 {
@@ -294,8 +296,7 @@ func (ci *copyin) Close() (err error) {
 	<-ci.done
 	ci.cn.inCopy = false
 
-	if ci.isErrorSet() {
-		err = ci.err
+	if err := ci.err(); err != nil {
 		return err
 	}
 	return nil
