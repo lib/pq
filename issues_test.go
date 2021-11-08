@@ -2,7 +2,6 @@ package pq
 
 import (
 	"context"
-	"database/sql/driver"
 	"testing"
 	"time"
 )
@@ -73,8 +72,8 @@ func TestIssue1062(t *testing.T) {
 
 		var v int
 		err := row.Scan(&v)
-		if err == driver.ErrBadConn {
-			t.Fatalf("Scan resulted in ErrBadConn for canceled QueryRowContext at attempt %d", i+1)
+		if err != nil && err != context.Canceled && err.Error() != "pq: canceling statement due to user request" {
+			t.Fatalf("Scan resulted in unexpected error %v for canceled QueryRowContext at attempt %d", err, i+1)
 		}
 	}
 }
