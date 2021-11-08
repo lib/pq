@@ -1823,7 +1823,7 @@ func TestConnPrepareContext(t *testing.T) {
 		{
 			name: "context.WithTimeout exceeded",
 			ctx: func() (context.Context, context.CancelFunc) {
-				return context.WithTimeout(context.Background(), time.Microsecond)
+				return context.WithTimeout(context.Background(), -time.Minute)
 			},
 			sql: "SELECT 1",
 			err: context.DeadlineExceeded,
