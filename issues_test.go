@@ -58,3 +58,22 @@ func TestIssue1046(t *testing.T) {
 		t.Fail()
 	}
 }
+
+func TestIssue1062(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	// Ensure that cancelling a QueryRowContext does not result in an ErrBadConn.
+
+	for i := 0; i < 100; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		go cancel()
+		row := db.QueryRowContext(ctx, "select 1")
+
+		var v int
+		err := row.Scan(&v)
+		if err != nil && err != context.Canceled && err.Error() != "pq: canceling statement due to user request" {
+			t.Fatalf("Scan resulted in unexpected error %v for canceled QueryRowContext at attempt %d", err, i+1)
+		}
+	}
+}
