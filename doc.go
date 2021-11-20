@@ -66,6 +66,8 @@ Valid values for sslmode are:
   - verify-full - Always SSL (verify that the certification presented by
     the server was signed by a trusted CA and the server host name
     matches the one in the certificate)
+  - A custom TLS configuration registered with [RegisterTLSConfig]. These must
+    be prefixed with "pqgo-".
 
 See http://www.postgresql.org/docs/current/static/libpq-connect.html#LIBPQ-CONNSTRING
 for more information about connection string parameters.
