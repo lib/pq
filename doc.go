@@ -68,6 +68,47 @@ Valid values for sslmode are:
 	  the server was signed by a trusted CA and the server host name
 	  matches the one in the certificate)
 
+For support ssl key in memory, we extend sslmode. For example:
+
+	import (
+		"crypto/tls"
+		"crypto/x509"
+		"io/ioutil"
+		"log"
+
+		"github.com/lib/pq"
+	)
+
+	func main() {
+		rootCertPool := x509.NewCertPool()
+		pem, err := ioutil.ReadFile("ca.crt")
+		if err != nil {
+			log.Fatal(err)
+		}
+		if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
+			log.Fatal("Failed to append PEM.")
+		}
+		clientCert := make([]tls.Certificate, 0, 1)
+		certs, err := tls.LoadX509KeyPair("client1.crt", "client1.key")
+		if err != nil {
+			log.Fatal(err)
+		}
+		clientCert = append(clientCert, certs)
+		err = pq.RegisterTLSConfig("custom", &tls.Config{
+			RootCAs:      rootCertPool,
+			Certificates: clientCert,
+			ServerName:   "pq.example.com",
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+		connStr := "host=pq.example.com port=5432 user=user1 dbname=pqgotest password=pqgotest sslmode=custom"
+		db, err := sql.Open("postgres", connStr)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
 See http://www.postgresql.org/docs/current/static/libpq-connect.html#LIBPQ-CONNSTRING
 for more information about connection string parameters.
 
