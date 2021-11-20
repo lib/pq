@@ -1,9 +1,12 @@
 package pq_test
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/lib/pq"
 )
@@ -23,6 +26,7 @@ func ExampleNewConnector() {
 		log.Fatalf("could not start transaction: %v", err)
 	}
 	tx.Rollback()
+	// Output:
 }
 
 func ExampleConnectorWithNoticeHandler() {
@@ -44,7 +48,38 @@ func ExampleConnectorWithNoticeHandler() {
 	if _, err := db.Exec(sql); err != nil {
 		log.Fatal(err)
 	}
-
 	// Output:
 	// Notice sent: test notice
+}
+
+func ExampleRegisterTLSConfig() {
+	pem, err := os.ReadFile("testdata/init/root.crt")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	root := x509.NewCertPool()
+	root.AppendCertsFromPEM(pem)
+
+	certs, err := tls.LoadX509KeyPair("testdata/init/postgresql.crt", "testdata/init/postgresql.key")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	pq.RegisterTLSConfig("mytls", &tls.Config{
+		RootCAs:      root,
+		Certificates: []tls.Certificate{certs},
+		ServerName:   "postgres",
+	})
+
+	db, err := sql.Open("postgres", "host=postgres dbname=pqgo sslmode=pqgo-mytls")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = db.Ping()
+	if err != nil {
+		log.Fatal(err)
+	}
+	// Output:
 }

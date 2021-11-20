@@ -10,19 +10,57 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/lib/pq/internal/pqutil"
 )
 
+// Registry for custom tls.Configs
+var (
+	tlsConfs   = make(map[string]*tls.Config)
+	tlsConfsMu sync.RWMutex
+)
+
+// RegisterTLSConfig registers a custom [tls.Config]. They are used by using
+// sslmode=pqgo-«key» in the connection string.
+//
+// Set the config to nil to remove a configuration.
+func RegisterTLSConfig(key string, config *tls.Config) error {
+	key = strings.TrimPrefix(key, "pqgo-")
+	if config == nil {
+		tlsConfsMu.Lock()
+		delete(tlsConfs, key)
+		tlsConfsMu.Unlock()
+		return nil
+	}
+
+	tlsConfsMu.Lock()
+	tlsConfs[key] = config
+	tlsConfsMu.Unlock()
+	return nil
+}
+
+func getTLSConfigClone(key string) *tls.Config {
+	tlsConfsMu.RLock()
+	if v, ok := tlsConfs[key]; ok {
+		return v.Clone()
+	}
+	tlsConfsMu.RUnlock()
+	return nil
+}
+
 // ssl generates a function to upgrade a net.Conn based on the "sslmode" and
 // related settings. The function is nil when no upgrade should take place.
 func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
-	verifyCaOnly := false
-	tlsConf := tls.Config{}
-	switch mode := o["sslmode"]; mode {
+	var (
+		verifyCaOnly = false
+		tlsConf      = &tls.Config{}
+		mode         = o["sslmode"]
+	)
+	switch {
 	// "require" is the default.
-	case "", "require":
+	case mode == "" || mode == "require":
 		// We must skip TLS's own verification since it requires full
 		// verification since Go 1.3.
 		tlsConf.InsecureSkipVerify = true
@@ -42,15 +80,20 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 				delete(o, "sslrootcert")
 			}
 		}
-	case "verify-ca":
+	case mode == "verify-ca":
 		// We must skip TLS's own verification since it requires full
 		// verification since Go 1.3.
 		tlsConf.InsecureSkipVerify = true
 		verifyCaOnly = true
-	case "verify-full":
+	case mode == "verify-full":
 		tlsConf.ServerName = o["host"]
-	case "disable":
+	case mode == "disable":
 		return nil, nil
+	case strings.HasPrefix(mode, "pqgo-"):
+		tlsConf = getTLSConfigClone(mode[5:])
+		if tlsConf == nil {
+			return nil, fmt.Errorf(`pq: unknown custom sslmode %q`, mode)
+		}
 	default:
 		return nil, fmt.Errorf(
 			`pq: unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`,
@@ -67,11 +110,11 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 		tlsConf.ServerName = o["host"]
 	}
 
-	err := sslClientCertificates(&tlsConf, o)
+	err := sslClientCertificates(tlsConf, o)
 	if err != nil {
 		return nil, err
 	}
-	err = sslCertificateAuthority(&tlsConf, o)
+	err = sslCertificateAuthority(tlsConf, o)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +127,7 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 	tlsConf.Renegotiation = tls.RenegotiateFreelyAsClient
 
 	return func(conn net.Conn) (net.Conn, error) {
-		client := tls.Client(conn, &tlsConf)
+		client := tls.Client(conn, tlsConf)
 		if verifyCaOnly {
 			err := client.Handshake()
 			if err != nil {
