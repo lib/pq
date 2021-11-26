@@ -916,12 +916,20 @@ func (cn *conn) Close() (err error) {
 	return cn.sendSimpleMessage('X')
 }
 
-// Implement the "Queryer" interface
-func (cn *conn) Query(query string, args []driver.Value) (driver.Rows, error) {
-	return cn.query(query, args)
+func toNamedValue(v []driver.Value) []driver.NamedValue {
+	v2 := make([]driver.NamedValue, len(v))
+	for i := range v {
+		v2[i] = driver.NamedValue{Ordinal: i + 1, Value: v[i]}
+	}
+	return v2
 }
 
-func (cn *conn) query(query string, args []driver.Value) (_ *rows, err error) {
+// Implement the "Queryer" interface
+func (cn *conn) Query(query string, args []driver.Value) (driver.Rows, error) {
+	return cn.query(query, toNamedValue(args))
+}
+
+func (cn *conn) query(query string, args []driver.NamedValue) (_ *rows, err error) {
 	if err := cn.err.get(); err != nil {
 		return nil, err
 	}
@@ -970,7 +978,7 @@ func (cn *conn) Exec(query string, args []driver.Value) (res driver.Result, err 
 	}
 
 	if cn.binaryParameters {
-		cn.sendBinaryModeQuery(query, args)
+		cn.sendBinaryModeQuery(query, toNamedValue(args))
 
 		cn.readParseResponse()
 		cn.readBindResponse()
@@ -1428,10 +1436,10 @@ func (st *stmt) Close() (err error) {
 }
 
 func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) {
-	return st.query(v)
+	return st.query(toNamedValue(v))
 }
 
-func (st *stmt) query(v []driver.Value) (r *rows, err error) {
+func (st *stmt) query(v []driver.NamedValue) (r *rows, err error) {
 	if err := st.cn.err.get(); err != nil {
 		return nil, err
 	}
@@ -1444,18 +1452,11 @@ func (st *stmt) query(v []driver.Value) (r *rows, err error) {
 	}, nil
 }
 
-func (st *stmt) Exec(v []driver.Value) (res driver.Result, err error) {
-	if err := st.cn.err.get(); err != nil {
-		return nil, err
-	}
-	defer st.cn.errRecover(&err)
-
-	st.exec(v)
-	res, _, err = st.cn.readExecuteResponse("simple query")
-	return res, err
+func (st *stmt) Exec(v []driver.Value) (driver.Result, error) {
+	return st.ExecContext(context.Background(), toNamedValue(v))
 }
 
-func (st *stmt) exec(v []driver.Value) {
+func (st *stmt) exec(v []driver.NamedValue) {
 	if len(v) >= 65536 {
 		errorf("got %d parameters but PostgreSQL only supports 65535 parameters", len(v))
 	}
@@ -1474,10 +1475,10 @@ func (st *stmt) exec(v []driver.Value) {
 		w.int16(0)
 		w.int16(len(v))
 		for i, x := range v {
-			if x == nil {
+			if x.Value == nil {
 				w.int32(-1)
 			} else {
-				b := encode(&cn.parameterStatus, x, st.paramTyps[i])
+				b := encode(&cn.parameterStatus, x.Value, st.paramTyps[i])
 				w.int32(len(b))
 				w.bytes(b)
 			}
@@ -1744,13 +1745,13 @@ func md5s(s string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-func (cn *conn) sendBinaryParameters(b *writeBuf, args []driver.Value) {
+func (cn *conn) sendBinaryParameters(b *writeBuf, args []driver.NamedValue) {
 	// Do one pass over the parameters to see if we're going to send any of
 	// them over in binary.  If we are, create a paramFormats array at the
 	// same time.
 	var paramFormats []int
 	for i, x := range args {
-		_, ok := x.([]byte)
+		_, ok := x.Value.([]byte)
 		if ok {
 			if paramFormats == nil {
 				paramFormats = make([]int, len(args))
@@ -1769,17 +1770,17 @@ func (cn *conn) sendBinaryParameters(b *writeBuf, args []driver.Value) {
 
 	b.int16(len(args))
 	for _, x := range args {
-		if x == nil {
+		if x.Value == nil {
 			b.int32(-1)
 		} else {
-			datum := binaryEncode(&cn.parameterStatus, x)
+			datum := binaryEncode(&cn.parameterStatus, x.Value)
 			b.int32(len(datum))
 			b.bytes(datum)
 		}
 	}
 }
 
-func (cn *conn) sendBinaryModeQuery(query string, args []driver.Value) {
+func (cn *conn) sendBinaryModeQuery(query string, args []driver.NamedValue) {
 	if len(args) >= 65536 {
 		errorf("got %d parameters but PostgreSQL only supports 65535 parameters", len(args))
 	}
