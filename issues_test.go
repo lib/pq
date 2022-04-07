@@ -2,6 +2,7 @@ package pq
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -51,10 +52,9 @@ func TestIssue1046(t *testing.T) {
 		t.Logf("FAIL %s: query returned after context deadline: %v\n", t.Name(), since)
 		t.Fail()
 	}
-	expectedErr := &Error{Message: "canceling statement due to user request"}
-	if err == nil || err.Error() != expectedErr.Error() {
+	if pgErr := (*Error)(nil); !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
 		t.Logf("ctx.Err(): [%T]%+v\n", ctx.Err(), ctx.Err())
-		t.Logf("got err: [%T] %+v expected err: [%T] %+v", err, err, expectedErr, expectedErr)
+		t.Logf("got err: [%T] %+v expected errCode: %v", err, err, cancelErrorCode)
 		t.Fail()
 	}
 }
@@ -72,7 +72,9 @@ func TestIssue1062(t *testing.T) {
 
 		var v int
 		err := row.Scan(&v)
-		if err != nil && err != context.Canceled && err.Error() != "pq: canceling statement due to user request" {
+		if pgErr := (*Error)(nil); err != nil &&
+			err != context.Canceled &&
+			!(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
 			t.Fatalf("Scan resulted in unexpected error %v for canceled QueryRowContext at attempt %d", err, i+1)
 		}
 	}

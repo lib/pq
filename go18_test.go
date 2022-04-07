@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"runtime"
 	"strings"
 	"testing"
@@ -75,6 +76,8 @@ func TestMultipleSimpleQuery(t *testing.T) {
 
 const contextRaceIterations = 100
 
+const cancelErrorCode ErrorCode = "57014"
+
 func TestContextCancelExec(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
@@ -87,7 +90,7 @@ func TestContextCancelExec(t *testing.T) {
 	// Not canceled until after the exec has started.
 	if _, err := db.ExecContext(ctx, "select pg_sleep(1)"); err == nil {
 		t.Fatal("expected error")
-	} else if err.Error() != "pq: canceling statement due to user request" {
+	} else if pgErr := (*Error)(nil); !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
@@ -125,7 +128,7 @@ func TestContextCancelQuery(t *testing.T) {
 	// Not canceled until after the exec has started.
 	if _, err := db.QueryContext(ctx, "select pg_sleep(1)"); err == nil {
 		t.Fatal("expected error")
-	} else if err.Error() != "pq: canceling statement due to user request" {
+	} else if pgErr := (*Error)(nil); !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
@@ -215,7 +218,7 @@ func TestContextCancelBegin(t *testing.T) {
 	// Not canceled until after the exec has started.
 	if _, err := tx.Exec("select pg_sleep(1)"); err == nil {
 		t.Fatal("expected error")
-	} else if err.Error() != "pq: canceling statement due to user request" {
+	} else if pgErr := (*Error)(nil); !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
@@ -240,8 +243,8 @@ func TestContextCancelBegin(t *testing.T) {
 			cancel()
 			if err != nil {
 				t.Fatal(err)
-			} else if err := tx.Rollback(); err != nil &&
-				err.Error() != "pq: canceling statement due to user request" &&
+			} else if err, pgErr := tx.Rollback(), (*Error)(nil); err != nil &&
+				!(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) &&
 				err != sql.ErrTxDone && err != driver.ErrBadConn && err != context.Canceled {
 				t.Fatal(err)
 			}
