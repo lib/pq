@@ -366,7 +366,7 @@ func TestCopySyntaxError(t *testing.T) {
 	}
 }
 
-// Tests for connection errors in copyin.resploop()
+// Tests for connection errors in CopyInStmt.resploop()
 func TestCopyRespLoopConnectionError(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
