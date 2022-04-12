@@ -274,8 +274,13 @@ func (ci *copyin) Exec(v []driver.Value) (r driver.Result, err error) {
 	return driver.RowsAffected(0), nil
 }
 
-// CopyData executes a raw CopyData command using the PostgreSQL Frontend/Backend
-// protocol. Use Exec(nil) to finish the command.
+// CopyData inserts a raw string into the COPY stream. The insert is
+// asynchronous and CopyData can return errors from previous CopyData calls to
+// the same COPY stmt.
+//
+// You need to call Exec(nil) to sync the COPY stream and to get any
+// errors from pending data, since Stmt.Close() doesn't return errors
+// to the user.
 func (ci *copyin) CopyData(ctx context.Context, line string) (r driver.Result, err error) {
 	if ci.closed {
 		return nil, errCopyInClosed
