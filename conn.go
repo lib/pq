@@ -2058,3 +2058,21 @@ func alnumLowerASCII(ch rune) rune {
 	}
 	return -1 // discard
 }
+
+// The database/sql/driver package says:
+// All Conn implementations should implement the following interfaces: Pinger, SessionResetter, and Validator.
+var _ driver.Pinger = &conn{}
+var _ driver.SessionResetter = &conn{}
+var _ driver.Validator = &conn{}
+
+func (cn *conn) ResetSession(ctx context.Context) error {
+	// Ensure bad connections are reported: From database/sql/driver:
+	// If a connection is never returned to the connection pool but immediately reused, then
+	// ResetSession is called prior to reuse but IsValid is not called.
+	return cn.err.get()
+}
+
+func (cn *conn) IsValid() bool {
+	// panic("TODO IsValid")
+	return cn.err.get() == nil
+}
