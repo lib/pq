@@ -334,3 +334,19 @@ func TestTxOptions(t *testing.T) {
 		t.Errorf("Expected error to mention isolation level, got %q", err)
 	}
 }
+
+func TestErrorSQLState(t *testing.T) {
+	r := readBuf([]byte{67, 52, 48, 48, 48, 49, 0, 0}) // 40001
+	err := parseError(&r)
+	var sqlErr errWithSQLState
+	if !errors.As(err, &sqlErr) {
+		t.Fatal("SQLState interface not satisfied")
+	}
+	if state := err.SQLState(); state != "40001" {
+		t.Fatalf("unexpected SQL state %v", state)
+	}
+}
+
+type errWithSQLState interface {
+	SQLState() string
+}
