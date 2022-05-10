@@ -322,7 +322,7 @@ func DialOpen(d Dialer, dsn string) (_ driver.Conn, err error) {
 	if err != nil {
 		return nil, err
 	}
-	c.dialer = d
+	c.Dialer(d)
 	return c.open(context.Background())
 }
 
