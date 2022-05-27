@@ -450,6 +450,9 @@ func (err *Error) Get(k byte) (v string) {
 }
 
 func (err Error) Error() string {
+	if err.Detail != "" {
+		return "pq: " + err.Message + ": " + err.Detail
+	}
 	return "pq: " + err.Message
 }
 
