@@ -1127,7 +1127,7 @@ func isDriverSetting(key string) bool {
 		return true
 	case "password":
 		return true
-	case "sslmode", "sslcert", "sslkey", "sslrootcert", "sslinline":
+	case "sslmode", "sslcert", "sslkey", "sslrootcert", "sslinline", "sslcrl":
 		return true
 	case "fallback_application_name":
 		return true
@@ -2020,7 +2020,9 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("sslkey")
 		case "PGSSLROOTCERT":
 			accrue("sslrootcert")
-		case "PGREQUIRESSL", "PGSSLCRL":
+		case "PGSSLCRL":
+			accrue("sslcrl")
+		case "PGREQUIRESSL":
 			unsupported()
 		case "PGREQUIREPEER":
 			unsupported()
