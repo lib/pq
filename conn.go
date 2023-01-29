@@ -2096,6 +2096,5 @@ func (cn *conn) ResetSession(ctx context.Context) error {
 }
 
 func (cn *conn) IsValid() bool {
-	// panic("TODO IsValid")
 	return cn.err.get() == nil
 }
