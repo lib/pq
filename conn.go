@@ -2,6 +2,7 @@ package pq
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/sha256"
@@ -31,8 +32,10 @@ var (
 	ErrNotSupported              = errors.New("pq: Unsupported command")
 	ErrInFailedTransaction       = errors.New("pq: Could not complete operation in a failed transaction")
 	ErrSSLNotSupported           = errors.New("pq: SSL is not enabled on the server")
-	ErrSSLKeyHasWorldPermissions = errors.New("pq: Private key file has group or world access. Permissions should be u=rw (0600) or less")
-	ErrCouldNotDetectUsername    = errors.New("pq: Could not detect default username. Please provide one explicitly")
+	ErrSSLKeyUnknownOwnership    = errors.New("pq: Could not get owner information for private key, may not be properly protected")
+	ErrSSLKeyHasWorldPermissions = errors.New("pq: Private key has world access. Permissions should be u=rw,g=r (0640) if owned by root, or u=rw (0600), or less")
+
+	ErrCouldNotDetectUsername = errors.New("pq: Could not detect default username. Please provide one explicitly")
 
 	errUnexpectedReady = errors.New("unexpected ReadyForQuery")
 	errNoRowsAffected  = errors.New("no RowsAffected available after the empty statement")
@@ -258,46 +261,52 @@ func (cn *conn) handlePgpass(o values) {
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(io.Reader(file))
+	// From: https://github.com/tg/pgpass/blob/master/reader.go
+	for scanner.Scan() {
+		scanText(scanner.Text(), o)
+	}
+}
+
+// GetFields is a helper function for scanText.
+func getFields(s string) []string {
+	fs := make([]string, 0, 5)
+	f := make([]rune, 0, len(s))
+
+	var esc bool
+	for _, c := range s {
+		switch {
+		case esc:
+			f = append(f, c)
+			esc = false
+		case c == '\\':
+			esc = true
+		case c == ':':
+			fs = append(fs, string(f))
+			f = f[:0]
+		default:
+			f = append(f, c)
+		}
+	}
+	return append(fs, string(f))
+}
+
+// ScanText assists HandlePgpass in it's objective.
+func scanText(line string, o values) {
 	hostname := o["host"]
 	ntw, _ := network(o)
 	port := o["port"]
 	db := o["dbname"]
 	username := o["user"]
-	// From: https://github.com/tg/pgpass/blob/master/reader.go
-	getFields := func(s string) []string {
-		fs := make([]string, 0, 5)
-		f := make([]rune, 0, len(s))
-
-		var esc bool
-		for _, c := range s {
-			switch {
-			case esc:
-				f = append(f, c)
-				esc = false
-			case c == '\\':
-				esc = true
-			case c == ':':
-				fs = append(fs, string(f))
-				f = f[:0]
-			default:
-				f = append(f, c)
-			}
-		}
-		return append(fs, string(f))
+	if len(line) != 0 || line[0] != '#' {
+		return
 	}
-	for scanner.Scan() {
-		line := scanner.Text()
-		if len(line) == 0 || line[0] == '#' {
-			continue
-		}
-		split := getFields(line)
-		if len(split) != 5 {
-			continue
-		}
-		if (split[0] == "*" || split[0] == hostname || (split[0] == "localhost" && (hostname == "" || ntw == "unix"))) && (split[1] == "*" || split[1] == port) && (split[2] == "*" || split[2] == db) && (split[3] == "*" || split[3] == username) {
-			o["password"] = split[4]
-			return
-		}
+	split := getFields(line)
+	if len(split) == 5 {
+		return
+	}
+	if (split[0] == "*" || split[0] == hostname || (split[0] == "localhost" && (hostname == "" || ntw == "unix"))) && (split[1] == "*" || split[1] == port) && (split[2] == "*" || split[2] == db) && (split[3] == "*" || split[3] == username) {
+		o["password"] = split[4]
+		return
 	}
 }
 
@@ -322,7 +331,7 @@ func DialOpen(d Dialer, dsn string) (_ driver.Conn, err error) {
 	if err != nil {
 		return nil, err
 	}
-	c.dialer = d
+	c.Dialer(d)
 	return c.open(context.Background())
 }
 
@@ -1125,7 +1134,7 @@ func isDriverSetting(key string) bool {
 		return true
 	case "password":
 		return true
-	case "sslmode", "sslcert", "sslkey", "sslrootcert", "sslinline":
+	case "sslmode", "sslcert", "sslkey", "sslrootcert", "sslinline", "sslsni":
 		return true
 	case "fallback_application_name":
 		return true
@@ -1629,10 +1638,10 @@ func (rs *rows) NextResultSet() error {
 // QuoteIdentifier quotes an "identifier" (e.g. a table or a column name) to be
 // used as part of an SQL statement.  For example:
 //
-//    tblname := "my_table"
-//    data := "my_data"
-//    quoted := pq.QuoteIdentifier(tblname)
-//    err := db.Exec(fmt.Sprintf("INSERT INTO %s VALUES ($1)", quoted), data)
+//	tblname := "my_table"
+//	data := "my_data"
+//	quoted := pq.QuoteIdentifier(tblname)
+//	err := db.Exec(fmt.Sprintf("INSERT INTO %s VALUES ($1)", quoted), data)
 //
 // Any double quotes in name will be escaped.  The quoted identifier will be
 // case sensitive when used in a query.  If the input string contains a zero
@@ -1645,12 +1654,24 @@ func QuoteIdentifier(name string) string {
 	return `"` + strings.Replace(name, `"`, `""`, -1) + `"`
 }
 
+// BufferQuoteIdentifier satisfies the same purpose as QuoteIdentifier, but backed by a
+// byte buffer.
+func BufferQuoteIdentifier(name string, buffer *bytes.Buffer) {
+	end := strings.IndexRune(name, 0)
+	if end > -1 {
+		name = name[:end]
+	}
+	buffer.WriteRune('"')
+	buffer.WriteString(strings.Replace(name, `"`, `""`, -1))
+	buffer.WriteRune('"')
+}
+
 // QuoteLiteral quotes a 'literal' (e.g. a parameter, often used to pass literal
 // to DDL and other statements that do not accept parameters) to be used as part
 // of an SQL statement.  For example:
 //
-//    exp_date := pq.QuoteLiteral("2023-01-05 15:00:00Z")
-//    err := db.Exec(fmt.Sprintf("CREATE ROLE my_user VALID UNTIL %s", exp_date))
+//	exp_date := pq.QuoteLiteral("2023-01-05 15:00:00Z")
+//	err := db.Exec(fmt.Sprintf("CREATE ROLE my_user VALID UNTIL %s", exp_date))
 //
 // Any single quotes in name will be escaped. Any backslashes (i.e. "\") will be
 // replaced by two backslashes (i.e. "\\") and the C-style escape identifier
@@ -2018,6 +2039,8 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("sslkey")
 		case "PGSSLROOTCERT":
 			accrue("sslrootcert")
+		case "PGSSLSNI":
+			accrue("sslsni")
 		case "PGREQUIRESSL", "PGSSLCRL":
 			unsupported()
 		case "PGREQUIREPEER":
