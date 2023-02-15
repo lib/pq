@@ -1016,17 +1016,12 @@ func (cn *conn) recvMessage(r *readBuf) (byte, error) {
 	// read the type and length of the message that follows
 	t := x[0]
 	n := int(binary.BigEndian.Uint32(x[1:])) - 4
-	var y []byte
-	if n <= len(cn.scratch) {
-		y = cn.scratch[:n]
-	} else {
-		y = make([]byte, n)
-	}
-	_, err = io.ReadFull(cn.buf, y)
+	buf := bytes.NewBuffer(cn.scratch[:0])
+	_, err = io.CopyN(buf, cn.buf, int64(n))
 	if err != nil {
 		return 0, err
 	}
-	*r = y
+	*r = buf.Bytes()
 	return t, nil
 }
 
