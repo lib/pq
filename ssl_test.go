@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -86,6 +87,10 @@ func TestSSLVerifyFull(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
+	// in Go 1.20 the error is wrapped in tls.CertificateVerificationError
+	if errWrapped := errors.Unwrap(err); errWrapped != nil {
+		err = errWrapped
+	}
 	_, ok := err.(x509.UnknownAuthorityError)
 	if !ok {
 		_, ok := err.(x509.HostnameError)
@@ -100,6 +105,9 @@ func TestSSLVerifyFull(t *testing.T) {
 	_, err = openSSLConn(t, rootCert+"host=127.0.0.1 sslmode=verify-full user=pqgossltest")
 	if err == nil {
 		t.Fatal("expected error")
+	}
+	if errWrapped := errors.Unwrap(err); errWrapped != nil {
+		err = errWrapped
 	}
 	_, ok = err.(x509.HostnameError)
 	if !ok {
