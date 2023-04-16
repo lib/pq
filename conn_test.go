@@ -144,10 +144,6 @@ func TestOpenURL(t *testing.T) {
 const pgpassFile = "/tmp/pqgotest_pgpass"
 
 func TestPgpass(t *testing.T) {
-	if os.Getenv("TRAVIS") != "true" {
-		t.Skip("not running under Travis, skipping pgpass tests")
-	}
-
 	testAssert := func(conninfo string, expected string, reason string) {
 		conn, err := openTestConnConninfo(conninfo)
 		if err != nil {

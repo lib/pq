@@ -263,7 +263,9 @@ func (cn *conn) handlePgpass(o values) {
 	scanner := bufio.NewScanner(io.Reader(file))
 	// From: https://github.com/tg/pgpass/blob/master/reader.go
 	for scanner.Scan() {
-		scanText(scanner.Text(), o)
+		if scanText(scanner.Text(), o) {
+			break
+		}
 	}
 }
 
@@ -291,23 +293,24 @@ func getFields(s string) []string {
 }
 
 // ScanText assists HandlePgpass in it's objective.
-func scanText(line string, o values) {
+func scanText(line string, o values) bool {
 	hostname := o["host"]
 	ntw, _ := network(o)
 	port := o["port"]
 	db := o["dbname"]
 	username := o["user"]
-	if len(line) != 0 || line[0] != '#' {
-		return
+	if len(line) == 0 || line[0] == '#' {
+		return false
 	}
 	split := getFields(line)
-	if len(split) == 5 {
-		return
+	if len(split) != 5 {
+		return false
 	}
 	if (split[0] == "*" || split[0] == hostname || (split[0] == "localhost" && (hostname == "" || ntw == "unix"))) && (split[1] == "*" || split[1] == port) && (split[2] == "*" || split[2] == db) && (split[3] == "*" || split[3] == username) {
 		o["password"] = split[4]
-		return
+		return true
 	}
+	return false
 }
 
 func (cn *conn) writeBuf(b byte) *writeBuf {
