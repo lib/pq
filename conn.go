@@ -113,7 +113,9 @@ type defaultDialer struct {
 func (d defaultDialer) Dial(network, address string) (net.Conn, error) {
 	return d.d.Dial(network, address)
 }
-func (d defaultDialer) DialTimeout(network, address string, timeout time.Duration) (net.Conn, error) {
+func (d defaultDialer) DialTimeout(
+	network, address string, timeout time.Duration,
+) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return d.DialContext(ctx, network, address)
@@ -775,7 +777,9 @@ func (noRows) RowsAffected() (int64, error) {
 
 // Decides which column formats to use for a prepared statement.  The input is
 // an array of type oids, one element per result column.
-func decideColumnFormats(colTyps []fieldDesc, forceText bool) (colFmts []format, colFmtData []byte) {
+func decideColumnFormats(
+	colTyps []fieldDesc, forceText bool,
+) (colFmts []format, colFmtData []byte) {
 	if len(colTyps) == 0 {
 		return nil, colFmtDataAllText
 	}
@@ -1830,7 +1834,11 @@ func (cn *conn) readParseResponse() {
 	}
 }
 
-func (cn *conn) readStatementDescribeResponse() (paramTyps []oid.Oid, colNames []string, colTyps []fieldDesc) {
+func (cn *conn) readStatementDescribeResponse() (
+	paramTyps []oid.Oid,
+	colNames []string,
+	colTyps []fieldDesc,
+) {
 	for {
 		t, r := cn.recv1()
 		switch t {
@@ -1918,7 +1926,9 @@ func (cn *conn) postExecuteWorkaround() {
 }
 
 // Only for Exec(), since we ignore the returned data
-func (cn *conn) readExecuteResponse(protocolState string) (res driver.Result, commandTag string, err error) {
+func (cn *conn) readExecuteResponse(
+	protocolState string,
+) (res driver.Result, commandTag string, err error) {
 	for {
 		t, r := cn.recv1()
 		switch t {
@@ -2089,7 +2099,6 @@ func alnumLowerASCII(ch rune) rune {
 // All Conn implementations should implement the following interfaces: Pinger, SessionResetter, and Validator.
 var _ driver.Pinger = &conn{}
 var _ driver.SessionResetter = &conn{}
-var _ driver.Validator = &conn{}
 
 func (cn *conn) ResetSession(ctx context.Context) error {
 	// Ensure bad connections are reported: From database/sql/driver:
