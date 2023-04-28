@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -86,11 +87,13 @@ func TestSSLVerifyFull(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	_, ok := err.(x509.UnknownAuthorityError)
-	if !ok {
-		_, ok := err.(x509.HostnameError)
-		if !ok {
-			t.Fatalf("expected x509.UnknownAuthorityError or x509.HostnameError, got %#+v", err)
+	{
+		var x509err x509.UnknownAuthorityError
+		if !errors.As(err, &x509err) {
+			var x509err x509.HostnameError
+			if !errors.As(err, &x509err) {
+				t.Fatalf("expected x509.UnknownAuthorityError or x509.HostnameError, got %#+v", err)
+			}
 		}
 	}
 
@@ -101,9 +104,11 @@ func TestSSLVerifyFull(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	_, ok = err.(x509.HostnameError)
-	if !ok {
-		t.Fatalf("expected x509.HostnameError, got %#+v", err)
+	{
+		var x509err x509.HostnameError
+		if !errors.As(err, &x509err) {
+			t.Fatalf("expected x509.HostnameError, got %#+v", err)
+		}
 	}
 	// OK
 	_, err = openSSLConn(t, rootCert+"host=postgres sslmode=verify-full user=pqgossltest")
@@ -126,9 +131,11 @@ func TestSSLRequireWithRootCert(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	_, ok := err.(x509.UnknownAuthorityError)
-	if !ok {
-		t.Fatalf("expected x509.UnknownAuthorityError, got %s, %#+v", err, err)
+	{
+		var x509err x509.UnknownAuthorityError
+		if !errors.As(err, &x509err) {
+			t.Fatalf("expected x509.UnknownAuthorityError, got %s, %#+v", err, err)
+		}
 	}
 
 	nonExistentCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "non_existent.crt")
@@ -164,7 +171,8 @@ func TestSSLVerifyCA(t *testing.T) {
 	// Not OK according to the system CA
 	{
 		_, err := openSSLConn(t, "host=postgres sslmode=verify-ca user=pqgossltest")
-		if _, ok := err.(x509.UnknownAuthorityError); !ok {
+		var x509err x509.UnknownAuthorityError
+		if !errors.As(err, &x509err) {
 			t.Fatalf("expected %T, got %#+v", x509.UnknownAuthorityError{}, err)
 		}
 	}
@@ -172,7 +180,8 @@ func TestSSLVerifyCA(t *testing.T) {
 	// Still not OK according to the system CA; empty sslrootcert is treated as unspecified.
 	{
 		_, err := openSSLConn(t, "host=postgres sslmode=verify-ca user=pqgossltest sslrootcert=''")
-		if _, ok := err.(x509.UnknownAuthorityError); !ok {
+		var x509err x509.UnknownAuthorityError
+		if !errors.As(err, &x509err) {
 			t.Fatalf("expected %T, got %#+v", x509.UnknownAuthorityError{}, err)
 		}
 	}
@@ -243,7 +252,8 @@ func TestSSLClientCertificates(t *testing.T) {
 	// Cert present, key not specified, should fail
 	{
 		_, err := openSSLConn(t, baseinfo+" sslcert="+sslcert)
-		if _, ok := err.(*os.PathError); !ok {
+		var pathErr *os.PathError
+		if !errors.As(err, &pathErr) {
 			t.Fatalf("expected %T, got %#+v", (*os.PathError)(nil), err)
 		}
 	}
@@ -251,7 +261,8 @@ func TestSSLClientCertificates(t *testing.T) {
 	// Cert present, empty key specified, should fail
 	{
 		_, err := openSSLConn(t, baseinfo+" sslcert="+sslcert+" sslkey=''")
-		if _, ok := err.(*os.PathError); !ok {
+		var pathErr *os.PathError
+		if !errors.As(err, &pathErr) {
 			t.Fatalf("expected %T, got %#+v", (*os.PathError)(nil), err)
 		}
 	}
@@ -259,7 +270,8 @@ func TestSSLClientCertificates(t *testing.T) {
 	// Cert present, non-existent key, should fail
 	{
 		_, err := openSSLConn(t, baseinfo+" sslcert="+sslcert+" sslkey=/tmp/filedoesnotexist")
-		if _, ok := err.(*os.PathError); !ok {
+		var pathErr *os.PathError
+		if !errors.As(err, &pathErr) {
 			t.Fatalf("expected %T, got %#+v", (*os.PathError)(nil), err)
 		}
 	}
