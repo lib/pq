@@ -1501,7 +1501,7 @@ func TestRuntimeParameters(t *testing.T) {
 		}
 
 		value, success := tryGetParameterValue()
-		if success != test.success && !test.success {
+		if success != test.success && !success {
 			t.Fatalf("%v: unexpected error: %v", test.conninfo, err)
 		}
 		if success != test.success {
