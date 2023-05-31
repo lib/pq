@@ -318,7 +318,7 @@ func TestStatment(t *testing.T) {
 
 	if !r1.Next() {
 		if r.Err() != nil {
-			t.Fatal(r1.Err())
+			t.Fatal(r.Err())
 		}
 		t.Fatal("expected row")
 	}
@@ -1290,7 +1290,7 @@ func TestNullAfterNonNull(t *testing.T) {
 
 	if !r.Next() {
 		if r.Err() != nil {
-			t.Fatal(err)
+			t.Fatal(r.Err())
 		}
 		t.Fatal("expected row")
 	}
@@ -1305,7 +1305,7 @@ func TestNullAfterNonNull(t *testing.T) {
 
 	if !r.Next() {
 		if r.Err() != nil {
-			t.Fatal(err)
+			t.Fatal(r.Err())
 		}
 		t.Fatal("expected row")
 	}
