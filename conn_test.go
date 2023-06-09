@@ -189,6 +189,7 @@ localhost:*:*:*:pass_C
 	if err != nil {
 		t.Fatalf("Unexpected error writing pgpass file %#v", err)
 	}
+	defer os.Remove(pgpassFile)
 	pgpass.Close()
 
 	assertPassword := func(extra values, expected string) {
@@ -221,8 +222,11 @@ localhost:*:*:*:pass_C
 	// localhost also matches the default "" and UNIX sockets
 	assertPassword(values{"host": "", "user": "some_user"}, "pass_C")
 	assertPassword(values{"host": "/tmp", "user": "some_user"}, "pass_C")
+	// passfile connection parameter takes precedence
+	os.Setenv("PGPASSFILE", "/tmp")
+	assertPassword(values{"host": "server", "dbname": "some_db", "user": "some_user", "passfile": pgpassFile}, "pass_A")
+
 	// cleanup
-	os.Remove(pgpassFile)
 	os.Setenv("PGPASSFILE", "")
 }
 

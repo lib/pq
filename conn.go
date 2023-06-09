@@ -233,7 +233,11 @@ func (cn *conn) handlePgpass(o values) {
 	if _, ok := o["password"]; ok {
 		return
 	}
-	filename := os.Getenv("PGPASSFILE")
+	// Get passfile from the options, if empty, get it from envvar
+	filename := o["passfile"]
+	if filename == "" {
+		filename = os.Getenv("PGPASSFILE")
+	}
 	if filename == "" {
 		// XXX this code doesn't work on Windows where the default filename is
 		// XXX %APPDATA%\postgresql\pgpass.conf
