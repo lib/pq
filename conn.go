@@ -233,11 +233,8 @@ func (cn *conn) handlePgpass(o values) {
 	if _, ok := o["password"]; ok {
 		return
 	}
-	// Get passfile from the options, if empty, get it from envvar
+	// Get passfile from the options
 	filename := o["passfile"]
-	if filename == "" {
-		filename = os.Getenv("PGPASSFILE")
-	}
 	if filename == "" {
 		// XXX this code doesn't work on Windows where the default filename is
 		// XXX %APPDATA%\postgresql\pgpass.conf
@@ -2042,6 +2039,8 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("user")
 		case "PGPASSWORD":
 			accrue("password")
+		case "PGPASSFILE":
+			accrue("passfile")
 		case "PGSERVICE", "PGSERVICEFILE", "PGREALM":
 			unsupported()
 		case "PGOPTIONS":

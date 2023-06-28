@@ -174,7 +174,10 @@ func TestPgpass(t *testing.T) {
 	}
 	testAssert("", "ok", "missing .pgpass, unexpected error %#v")
 	os.Setenv("PGPASSFILE", pgpassFile)
+	defer os.Unsetenv("PGPASSFILE")
 	testAssert("host=/tmp", "fail", ", unexpected error %#v")
+	os.Unsetenv("PGPASSFILE")
+
 	os.Remove(pgpassFile)
 	pgpass, err := os.OpenFile(pgpassFile, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
@@ -212,22 +215,22 @@ localhost:*:*:*:pass_C
 			t.Fatalf("For %v expected %s got %s", extra, expected, pw)
 		}
 	}
+	// missing passfile means empty psasword
+	assertPassword(values{"host": "server", "dbname": "some_db", "user": "some_user"}, "")
 	// wrong permissions for the pgpass file means it should be ignored
-	assertPassword(values{"host": "example.com", "user": "foo"}, "")
+	assertPassword(values{"host": "example.com", "passfile": pgpassFile, "user": "foo"}, "")
 	// fix the permissions and check if it has taken effect
 	os.Chmod(pgpassFile, 0600)
-	assertPassword(values{"host": "server", "dbname": "some_db", "user": "some_user"}, "pass_A")
-	assertPassword(values{"host": "example.com", "user": "foo"}, "pass_fallback")
-	assertPassword(values{"host": "example.com", "dbname": "some_db", "user": "some_user"}, "pass_B")
+
+	assertPassword(values{"host": "server", "passfile": pgpassFile, "dbname": "some_db", "user": "some_user"}, "pass_A")
+	assertPassword(values{"host": "example.com", "passfile": pgpassFile, "user": "foo"}, "pass_fallback")
+	assertPassword(values{"host": "example.com", "passfile": pgpassFile, "dbname": "some_db", "user": "some_user"}, "pass_B")
 	// localhost also matches the default "" and UNIX sockets
-	assertPassword(values{"host": "", "user": "some_user"}, "pass_C")
-	assertPassword(values{"host": "/tmp", "user": "some_user"}, "pass_C")
+	assertPassword(values{"host": "", "passfile": pgpassFile, "user": "some_user"}, "pass_C")
+	assertPassword(values{"host": "/tmp", "passfile": pgpassFile, "user": "some_user"}, "pass_C")
 	// passfile connection parameter takes precedence
 	os.Setenv("PGPASSFILE", "/tmp")
-	assertPassword(values{"host": "server", "dbname": "some_db", "user": "some_user", "passfile": pgpassFile}, "pass_A")
-
-	// cleanup
-	os.Setenv("PGPASSFILE", "")
+	assertPassword(values{"host": "server", "passfile": pgpassFile, "dbname": "some_db", "user": "some_user"}, "pass_A")
 }
 
 func TestExec(t *testing.T) {
