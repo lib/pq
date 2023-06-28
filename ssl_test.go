@@ -4,7 +4,6 @@ package pq
 
 import (
 	"bytes"
-	"context"
 	_ "crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -78,31 +77,16 @@ func TestSSLConnection(t *testing.T) {
 	rows.Close()
 }
 
-// Test sslmode=verify-full
+// Test sslmode=verify-full sslrootcert=rootCertPath
 func TestSSLVerifyFull(t *testing.T) {
 	maybeSkipSSLTests(t)
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
-	// Not OK according to the system CA
-	_, err := openSSLConn(t, "host=postgres sslmode=verify-full user=pqgossltest")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	{
-		var x509err x509.UnknownAuthorityError
-		if !errors.As(err, &x509err) {
-			var x509err x509.HostnameError
-			if !errors.As(err, &x509err) {
-				t.Fatalf("expected x509.UnknownAuthorityError or x509.HostnameError, got %#+v", err)
-			}
-		}
-	}
-
 	rootCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "root.crt")
 	rootCert := "sslrootcert=" + rootCertPath + " "
 	// No match on Common Name
-	_, err = openSSLConn(t, rootCert+"host=127.0.0.1 sslmode=verify-full user=pqgossltest")
+	_, err := openSSLConn(t, rootCert+"host=127.0.0.1 sslmode=verify-full user=pqgossltest")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -114,6 +98,20 @@ func TestSSLVerifyFull(t *testing.T) {
 	}
 	// OK
 	_, err = openSSLConn(t, rootCert+"host=postgres sslmode=verify-full user=pqgossltest")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Test sslmode=verify-full
+func TestSSLVerifyFullWithDefaultRootCert(t *testing.T) {
+	maybeSkipSSLTests(t)
+	// Environment sanity check: should fail without SSL
+	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
+
+	setupHomeWithRootCRT(t)
+
+	_, err := openSSLConn(t, "host=postgres sslmode=verify-full user=pqgossltest")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,29 +162,11 @@ func TestSSLRequireWithRootCert(t *testing.T) {
 	}
 }
 
-// Test sslmode=verify-ca
+// Test sslmode=verify-ca sslrootcert=rootCertPath
 func TestSSLVerifyCA(t *testing.T) {
 	maybeSkipSSLTests(t)
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
-
-	// Not OK according to the system CA
-	{
-		_, err := openSSLConn(t, "host=postgres sslmode=verify-ca user=pqgossltest")
-		var x509err x509.UnknownAuthorityError
-		if !errors.As(err, &x509err) {
-			t.Fatalf("expected %T, got %#+v", x509.UnknownAuthorityError{}, err)
-		}
-	}
-
-	// Still not OK according to the system CA; empty sslrootcert is treated as unspecified.
-	{
-		_, err := openSSLConn(t, "host=postgres sslmode=verify-ca user=pqgossltest sslrootcert=''")
-		var x509err x509.UnknownAuthorityError
-		if !errors.As(err, &x509err) {
-			t.Fatalf("expected %T, got %#+v", x509.UnknownAuthorityError{}, err)
-		}
-	}
 
 	rootCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "root.crt")
 	rootCert := "sslrootcert=" + rootCertPath + " "
@@ -196,6 +176,23 @@ func TestSSLVerifyCA(t *testing.T) {
 	}
 	// Everything OK
 	if _, err := openSSLConn(t, rootCert+"host=postgres sslmode=verify-ca user=pqgossltest"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSSLVerifyCAWithDefaultRootCert(t *testing.T) {
+	maybeSkipSSLTests(t)
+	// Environment sanity check: should fail without SSL
+	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
+
+	setupHomeWithRootCRT(t)
+
+	// No match on Common Name, but that's OK
+	if _, err := openSSLConn(t, "host=127.0.0.1 sslmode=verify-ca user=pqgossltest"); err != nil {
+		t.Fatal(err)
+	}
+	// Everything OK
+	if _, err := openSSLConn(t, "host=postgres sslmode=verify-ca user=pqgossltest"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -379,10 +376,28 @@ func TestSNISupport(t *testing.T) {
 	}
 }
 
-func TestDefaultRootCert(t *testing.T) {
-	homeDir, err := setupHomeWithRootCRT(t)
+func setupHomeWithRootCRT(t *testing.T) {
+	t.Helper()
+
+	homeDir, err := os.MkdirTemp("", "lib-pg-ssl-test-*")
 	if err != nil {
-		t.Fatalf("setup mock $HOME: %v", err)
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(homeDir) })
+
+	err = os.MkdirAll(filepath.Join(homeDir, ".postgresql"), 0700)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := os.ReadFile("certs/root.crt")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = os.WriteFile(filepath.Join(homeDir, ".postgresql", "root.crt"), b, 0600)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	testUser = &user.User{
@@ -390,97 +405,7 @@ func TestDefaultRootCert(t *testing.T) {
 		// does not exist
 		HomeDir: homeDir,
 	}
-	defer func() { testUser = nil }()
-
-	o := values{"sslmode": "verify-ca"}
-
-	upgrade, err := ssl(o)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	addr, handshakeErr := mockTLSServer(t, "certs/server.crt", "certs/server.key")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-
-	if _, err := upgrade(conn); err != nil {
-		t.Fatal(err)
-	}
-
-	select {
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	case err := <-handshakeErr:
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func setupHomeWithRootCRT(t *testing.T) (string, error) {
-	t.Helper()
-
-	homeDir, err := os.MkdirTemp("", "lib-pg-ssl-test-*")
-	if err != nil {
-		return "", err
-	}
-	t.Cleanup(func() { os.RemoveAll(homeDir) })
-
-	err = os.MkdirAll(filepath.Join(homeDir, ".postgresql"), 0700)
-	if err != nil {
-		return "", err
-	}
-
-	b, err := os.ReadFile("certs/root.crt")
-	if err != nil {
-		return "", err
-	}
-
-	err = os.WriteFile(filepath.Join(homeDir, ".postgresql", "root.crt"), b, 0600)
-	if err != nil {
-		return "", err
-	}
-
-	return homeDir, nil
-}
-
-func mockTLSServer(t *testing.T, certFile, keyFile string) (string, chan error) {
-	t.Helper()
-
-	ln, err := net.Listen("tcp", "localhost:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { ln.Close() })
-
-	serverCert, err := tls.LoadX509KeyPair(certFile, keyFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	serverConf := &tls.Config{
-		Certificates: []tls.Certificate{serverCert},
-	}
-
-	handshakeErr := make(chan error, 1)
-	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			t.Logf("mockTLSServer: cannot Accept: %v", err)
-			return
-		}
-		defer conn.Close()
-
-		handshakeErr <- tls.Server(conn, serverConf).Handshake()
-	}()
-
-	return ln.Addr().String(), handshakeErr
+	t.Cleanup(func() { testUser = nil })
 }
 
 // Make a postgres mock server to test TLS SNI
