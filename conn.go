@@ -327,7 +327,11 @@ func (cn *conn) writeBuf(b byte) *writeBuf {
 // Most users should only use it through database/sql package from the standard
 // library.
 func Open(dsn string) (_ driver.Conn, err error) {
-	return DialOpen(defaultDialer{}, dsn)
+	c, err := NewConnector(dsn)
+	if err != nil {
+		return nil, err
+	}
+	return c.open(context.Background())
 }
 
 // DialOpen opens a new connection to the database using a dialer.
@@ -1144,6 +1148,8 @@ func isDriverSetting(key string) bool {
 	case "sslmode", "sslcert", "sslkey", "sslrootcert", "sslinline", "sslsni":
 		return true
 	case "fallback_application_name":
+		return true
+	case "keepalives", "keepalives_interval":
 		return true
 	case "connect_timeout":
 		return true
