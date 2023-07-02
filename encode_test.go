@@ -59,6 +59,8 @@ var timeTests = []struct {
 		time.FixedZone("", -(7*60*60+42*60)))},
 	{"2001-02-03 04:05:06-07:30:09", time.Date(2001, time.February, 3, 4, 5, 6, 0,
 		time.FixedZone("", -(7*60*60+30*60+9)))},
+	{"2001-02-03 04:05:06+07:30:09", time.Date(2001, time.February, 3, 4, 5, 6, 0,
+		time.FixedZone("", +(7*60*60+30*60+9)))},
 	{"2001-02-03 04:05:06+07", time.Date(2001, time.February, 3, 4, 5, 6, 0,
 		time.FixedZone("", 7*60*60))},
 	{"0011-02-03 04:05:06 BC", time.Date(-10, time.February, 3, 4, 5, 6, 0, time.FixedZone("", 0))},
@@ -251,6 +253,8 @@ func TestTimeWithTimezone(t *testing.T) {
 	}{
 		{"11:59:59+00:00", time.Date(0, 1, 1, 11, 59, 59, 0, time.UTC)},
 		{"11:59:59+04:00", time.Date(0, 1, 1, 11, 59, 59, 0, time.FixedZone("+04", 4*60*60))},
+		{"11:59:59+04:01:02", time.Date(0, 1, 1, 11, 59, 59, 0, time.FixedZone("+04:01:02", 4*60*60+1*60+2))},
+		{"11:59:59-04:01:02", time.Date(0, 1, 1, 11, 59, 59, 0, time.FixedZone("-04:01:02", -(4*60*60+1*60+2)))},
 		{"24:00+00", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
 		{"24:00Z", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
 		{"24:00-04:00", time.Date(0, 1, 2, 0, 0, 0, 0, time.FixedZone("-04", -4*60*60))},
@@ -821,6 +825,43 @@ func TestAppendEscapedTextExistingBuffer(t *testing.T) {
 	buf = []byte("123\t")
 	if esc := appendEscapedText(buf, "\n\r\t\f"); string(esc) != "123\t\\n\\r\\t\f" {
 		t.Fatal(string(esc))
+	}
+}
+
+var formatAndParseTimestamp = []struct {
+	time     time.Time
+	expected string
+}{
+	{time.Time{}, "0001-01-01 00:00:00Z"},
+	{time.Date(2001, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 0)), "2001-02-03 04:05:06.123456789Z"},
+	{time.Date(2001, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 2*60*60)), "2001-02-03 04:05:06.123456789+02:00"},
+	{time.Date(2001, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", -6*60*60)), "2001-02-03 04:05:06.123456789-06:00"},
+	{time.Date(2001, time.February, 3, 4, 5, 6, 0, time.FixedZone("", -(7*60*60+30*60+9))), "2001-02-03 04:05:06-07:30:09"},
+
+	{time.Date(1, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 0)), "0001-02-03 04:05:06.123456789Z"},
+	{time.Date(1, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 2*60*60)), "0001-02-03 04:05:06.123456789+02:00"},
+	{time.Date(1, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", -6*60*60)), "0001-02-03 04:05:06.123456789-06:00"},
+
+	{time.Date(0, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 0)), "0001-02-03 04:05:06.123456789Z BC"},
+	{time.Date(0, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 2*60*60)), "0001-02-03 04:05:06.123456789+02:00 BC"},
+	{time.Date(0, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", -6*60*60)), "0001-02-03 04:05:06.123456789-06:00 BC"},
+
+	{time.Date(1, time.February, 3, 4, 5, 6, 0, time.FixedZone("", -(7*60*60+30*60+9))), "0001-02-03 04:05:06-07:30:09"},
+	{time.Date(0, time.February, 3, 4, 5, 6, 0, time.FixedZone("", -(7*60*60+30*60+9))), "0001-02-03 04:05:06-07:30:09 BC"},
+}
+
+func TestFormatAndParseTimestamp(t *testing.T) {
+	for _, val := range formatAndParseTimestamp {
+		formattedTime := FormatTimestamp(val.time)
+		parsedTime, err := ParseTimestamp(nil, string(formattedTime))
+
+		if err != nil {
+			t.Errorf("invalid parsing, err: %v", err.Error())
+		}
+
+		if val.time.UTC() != parsedTime.UTC() {
+			t.Errorf("invalid parsing from formatted timestamp, got %v; expected %v", parsedTime.String(), val.time.String())
+		}
 	}
 }
 

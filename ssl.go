@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 )
 
 // ssl generates a function to upgrade a net.Conn based on the "sslmode" and
@@ -50,6 +51,16 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 		return nil, fmterrorf(`unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`, mode)
 	}
 
+	// Set Server Name Indication (SNI), if enabled by connection parameters.
+	// By default SNI is on, any value which is not starting with "1" disables
+	// SNI -- that is the same check vanilla libpq uses.
+	if sslsni := o["sslsni"]; sslsni == "" || strings.HasPrefix(sslsni, "1") {
+		// RFC 6066 asks to not set SNI if the host is a literal IP address (IPv4
+		// or IPv6). This check is coded already crypto.tls.hostnameInSNI, so
+		// just always set ServerName here and let crypto/tls do the filtering.
+		tlsConf.ServerName = o["host"]
+	}
+
 	err := sslClientCertificates(&tlsConf, o)
 	if err != nil {
 		return nil, err
@@ -83,6 +94,16 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 // in the user's home directory. The configured files must exist and have
 // the correct permissions.
 func sslClientCertificates(tlsConf *tls.Config, o values) error {
+	sslinline := o["sslinline"]
+	if sslinline == "true" {
+		cert, err := tls.X509KeyPair([]byte(o["sslcert"]), []byte(o["sslkey"]))
+		if err != nil {
+			return err
+		}
+		tlsConf.Certificates = []tls.Certificate{cert}
+		return nil
+	}
+
 	// user.Current() might fail when cross-compiling. We have to ignore the
 	// error and continue without home directory defaults, since we wouldn't
 	// know from where to load them.
@@ -137,9 +158,17 @@ func sslCertificateAuthority(tlsConf *tls.Config, o values) error {
 	if sslrootcert := o["sslrootcert"]; len(sslrootcert) > 0 {
 		tlsConf.RootCAs = x509.NewCertPool()
 
-		cert, err := ioutil.ReadFile(sslrootcert)
-		if err != nil {
-			return err
+		sslinline := o["sslinline"]
+
+		var cert []byte
+		if sslinline == "true" {
+			cert = []byte(sslrootcert)
+		} else {
+			var err error
+			cert, err = ioutil.ReadFile(sslrootcert)
+			if err != nil {
+				return err
+			}
 		}
 
 		if !tlsConf.RootCAs.AppendCertsFromPEM(cert) {

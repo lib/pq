@@ -3,12 +3,20 @@ package pq
 // This file contains SSL tests
 
 import (
+	"bytes"
 	_ "crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"errors"
+	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func maybeSkipSSLTests(t *testing.T) {
@@ -79,11 +87,13 @@ func TestSSLVerifyFull(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	_, ok := err.(x509.UnknownAuthorityError)
-	if !ok {
-		_, ok := err.(x509.HostnameError)
-		if !ok {
-			t.Fatalf("expected x509.UnknownAuthorityError or x509.HostnameError, got %#+v", err)
+	{
+		var x509err x509.UnknownAuthorityError
+		if !errors.As(err, &x509err) {
+			var x509err x509.HostnameError
+			if !errors.As(err, &x509err) {
+				t.Fatalf("expected x509.UnknownAuthorityError or x509.HostnameError, got %#+v", err)
+			}
 		}
 	}
 
@@ -94,9 +104,11 @@ func TestSSLVerifyFull(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	_, ok = err.(x509.HostnameError)
-	if !ok {
-		t.Fatalf("expected x509.HostnameError, got %#+v", err)
+	{
+		var x509err x509.HostnameError
+		if !errors.As(err, &x509err) {
+			t.Fatalf("expected x509.HostnameError, got %#+v", err)
+		}
 	}
 	// OK
 	_, err = openSSLConn(t, rootCert+"host=postgres sslmode=verify-full user=pqgossltest")
@@ -119,9 +131,11 @@ func TestSSLRequireWithRootCert(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	_, ok := err.(x509.UnknownAuthorityError)
-	if !ok {
-		t.Fatalf("expected x509.UnknownAuthorityError, got %s, %#+v", err, err)
+	{
+		var x509err x509.UnknownAuthorityError
+		if !errors.As(err, &x509err) {
+			t.Fatalf("expected x509.UnknownAuthorityError, got %s, %#+v", err, err)
+		}
 	}
 
 	nonExistentCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "non_existent.crt")
@@ -157,7 +171,8 @@ func TestSSLVerifyCA(t *testing.T) {
 	// Not OK according to the system CA
 	{
 		_, err := openSSLConn(t, "host=postgres sslmode=verify-ca user=pqgossltest")
-		if _, ok := err.(x509.UnknownAuthorityError); !ok {
+		var x509err x509.UnknownAuthorityError
+		if !errors.As(err, &x509err) {
 			t.Fatalf("expected %T, got %#+v", x509.UnknownAuthorityError{}, err)
 		}
 	}
@@ -165,7 +180,8 @@ func TestSSLVerifyCA(t *testing.T) {
 	// Still not OK according to the system CA; empty sslrootcert is treated as unspecified.
 	{
 		_, err := openSSLConn(t, "host=postgres sslmode=verify-ca user=pqgossltest sslrootcert=''")
-		if _, ok := err.(x509.UnknownAuthorityError); !ok {
+		var x509err x509.UnknownAuthorityError
+		if !errors.As(err, &x509err) {
 			t.Fatalf("expected %T, got %#+v", x509.UnknownAuthorityError{}, err)
 		}
 	}
@@ -236,7 +252,8 @@ func TestSSLClientCertificates(t *testing.T) {
 	// Cert present, key not specified, should fail
 	{
 		_, err := openSSLConn(t, baseinfo+" sslcert="+sslcert)
-		if _, ok := err.(*os.PathError); !ok {
+		var pathErr *os.PathError
+		if !errors.As(err, &pathErr) {
 			t.Fatalf("expected %T, got %#+v", (*os.PathError)(nil), err)
 		}
 	}
@@ -244,7 +261,8 @@ func TestSSLClientCertificates(t *testing.T) {
 	// Cert present, empty key specified, should fail
 	{
 		_, err := openSSLConn(t, baseinfo+" sslcert="+sslcert+" sslkey=''")
-		if _, ok := err.(*os.PathError); !ok {
+		var pathErr *os.PathError
+		if !errors.As(err, &pathErr) {
 			t.Fatalf("expected %T, got %#+v", (*os.PathError)(nil), err)
 		}
 	}
@@ -252,7 +270,8 @@ func TestSSLClientCertificates(t *testing.T) {
 	// Cert present, non-existent key, should fail
 	{
 		_, err := openSSLConn(t, baseinfo+" sslcert="+sslcert+" sslkey=/tmp/filedoesnotexist")
-		if _, ok := err.(*os.PathError); !ok {
+		var pathErr *os.PathError
+		if !errors.As(err, &pathErr) {
 			t.Fatalf("expected %T, got %#+v", (*os.PathError)(nil), err)
 		}
 	}
@@ -279,4 +298,136 @@ func TestSSLClientCertificates(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// Check that clint sends SNI data when `sslsni` is not disabled
+func TestSNISupport(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		conn_param   string
+		hostname     string
+		expected_sni string
+	}{
+		{
+			name:         "SNI is set by default",
+			conn_param:   "",
+			hostname:     "localhost",
+			expected_sni: "localhost",
+		},
+		{
+			name:         "SNI is passed when asked for",
+			conn_param:   "sslsni=1",
+			hostname:     "localhost",
+			expected_sni: "localhost",
+		},
+		{
+			name:         "SNI is not passed when disabled",
+			conn_param:   "sslsni=0",
+			hostname:     "localhost",
+			expected_sni: "",
+		},
+		{
+			name:         "SNI is not set for IPv4",
+			conn_param:   "",
+			hostname:     "127.0.0.1",
+			expected_sni: "",
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Start mock postgres server on OS-provided port
+			listener, err := net.Listen("tcp", "127.0.0.1:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			serverErrChan := make(chan error, 1)
+			serverSNINameChan := make(chan string, 1)
+			go mockPostgresSSL(listener, serverErrChan, serverSNINameChan)
+
+			defer listener.Close()
+			defer close(serverErrChan)
+			defer close(serverSNINameChan)
+
+			// Try to establish a connection with the mock server. Connection will error out after TLS
+			// clientHello, but it is enough to catch SNI data on the server side
+			port := strings.Split(listener.Addr().String(), ":")[1]
+			connStr := fmt.Sprintf("sslmode=require host=%s port=%s %s", tt.hostname, port, tt.conn_param)
+
+			// We are okay to skip this error as we are polling serverErrChan and we'll get an error
+			// or timeout from the server side in case of problems here.
+			db, _ := sql.Open("postgres", connStr)
+			_, _ = db.Exec("SELECT 1")
+
+			// Check SNI data
+			select {
+			case sniHost := <-serverSNINameChan:
+				if sniHost != tt.expected_sni {
+					t.Fatalf("Expected SNI to be 'localhost', got '%+v' instead", sniHost)
+				}
+			case err = <-serverErrChan:
+				t.Fatalf("mock server failed with error: %+v", err)
+			case <-time.After(time.Second):
+				t.Fatal("exceeded connection timeout without erroring out")
+			}
+		})
+	}
+}
+
+// Make a postgres mock server to test TLS SNI
+//
+// Accepts postgres StartupMessage and handles TLS clientHello, then closes a connection.
+// While reading clientHello catch passed SNI data and report it to nameChan.
+func mockPostgresSSL(listener net.Listener, errChan chan error, nameChan chan string) {
+	var sniHost string
+
+	conn, err := listener.Accept()
+	if err != nil {
+		errChan <- err
+		return
+	}
+	defer conn.Close()
+
+	err = conn.SetDeadline(time.Now().Add(time.Second))
+	if err != nil {
+		errChan <- err
+		return
+	}
+
+	// Receive StartupMessage with SSL Request
+	startupMessage := make([]byte, 8)
+	if _, err := io.ReadFull(conn, startupMessage); err != nil {
+		errChan <- err
+		return
+	}
+	// StartupMessage: first four bytes -- total len = 8, last four bytes SslRequestNumber
+	if !bytes.Equal(startupMessage, []byte{0, 0, 0, 0x8, 0x4, 0xd2, 0x16, 0x2f}) {
+		errChan <- fmt.Errorf("unexpected startup message: %#v", startupMessage)
+		return
+	}
+
+	// Respond with SSLOk
+	_, err = conn.Write([]byte("S"))
+	if err != nil {
+		errChan <- err
+		return
+	}
+
+	// Set up TLS context to catch clientHello. It will always error out during handshake
+	// as no certificate is set.
+	srv := tls.Server(conn, &tls.Config{
+		GetConfigForClient: func(argHello *tls.ClientHelloInfo) (*tls.Config, error) {
+			sniHost = argHello.ServerName
+			return nil, nil
+		},
+	})
+	defer srv.Close()
+
+	// Do the TLS handshake ignoring errors
+	_ = srv.Handshake()
+
+	nameChan <- sniHost
 }
