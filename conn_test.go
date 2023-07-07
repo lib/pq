@@ -141,6 +141,72 @@ func TestOpenURL(t *testing.T) {
 	testURL("postgresql://")
 }
 
+func TestPgServiceFile(t *testing.T) {
+	if os.Getenv("PGSERVICEFILE") == "" {
+		if os.Getenv("TRAVIS") != "true" {
+			t.Skip("PGSERVICEFILE not set, skipping service connection file tests")
+		}
+		os.Setenv("PGSERVICEFILE", "/tmp/pqgotest_pgservice")
+		os.Remove(pgpassFile)
+		pgservice, err := os.OpenFile(os.Getenv("PGSERVICEFILE"), os.O_RDWR|os.O_CREATE, 0644)
+		if err != nil {
+			t.Fatalf("Unexpected error writing pg service file %#v", err)
+		}
+		_, err = pgservice.WriteString(`
+[service1]
+host=localhost
+
+[service2]
+dbname=template2
+
+[service3]
+thistestshould=fail
+`)
+		if err != nil {
+			t.Fatalf("Unexpected error writing pg service file %#v", err)
+		}
+		pgservice.Close()
+	}
+
+	testAssert := func(conninfo string, expected string, reason string) {
+		conn, err := openTestConnConninfo(conninfo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+
+		txn, err := conn.Begin()
+		if err != nil {
+			if expected != "fail" {
+				t.Fatalf(reason, err)
+			}
+			return
+		}
+		rows, err := txn.Query("SELECT USER")
+		if err != nil {
+			txn.Rollback()
+			if expected != "fail" {
+				t.Fatalf(reason, err)
+			}
+		} else {
+			rows.Close()
+			if expected != "ok" {
+				t.Fatalf(reason, err)
+			}
+		}
+		txn.Rollback()
+	}
+
+	testAssert("service=service1", "ok", "connect to defaults failed")
+	testAssert("service=service2", "fail", "connect to template2 failed")
+	testAssert("service=service3", "fail", "unrecognized parameter %#v")
+
+	os.Setenv("PGSERVICEFILE", "IdoNotExist")
+	testAssert("service=pietje", "fail", "service file does not exist")
+
+	os.Setenv("PGSERVICEFILE", "")
+}
+
 const pgpassFile = "/tmp/pqgotest_pgpass"
 
 func TestPgpass(t *testing.T) {
