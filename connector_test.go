@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"os"
 	"testing"
 )
 
@@ -65,4 +66,22 @@ func TestNewConnector_Driver(t *testing.T) {
 		t.Fatal(err)
 	}
 	txn.Rollback()
+}
+
+func TestNewConnector_Environ(t *testing.T) {
+	name := ""
+	os.Setenv("PGPASSFILE", "/tmp/.pgpass")
+	defer os.Unsetenv("PGPASSFILE")
+	c, err := NewConnector(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, expected := range map[string]string{
+		"passfile": "/tmp/.pgpass",
+	} {
+		if got := c.opts[key]; got != expected {
+			t.Fatalf("Getting values from environment variables, for %v expected %s got %s", key, expected, got)
+		}
+	}
+
 }
