@@ -8,14 +8,39 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
+
+var testUser *user.User // for replacing user.Current() in tests
 
 // ssl generates a function to upgrade a net.Conn based on the "sslmode" and
 // related settings. The function is nil when no upgrade should take place.
 func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
+	var usr *user.User
+	// usr.Current() might fail when cross-compiling. We have to ignore the
+	// error and continue without home directory defaults, since we wouldn't
+	// know from where to load certificates.
+	if testUser != nil {
+		usr = new(user.User)
+		*usr = *testUser
+	} else {
+		usr, _ = user.Current()
+	}
+
 	verifyCaOnly := false
 	tlsConf := tls.Config{}
+
+	if usr != nil && o["sslmode"] != "disable" && o["sslrootcert"] == "" {
+		// https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLROOTCERT
+		// https://www.postgresql.org/docs/current/libpq-ssl.html#LIBQ-SSL-CERTIFICATES
+		if runtime.GOOS == "windows" {
+			o["sslrootcert"] = filepath.Join(usr.HomeDir, "AppData", "Roaming", "postgresql", "root.crt")
+		} else {
+			o["sslrootcert"] = filepath.Join(usr.HomeDir, ".postgresql", "root.crt")
+		}
+	}
+
 	switch mode := o["sslmode"]; mode {
 	// "require" is the default.
 	case "", "require":
@@ -61,7 +86,7 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 		tlsConf.ServerName = o["host"]
 	}
 
-	err := sslClientCertificates(&tlsConf, o)
+	err := sslClientCertificates(&tlsConf, o, usr)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +118,7 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 // "sslkey" settings, or if they aren't set, from the .postgresql directory
 // in the user's home directory. The configured files must exist and have
 // the correct permissions.
-func sslClientCertificates(tlsConf *tls.Config, o values) error {
+func sslClientCertificates(tlsConf *tls.Config, o values, user *user.User) error {
 	sslinline := o["sslinline"]
 	if sslinline == "true" {
 		cert, err := tls.X509KeyPair([]byte(o["sslcert"]), []byte(o["sslkey"]))
@@ -103,11 +128,6 @@ func sslClientCertificates(tlsConf *tls.Config, o values) error {
 		tlsConf.Certificates = []tls.Certificate{cert}
 		return nil
 	}
-
-	// user.Current() might fail when cross-compiling. We have to ignore the
-	// error and continue without home directory defaults, since we wouldn't
-	// know from where to load them.
-	user, _ := user.Current()
 
 	// In libpq, the client certificate is only loaded if the setting is not blank.
 	//
