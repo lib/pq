@@ -1,5 +1,5 @@
-//go:build !windows
-// +build !windows
+//go:build !windows && !plan9
+// +build !windows,!plan9
 
 package pq
 
