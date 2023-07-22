@@ -132,6 +132,7 @@ func TestArrayScanner(t *testing.T) {
 		&[][]float32{},
 		&[][]int32{},
 		&[][]string{},
+		&[][][]byte{},
 	} {
 		s = Array(tt)
 		if _, ok := s.(GenericArray); !ok {
