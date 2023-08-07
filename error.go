@@ -520,4 +520,8 @@ func (cn *conn) errRecover(err *error) {
 	if *err == driver.ErrBadConn {
 		cn.err.set(driver.ErrBadConn)
 	}
+
+	if c.bad && c.c != nil {
+		c.c.Close()
+	}
 }
