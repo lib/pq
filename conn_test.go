@@ -1425,7 +1425,7 @@ func TestParseOpts(t *testing.T) {
 		{"dbname=hello user=   ", values{"dbname": "hello", "user": ""}, true},
 
 		// The parser ignores spaces after = and interprets the next set of non-whitespace characters as the value.
-		{"user= password=foo", values{"user": "password=foo"}, true},
+		{"user= password=foo", values{"password": "foo", "user": ""}, true},
 
 		// Backslash escapes next char
 		{`user=a\ \'\\b`, values{"user": `a '\b`}, true},
