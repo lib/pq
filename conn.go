@@ -1840,6 +1840,10 @@ func (cn *conn) readReadyForQuery() {
 	case 'Z':
 		cn.processReadyForQuery(r)
 		return
+	case 'E':
+		err := parseError(r, "")
+		cn.err.set(driver.ErrBadConn)
+		panic(err)
 	default:
 		cn.err.set(driver.ErrBadConn)
 		errorf("unexpected message %q; expected ReadyForQuery", t)
@@ -1866,11 +1870,7 @@ func (cn *conn) readParseResponse() {
 	}
 }
 
-func (cn *conn) readStatementDescribeResponse() (
-	paramTyps []oid.Oid,
-	colNames []string,
-	colTyps []fieldDesc,
-) {
+func (cn *conn) readStatementDescribeResponse() (paramTyps []oid.Oid, colNames []string, colTyps []fieldDesc) {
 	for {
 		t, r := cn.recv1()
 		switch t {
