@@ -1809,6 +1809,10 @@ func (cn *conn) readReadyForQuery() {
 	case 'Z':
 		cn.processReadyForQuery(r)
 		return
+	case 'E':
+		err := parseError(r)
+		cn.err.set(driver.ErrBadConn)
+		panic(err)
 	default:
 		cn.err.set(driver.ErrBadConn)
 		errorf("unexpected message %q; expected ReadyForQuery", t)
