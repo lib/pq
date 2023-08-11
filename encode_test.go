@@ -884,3 +884,18 @@ func BenchmarkAppendEscapedTextNoEscape(b *testing.B) {
 		appendEscapedText(nil, longString)
 	}
 }
+
+//TestRoundtripDecodeEncode tests that encode and decode work roundtrip,
+//ie Parse(Format(t)) should equal t. lib/pq#606
+func TestRoundtripDecodeEncode(t *testing.T) {
+	inTime := time.Now().UTC()
+	inDate := FormatTimestamp(inTime)
+	outTime, err := ParseTimestamp(time.UTC, string(inDate))
+	if err != nil {
+		t.Errorf("ParseTimestamp fails on FormatTimestamp with input %v with error: %v\n", inTime, err)
+	}
+	if !outTime.Equal(inTime) {
+		t.Errorf("Parse(Format(t)) did not equal t, expected %v and got %v\n", inTime, outTime)
+	}
+
+}
