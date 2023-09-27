@@ -255,7 +255,8 @@ func (cn *conn) handlePgpass(o values) {
 	}
 	mode := fileinfo.Mode()
 	if mode&(0x77) != 0 {
-		// XXX should warn about incorrect .pgpass permissions as psql does
+		fmt.Fprintf(os.Stderr, "WARNING: password file %q has group or world access; "+
+			"permissions should be u=rw (0600) or less\n", filename)
 		return
 	}
 	file, err := os.Open(filename)
