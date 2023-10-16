@@ -96,6 +96,11 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 func sslClientCertificates(tlsConf *tls.Config, o values) error {
 	sslinline := o["sslinline"]
 	if sslinline == "true" {
+		// If sslinline is specified and no client certificates are provided, skip them
+		if o["sslcert"] == "" && o["sslkey"] == "" {
+			return nil
+		}
+
 		cert, err := tls.X509KeyPair([]byte(o["sslcert"]), []byte(o["sslkey"]))
 		if err != nil {
 			return err
