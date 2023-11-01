@@ -3,7 +3,7 @@ on:
   pull_request:
     paths: ['**.go', 'go.mod', '.github/workflows/*']
   push:
-    branches: ['main']
+    branches: ['main', 'master']
 
 jobs:
   staticcheck:

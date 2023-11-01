@@ -49,12 +49,15 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 - Recognize float types in ColumnTypeScanType() ([#1166]).
 
+- Accept `PGGSSLIB` and `PGKRBSRVNAME` environment variables ([#1143]).
+
 [#595]: https://github.com/lib/pq/pull/595
 [#745]: https://github.com/lib/pq/pull/745
 [#949]: https://github.com/lib/pq/pull/949
 [#1125]: https://github.com/lib/pq/pull/1125
 [#1129]: https://github.com/lib/pq/pull/1129
 [#1133]: https://github.com/lib/pq/pull/1133
+[#1143]: https://github.com/lib/pq/pull/1143
 [#1161]: https://github.com/lib/pq/pull/1161
 [#1166]: https://github.com/lib/pq/pull/1166
 [#1179]: https://github.com/lib/pq/pull/1179
