@@ -2061,8 +2061,18 @@ func parseEnviron(env []string) (out map[string]string) {
 			unsupported()
 		case "PGREQUIREPEER":
 			unsupported()
-		case "PGKRBSRVNAME", "PGGSSLIB":
-			unsupported()
+		case "PGGSSLIB":
+			if newGss != nil {
+				accrue("gsslib")
+			} else {
+				unsupported()
+			}
+		case "PGKRBSRVNAME":
+			if newGss != nil {
+				accrue("krbsrvname")
+			} else {
+				unsupported()
+			}
 		case "PGCONNECT_TIMEOUT":
 			accrue("connect_timeout")
 		case "PGCLIENTENCODING":
