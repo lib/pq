@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -182,6 +183,55 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 
 	if num != 1 {
 		t.Fatalf("expected 1 items, not %d", num)
+	}
+}
+
+func TestCopyInJSON(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	txn, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer txn.Rollback()
+
+	_, err = txn.Exec("CREATE TEMP TABLE temp (json_data JSONB)")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stmt, err := txn.Prepare(CopyIn("temp", "json_data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b := json.RawMessage(`{"foo": "bar"}`)
+
+	_, err = stmt.Exec(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = stmt.Exec()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = stmt.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var json_data []byte
+
+	err = txn.QueryRow("SELECT json_data FROM temp").Scan(&json_data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(json_data, b) {
+		t.Fatal("unexpected result", json_data)
 	}
 }
 
