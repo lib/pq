@@ -25,7 +25,6 @@
 // Package scram implements a SCRAM-{SHA-1,etc} client per RFC5802.
 //
 // http://tools.ietf.org/html/rfc5802
-//
 package scram
 
 import (
@@ -43,17 +42,16 @@ import (
 //
 // A Client may be used within a SASL conversation with logic resembling:
 //
-//    var in []byte
-//    var client = scram.NewClient(sha1.New, user, pass)
-//    for client.Step(in) {
-//            out := client.Out()
-//            // send out to server
-//            in := serverOut
-//    }
-//    if client.Err() != nil {
-//            // auth failed
-//    }
-//
+//	var in []byte // first step requires no input
+//	var client = scram.NewClient(sha256.New, user, pass)
+//	for client.Step(in) { // stop on 1st error or after 3rd step
+//	        out := client.Out()
+//	        // send out to server
+//	        in = serverOut
+//	}
+//	if client.Err() != nil {
+//	        // auth failed
+//	}
 type Client struct {
 	newHash func() hash.Hash
 
@@ -73,8 +71,7 @@ type Client struct {
 //
 // For SCRAM-SHA-256, for example, use:
 //
-//    client := scram.NewClient(sha256.New, user, pass)
-//
+//	client := scram.NewClient(sha256.New, user, pass)
 func NewClient(newHash func() hash.Hash, user, pass string) *Client {
 	c := &Client{
 		newHash: newHash,
@@ -109,8 +106,8 @@ var escaper = strings.NewReplacer("=", "=3D", ",", "=2C")
 
 // Step processes the incoming data from the server and makes the
 // next round of data for the server available via Client.Out.
-// Step returns false if there are no errors and more data is
-// still expected.
+// Step returns true if there are no errors and Step should be called
+// again with upcoming data messages.
 func (c *Client) Step(in []byte) bool {
 	c.out.Reset()
 	if c.step > 2 || c.err != nil {
@@ -125,7 +122,7 @@ func (c *Client) Step(in []byte) bool {
 	case 3:
 		c.err = c.step3(in)
 	}
-	return c.step > 2 || c.err != nil
+	return c.step <= 2 && c.err == nil
 }
 
 func (c *Client) step1(in []byte) error {
