@@ -12,10 +12,10 @@ const headerSize = 4
 
 type fieldDesc struct {
 	
-	//If the field can be identified as a column of a specific table, the object ID of the table; otherwise zero.
+	// If the field can be identified as a column of a specific table, the object ID of the table; otherwise zero.
 	TableOID oid.Oid
 	
-	//If the field can be identified as a column of a specific table, the attribute number of the column; otherwise zero.
+	// If the field can be identified as a column of a specific table, the attribute number of the column; otherwise zero.
 	AtribNr int
 	
 	// The object ID of the data type.
