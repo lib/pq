@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"os"
 	"os/user"
@@ -780,9 +781,7 @@ func (noRows) RowsAffected() (int64, error) {
 
 // Decides which column formats to use for a prepared statement.  The input is
 // an array of type oids, one element per result column.
-func decideColumnFormats(
-	colTyps []fieldDesc, forceText bool,
-) (colFmts []format, colFmtData []byte) {
+func decideColumnFormats(colTyps []fieldDesc, forceText bool) (colFmts []format, colFmtData []byte) {
 	if len(colTyps) == 0 {
 		return nil, colFmtDataAllText
 	}
@@ -822,6 +821,9 @@ func decideColumnFormats(
 		return colFmts, colFmtDataAllText
 	} else {
 		colFmtData = make([]byte, 2+len(colFmts)*2)
+		if len(colFmts) > math.MaxUint16 {
+			errorf("too many columns (%d > math.MaxUint16)", len(colFmts))
+		}
 		binary.BigEndian.PutUint16(colFmtData, uint16(len(colFmts)))
 		for i, v := range colFmts {
 			binary.BigEndian.PutUint16(colFmtData[2+i*2:], uint16(v))
