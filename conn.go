@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"os"
 	"os/user"
@@ -820,6 +821,9 @@ func decideColumnFormats(
 		return colFmts, colFmtDataAllText
 	} else {
 		colFmtData = make([]byte, 2+len(colFmts)*2)
+		if len(colFmts) > math.MaxUint16 {
+			panic("too many columns")
+		}
 		binary.BigEndian.PutUint16(colFmtData, uint16(len(colFmts)))
 		for i, v := range colFmts {
 			binary.BigEndian.PutUint16(colFmtData[2+i*2:], uint16(v))
