@@ -15,6 +15,16 @@ import (
 	"time"
 )
 
+// This variable can be replaced with -ldflags like below:
+// go test "-ldflags=-X github.com/lib/pq.driverNameTest=custom"
+var driverNameTest string
+
+func init() {
+	if driverNameTest == "" {
+		driverNameTest = driverName
+	}
+}
+
 type Fatalistic interface {
 	Fatal(args ...interface{})
 }
@@ -49,7 +59,7 @@ func testConninfo(conninfo string) string {
 }
 
 func openTestConnConninfo(conninfo string) (*sql.DB, error) {
-	return sql.Open("postgres", testConninfo(conninfo))
+	return sql.Open(driverNameTest, testConninfo(conninfo))
 }
 
 func openTestConn(t Fatalistic) *sql.DB {
@@ -1969,5 +1979,12 @@ func TestStmtExecContext(t *testing.T) {
 				t.Errorf("stmt.QueryContext() got = %v, cancelExpected = %v", err.Error(), tt.cancelExpected)
 			}
 		})
+	}
+}
+
+func TestDriverName(t *testing.T) {
+	dn := DriverName()
+	if dn != driverName {
+		t.Fatalf("DriverName() returned driverName: %v, want: %v", dn, driverName)
 	}
 }

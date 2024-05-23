@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 type Fatalistic interface {
@@ -24,7 +24,7 @@ func openTestConn(t Fatalistic) *sql.DB {
 		os.Setenv("PGSSLMODE", "disable")
 	}
 
-	conn, err := sql.Open("postgres", "")
+	conn, err := sql.Open(pq.DriverName(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
