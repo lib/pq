@@ -57,8 +57,19 @@ func (d Driver) Open(name string) (driver.Conn, error) {
 	return Open(name)
 }
 
+// This variable can be replaced with -ldflags like below:
+// go build "-ldflags=-X github.com/lib/pq.driverName=custom"
+var driverName = "postgres"
+
 func init() {
-	sql.Register("postgres", &Driver{})
+	if driverName != "" {
+		sql.Register(driverName, &Driver{})
+	}
+}
+
+// DriverName return default driver name
+func DriverName() string {
+	return driverName
 }
 
 type parameterStatus struct {
@@ -1251,7 +1262,7 @@ func (cn *conn) auth(r *readBuf, o values) {
 			token, err = cli.GetInitTokenFromSpn(spn)
 		} else {
 			// Allow the kerberos service name to be overridden
-			service := "postgres"
+			service := driverName
 			if val, ok := o["krbsrvname"]; ok {
 				service = val
 			}
