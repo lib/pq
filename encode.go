@@ -431,6 +431,10 @@ func ParseTimestamp(currentLocation *time.Location, str string) (time.Time, erro
 
 		remainderIdx += fracOff + 1
 	}
+	// Avoid errors caused by whitespace preceding timezone information in certain situations.
+	if remainderIdx < len(str) && str[remainderIdx] == 32 {
+		remainderIdx++
+	}
 	if tzStart := remainderIdx; tzStart < len(str) && (str[tzStart] == '-' || str[tzStart] == '+') {
 		// time zone separator is always '-' or '+' or 'Z' (UTC is +00)
 		var tzSign int
