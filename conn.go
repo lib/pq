@@ -15,7 +15,6 @@ import (
 	"net"
 	"os"
 	"os/user"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -437,8 +436,10 @@ func dial(ctx context.Context, d Dialer, o values) (net.Conn, error) {
 func network(o values) (string, string) {
 	host := o["host"]
 
-	if strings.HasPrefix(host, "/") {
-		sockPath := path.Join(host, ".s.PGSQL."+o["port"])
+	// UNIX domain sockets are either represented by an (absolute) file system
+	// path or they live in the abstract name space (starting with an @).
+	if filepath.IsAbs(host) || strings.HasPrefix(host, "@") {
+		sockPath := filepath.Join(host, ".s.PGSQL."+o["port"])
 		return "unix", sockPath
 	}
 
