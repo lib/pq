@@ -1212,13 +1212,15 @@ func (cn *conn) ssl(o values) error {
 		return err
 	}
 
-	cb, err := tlsServerEndPoint(conn)
-	if err != nil {
-		return err
+	if o["channel_binding"] != "disable" {
+		cb, err := tlsServerEndPoint(conn)
+		if err != nil {
+			return err
+		}
+		cn.tlsServerEndPoint = cb
 	}
 
 	cn.c = conn
-	cn.tlsServerEndPoint = cb
 	return err
 }
 
@@ -1407,6 +1409,10 @@ func (cn *conn) auth(r *readBuf, o values) {
 			selected = "SCRAM-SHA-256"
 		} else {
 			errorf("SCRAM-SHA-256 protocol error")
+		}
+
+		if o["channel_binding"] == "required" && selected != "SCRAM-SHA-256-PLUS" {
+			errorf("SCRAM-SHA-256 protocol error: channel binding required")
 		}
 
 		sc.Step(nil)
