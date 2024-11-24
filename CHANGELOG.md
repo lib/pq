@@ -7,7 +7,9 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 ### Features
 
-- Add support for NamedValueChecker interface ([#1125])
+- Add support for NamedValueChecker interface ([#1125]).
+
+- Support [`sslnegotiation`] to use SSL without negotiation ([#1180]).
 
 - The `pq.Error.ErrorWithDetail()` method prints a more detailed multiline
   message, with the Detail, Hint, and error position (if any) ([#1219]):
@@ -55,6 +57,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 - Treat nil []byte in query parameters as nil/NULL rather than `""` ([#838]).
 
+[`sslnegotiation`]: https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLNEGOTIATION
 [#595]: https://github.com/lib/pq/pull/595
 [#745]: https://github.com/lib/pq/pull/745
 [#743]: https://github.com/lib/pq/pull/743
@@ -68,6 +71,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 [#1161]: https://github.com/lib/pq/pull/1161
 [#1166]: https://github.com/lib/pq/pull/1166
 [#1179]: https://github.com/lib/pq/pull/1179
+[#1180]: https://github.com/lib/pq/pull/1180
 [#1184]: https://github.com/lib/pq/pull/1184
 [#1211]: https://github.com/lib/pq/pull/1211
 [#1212]: https://github.com/lib/pq/pull/1212

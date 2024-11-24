@@ -1184,20 +1184,24 @@ func (cn *conn) ssl(o values) error {
 		return nil
 	}
 
-	w := cn.writeBuf(0)
-	w.int32(80877103)
-	if err = cn.sendStartupPacket(w); err != nil {
-		return err
-	}
+	// only negotiate the ssl handshake if requested (which is the default).
+	// sllnegotiation=direct is supported by pg17 and above.
+	if sslnegotiation(o) {
+		w := cn.writeBuf(0)
+		w.int32(80877103)
+		if err = cn.sendStartupPacket(w); err != nil {
+			return err
+		}
 
-	b := cn.scratch[:1]
-	_, err = io.ReadFull(cn.c, b)
-	if err != nil {
-		return err
-	}
+		b := cn.scratch[:1]
+		_, err = io.ReadFull(cn.c, b)
+		if err != nil {
+			return err
+		}
 
-	if b[0] != 'S' {
-		return ErrSSLNotSupported
+		if b[0] != 'S' {
+			return ErrSSLNotSupported
+		}
 	}
 
 	cn.c, err = upgrade(cn.c)

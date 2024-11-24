@@ -55,6 +55,7 @@ supported:
   - sslkey - Key file location. The file must contain PEM encoded data.
   - sslrootcert - The location of the root certificate file. The file
     must contain PEM encoded data.
+  - sslnegotiation - when set to "direct" it will use SSL without negotiation (PostgreSQL ≥17 only).
 
 Valid values for sslmode are:
 
