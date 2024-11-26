@@ -25,7 +25,6 @@
 // Package scram implements a SCRAM-{SHA-1,etc} client per RFC5802.
 //
 // http://tools.ietf.org/html/rfc5802
-//
 package scram
 
 import (
@@ -43,17 +42,16 @@ import (
 //
 // A Client may be used within a SASL conversation with logic resembling:
 //
-//    var in []byte
-//    var client = scram.NewClient(sha1.New, user, pass)
-//    for client.Step(in) {
-//            out := client.Out()
-//            // send out to server
-//            in := serverOut
-//    }
-//    if client.Err() != nil {
-//            // auth failed
-//    }
-//
+//	var in []byte
+//	var client = scram.NewClient(sha1.New, user, pass)
+//	for client.Step(in) {
+//	        out := client.Out()
+//	        // send out to server
+//	        in := serverOut
+//	}
+//	if client.Err() != nil {
+//	        // auth failed
+//	}
 type Client struct {
 	newHash func() hash.Hash
 
@@ -67,14 +65,17 @@ type Client struct {
 	serverNonce []byte
 	saltedPass  []byte
 	authMsg     bytes.Buffer
+
+	// channel binding data used for SCRAM-SHA-256-PLUS
+	tlsServerEndPoint []byte
+	channelBinding    bool
 }
 
 // NewClient returns a new SCRAM-* client with the provided hash algorithm.
 //
 // For SCRAM-SHA-256, for example, use:
 //
-//    client := scram.NewClient(sha256.New, user, pass)
-//
+//	client := scram.NewClient(sha256.New, user, pass)
 func NewClient(newHash func() hash.Hash, user, pass string) *Client {
 	c := &Client{
 		newHash: newHash,
@@ -84,6 +85,16 @@ func NewClient(newHash func() hash.Hash, user, pass string) *Client {
 	c.out.Grow(256)
 	c.authMsg.Grow(256)
 	return c
+}
+
+// Out returns the data to be sent to the server in the current step.
+func (c *Client) WithTlsServerEndPoint(cb []byte) {
+	c.tlsServerEndPoint = cb
+}
+
+// Out returns the data to be sent to the server in the current step.
+func (c *Client) UseChannelBinding() {
+	c.channelBinding = true
 }
 
 // Out returns the data to be sent to the server in the current step.
@@ -143,7 +154,17 @@ func (c *Client) step1(in []byte) error {
 	c.authMsg.WriteString(",r=")
 	c.authMsg.Write(c.clientNonce)
 
-	c.out.WriteString("n,,")
+	if c.tlsServerEndPoint != nil && c.channelBinding {
+		// we support channel binding, and so does the server
+		c.out.WriteString("p=tls-server-end-point,,")
+	} else if c.tlsServerEndPoint != nil {
+		// we support channel binding, but the server doesn't.
+		c.out.WriteString("y,,")
+	} else {
+		// we do not support channel binding.
+		c.out.WriteString("n,,")
+	}
+
 	c.out.Write(c.authMsg.Bytes())
 	return nil
 }
@@ -185,11 +206,34 @@ func (c *Client) step2(in []byte) error {
 	}
 	c.saltPassword(salt, iterCount)
 
-	c.authMsg.WriteString(",c=biws,r=")
-	c.authMsg.Write(c.serverNonce)
+	// channel binding:
+	c.authMsg.WriteString(",c=")
+	c.out.WriteString("c=")
 
-	c.out.WriteString("c=biws,r=")
+	var mode string
+	if c.tlsServerEndPoint != nil && c.channelBinding {
+		// we support channel binding, and so does the server
+		data := []byte("p=tls-server-end-point,,")
+		data = append(data, c.tlsServerEndPoint...)
+
+		mode = base64.StdEncoding.EncodeToString(data)
+	} else if c.tlsServerEndPoint != nil {
+		// we support channel binding, but the server doesn't.
+		mode = "eSws"
+	} else {
+		// we do not support channel binding.
+		mode = "biws"
+	}
+	c.authMsg.WriteString(mode)
+	c.out.WriteString(mode)
+
+	// server nonce
+	c.authMsg.WriteString(",r=")
+	c.out.WriteString(",r=")
+
+	c.authMsg.Write(c.serverNonce)
 	c.out.Write(c.serverNonce)
+
 	c.out.WriteString(",p=")
 	c.out.Write(c.clientProof())
 	return nil

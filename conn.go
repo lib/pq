@@ -169,6 +169,9 @@ type conn struct {
 
 	// GSSAPI context
 	gss GSS
+
+	// channel binding data used for SCRAM-SHA-256-PLUS
+	tlsServerEndPoint []byte
 }
 
 type syncErr struct {
@@ -1130,7 +1133,20 @@ func (cn *conn) ssl(o values) error {
 		return ErrSSLNotSupported
 	}
 
-	cn.c, err = upgrade(cn.c)
+	conn, err := upgrade(cn.c)
+	if err != nil {
+		return err
+	}
+
+	if o["channel_binding"] != "disable" {
+		cb, err := tlsServerEndPoint(conn)
+		if err != nil {
+			return err
+		}
+		cn.tlsServerEndPoint = cb
+	}
+
+	cn.c = conn
 	return err
 }
 
@@ -1208,8 +1224,16 @@ func (cn *conn) startup(o values) {
 func (cn *conn) auth(r *readBuf, o values) {
 	switch code := r.int32(); code {
 	case 0:
+		if o["channel_binding"] == "required" {
+			errorf("SCRAM-SHA-256 protocol error: channel binding required")
+		}
+
 		// OK
 	case 3:
+		if o["channel_binding"] == "required" {
+			errorf("SCRAM-SHA-256 protocol error: channel binding required")
+		}
+
 		w := cn.writeBuf('p')
 		w.string(o["password"])
 		cn.send(w)
@@ -1223,6 +1247,10 @@ func (cn *conn) auth(r *readBuf, o values) {
 			errorf("unexpected authentication response: %q", t)
 		}
 	case 5:
+		if o["channel_binding"] == "required" {
+			errorf("SCRAM-SHA-256 protocol error: channel binding required")
+		}
+
 		s := string(r.next(4))
 		w := cn.writeBuf('p')
 		w.string("md5" + md5s(md5s(o["password"]+o["user"])+s))
@@ -1237,6 +1265,10 @@ func (cn *conn) auth(r *readBuf, o values) {
 			errorf("unexpected authentication response: %q", t)
 		}
 	case 7: // GSSAPI, startup
+		if o["channel_binding"] == "required" {
+			errorf("SCRAM-SHA-256 protocol error: channel binding required")
+		}
+
 		if newGss == nil {
 			errorf("kerberos error: no GSSAPI provider registered (import github.com/lib/pq/auth/kerberos if you need Kerberos support)")
 		}
@@ -1272,6 +1304,9 @@ func (cn *conn) auth(r *readBuf, o values) {
 		cn.gss = cli
 
 	case 8: // GSSAPI continue
+		if o["channel_binding"] == "required" {
+			errorf("SCRAM-SHA-256 protocol error: channel binding required")
+		}
 
 		if cn.gss == nil {
 			errorf("GSSAPI protocol error")
@@ -1290,7 +1325,41 @@ func (cn *conn) auth(r *readBuf, o values) {
 		// from the server..
 
 	case 10:
+		supported := r.strings()
+
+		scramSha256 := false
+		scramSha256Plus := false
+		for _, s := range supported {
+			switch s {
+			case "SCRAM-SHA-256":
+				scramSha256 = true
+			case "SCRAM-SHA-256-PLUS":
+				scramSha256Plus = true
+			}
+		}
+
 		sc := scram.NewClient(sha256.New, o["user"], o["password"])
+
+		// channel binding is supported by the client
+		if cn.tlsServerEndPoint != nil {
+			sc.WithTlsServerEndPoint(cn.tlsServerEndPoint)
+		}
+
+		var selected string
+		// SCRAM-SHA-256-PLUS always takes preference.
+		if cn.tlsServerEndPoint != nil && scramSha256Plus {
+			sc.UseChannelBinding()
+			selected = "SCRAM-SHA-256-PLUS"
+		} else if scramSha256 {
+			selected = "SCRAM-SHA-256"
+		} else {
+			errorf("SCRAM-SHA-256 protocol error")
+		}
+
+		if o["channel_binding"] == "required" && selected != "SCRAM-SHA-256-PLUS" {
+			errorf("SCRAM-SHA-256 protocol error: channel binding required")
+		}
+
 		sc.Step(nil)
 		if sc.Err() != nil {
 			errorf("SCRAM-SHA-256 error: %s", sc.Err().Error())
@@ -1298,7 +1367,7 @@ func (cn *conn) auth(r *readBuf, o values) {
 		scOut := sc.Out()
 
 		w := cn.writeBuf('p')
-		w.string("SCRAM-SHA-256")
+		w.string(selected)
 		w.int32(len(scOut))
 		w.bytes(scOut)
 		cn.send(w)
