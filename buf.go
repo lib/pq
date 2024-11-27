@@ -3,6 +3,7 @@ package pq
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 
 	"github.com/lib/pq/oid"
 )
@@ -79,12 +80,18 @@ func (b *writeBuf) bytes(v []byte) {
 
 func (b *writeBuf) wrap() []byte {
 	p := b.buf[b.pos:]
+	if len(p) > math.MaxUint32 {
+		panic("message too large")
+	}
 	binary.BigEndian.PutUint32(p, uint32(len(p)))
 	return b.buf
 }
 
 func (b *writeBuf) next(c byte) {
 	p := b.buf[b.pos:]
+	if len(p) > math.MaxUint32 {
+		panic("message too large")
+	}
 	binary.BigEndian.PutUint32(p, uint32(len(p)))
 	b.pos = len(b.buf) + 1
 	b.buf = append(b.buf, c, 0, 0, 0, 0)
