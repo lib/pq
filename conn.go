@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -1446,6 +1447,17 @@ func (st *stmt) exec(v []driver.Value) {
 			if x == nil {
 				w.int32(-1)
 			} else {
+				// Check if v is a nil interface value(covers nil slices)
+				rv := reflect.ValueOf(x)
+
+				switch rv.Kind() {
+				case reflect.Slice, reflect.Interface:
+					if rv.IsNil() {
+						w.int32(-1)
+						continue
+					}
+				}
+
 				b := encode(&cn.parameterStatus, x, st.paramTyps[i])
 				w.int32(len(b))
 				w.bytes(b)
