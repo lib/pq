@@ -202,3 +202,14 @@ func sslVerifyCertificateAuthority(client *tls.Conn, tlsConf *tls.Config) error 
 	_, err = certs[0].Verify(opts)
 	return err
 }
+
+// sslnegotiation returns true if we should negotiate SSL.
+// returns false if there should be no negotiation and we should upgrade immediately.
+func sslnegotiation(o values) bool {
+	if negotiation, ok := o["sslnegotiation"]; ok {
+		if negotiation == "direct" {
+			return false
+		}
+	}
+	return true
+}
