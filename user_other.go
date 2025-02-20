@@ -1,7 +1,7 @@
 // Package pq is a pure Go Postgres driver for the database/sql package.
 
-//go:build js || android || hurd || zos
-// +build js android hurd zos
+//go:build js || android || hurd || zos || wasip1
+// +build js android hurd zos wasip1
 
 package pq
 
