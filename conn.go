@@ -1227,50 +1227,22 @@ func (cn *conn) auth(r *readBuf, cfg Config) error {
 		return fmt.Errorf("pq: unknown authentication response: %s", code)
 	case proto.AuthReqKrb4, proto.AuthReqKrb5, proto.AuthReqCrypt, proto.AuthReqSSPI:
 		return fmt.Errorf("pq: unsupported authentication method: %s", code)
-
 	case proto.AuthReqOk:
 		return nil
 
 	case proto.AuthReqPassword:
 		w := cn.writeBuf(proto.PasswordMessage)
 		w.string(cfg.Password)
-		err := cn.send(w)
-		if err != nil {
-			return err
-		}
-
-		t, r, err := cn.recv()
-		if err != nil {
-			return err
-		}
-		if t != proto.AuthenticationRequest {
-			return fmt.Errorf("pq: unexpected password response: %q", t)
-		}
-		if r.int32() != int(proto.AuthReqOk) {
-			return fmt.Errorf("pq: unexpected authentication response: %q", t)
-		}
-		return nil
+		// Don't need to check AuthOk response here; auth() is called in a loop,
+		// which catches the errors and AuthReqOk responses.
+		return cn.send(w)
 
 	case proto.AuthReqMD5:
 		s := string(r.next(4))
 		w := cn.writeBuf(proto.PasswordMessage)
 		w.string("md5" + md5s(md5s(cfg.Password+cfg.User)+s))
-		err := cn.send(w)
-		if err != nil {
-			return err
-		}
-
-		t, r, err := cn.recv()
-		if err != nil {
-			return err
-		}
-		if t != proto.AuthenticationRequest {
-			return fmt.Errorf("pq: unexpected password response: %q", t)
-		}
-		if r.int32() != int(proto.AuthReqOk) {
-			return fmt.Errorf("pq: unexpected authentication response: %q", t)
-		}
-		return nil
+		// Same here.
+		return cn.send(w)
 
 	case proto.AuthReqGSS: // GSSAPI, startup
 		if newGss == nil {
