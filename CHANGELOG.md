@@ -83,6 +83,9 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 - Treat nil []byte in query parameters as nil/NULL rather than `""` ([#838]).
 
+- Accept multiple authentication methods before checking AuthOk, which improves
+  compatibility with PgPool-II ([#1188]).
+
 [`sslnegotiation`]: https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLNEGOTIATION
 [#595]: https://github.com/lib/pq/pull/595
 [#745]: https://github.com/lib/pq/pull/745
@@ -99,6 +102,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 [#1179]: https://github.com/lib/pq/pull/1179
 [#1180]: https://github.com/lib/pq/pull/1180
 [#1184]: https://github.com/lib/pq/pull/1184
+[#1188]: https://github.com/lib/pq/pull/1188
 [#1211]: https://github.com/lib/pq/pull/1211
 [#1212]: https://github.com/lib/pq/pull/1212
 [#1214]: https://github.com/lib/pq/pull/1214
