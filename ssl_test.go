@@ -87,15 +87,7 @@ func TestSSLVerifyFull(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	{
-		var x509err x509.UnknownAuthorityError
-		if !errors.As(err, &x509err) {
-			var x509err x509.HostnameError
-			if !errors.As(err, &x509err) {
-				t.Fatalf("expected x509.UnknownAuthorityError or x509.HostnameError, got %#+v", err)
-			}
-		}
-	}
+	assertInvalidCertificate(t, err)
 
 	rootCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "root.crt")
 	rootCert := "sslrootcert=" + rootCertPath + " "
@@ -172,7 +164,7 @@ func TestSSLVerifyCA(t *testing.T) {
 	{
 		_, err := openSSLConn(t, "host=postgres sslmode=verify-ca user=pqgossltest")
 		var x509err x509.UnknownAuthorityError
-		if !errors.As(err, &x509err) {
+		if !errors.As(err, &x509err) && err.Error() != errMacOsCertificateNotCompliant {
 			t.Fatalf("expected %T, got %#+v", x509.UnknownAuthorityError{}, err)
 		}
 	}
@@ -181,7 +173,7 @@ func TestSSLVerifyCA(t *testing.T) {
 	{
 		_, err := openSSLConn(t, "host=postgres sslmode=verify-ca user=pqgossltest sslrootcert=''")
 		var x509err x509.UnknownAuthorityError
-		if !errors.As(err, &x509err) {
+		if !errors.As(err, &x509err) && err.Error() != errMacOsCertificateNotCompliant {
 			t.Fatalf("expected %T, got %#+v", x509.UnknownAuthorityError{}, err)
 		}
 	}
