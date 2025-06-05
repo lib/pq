@@ -300,6 +300,45 @@ func TestSSLClientCertificates(t *testing.T) {
 	}
 }
 
+// Authenticate over SSL using inline client certificates
+func TestSSLInlineClientCertificates(t *testing.T) {
+	maybeSkipSSLTests(t)
+	// Environment sanity check: should fail without SSL
+	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
+
+	certpath, ok := os.LookupEnv("PQSSLCERTTEST_PATH")
+	if !ok {
+		t.Fatalf("PQSSLCERTTEST_PATH not present in environment")
+	}
+
+	sslcertBytes, err := os.ReadFile(filepath.Join(certpath, "postgresql.crt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sslcert := string(sslcertBytes)
+
+	sslkeyBytes, err := os.ReadFile(filepath.Join(certpath, "postgresql.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sslkey := string(sslkeyBytes)
+
+	db, err := openSSLConn(t, "sslmode=require user=pqgosslcert sslinline=true sslcert='"+sslcert+"' sslkey='"+sslkey+"'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query("SELECT 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Check that clint sends SNI data when `sslsni` is not disabled
 func TestSNISupport(t *testing.T) {
 	t.Parallel()
