@@ -41,11 +41,15 @@ func ParseURL(url string) (string, error) {
 
 	var kvs []string
 	escaper := strings.NewReplacer(`'`, `\'`, `\`, `\\`)
-	accrue := func(k, v string) {
-		if v != "" {
-			kvs = append(kvs, k+"='"+escaper.Replace(v)+"'")
+	accrue := func(key, value string) {
+		if value == "" {
+			return
 		}
+		escapedValue := escaper.Replace(value)
+		entry := fmt.Sprintf("%s='%s'", key, escapedValue)
+		kvs = append(kvs, entry)
 	}
+
 
 	if u.User != nil {
 		v := u.User.Username()
