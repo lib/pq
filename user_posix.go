@@ -1,6 +1,4 @@
-// Package pq is a pure Go Postgres driver for the database/sql package.
-
-//go:build aix || darwin || dragonfly || freebsd || (linux && !android) || nacl || netbsd || openbsd || plan9 || solaris || rumprun || illumos
+//go:build aix || darwin || dragonfly || freebsd || (linux && !android && !appengine) || nacl || netbsd || openbsd || plan9 || solaris || rumprun || illumos
 
 package pq
 
