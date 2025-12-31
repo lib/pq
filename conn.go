@@ -43,7 +43,8 @@ var (
 
 // Compile time validation that our types implement the expected interfaces
 var (
-	_ driver.Driver = Driver{}
+	_ driver.Driver    = Driver{}
+	_ driver.Validator = &conn{}
 )
 
 // Driver is the Postgres database driver.
