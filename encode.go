@@ -19,7 +19,7 @@ import (
 
 var time2400Regex = regexp.MustCompile(`^(24:00(?::00(?:\.0+)?)?)(?:[Z+-].*)?$`)
 
-func binaryEncode(parameterStatus *parameterStatus, x interface{}) []byte {
+func binaryEncode(parameterStatus *parameterStatus, x any) []byte {
 	switch v := x.(type) {
 	case []byte:
 		return v
@@ -28,7 +28,7 @@ func binaryEncode(parameterStatus *parameterStatus, x interface{}) []byte {
 	}
 }
 
-func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) []byte {
+func encode(parameterStatus *parameterStatus, x any, pgtypOid oid.Oid) []byte {
 	switch v := x.(type) {
 	case int64:
 		return strconv.AppendInt(nil, v, 10)
@@ -58,7 +58,7 @@ func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) [
 	panic("not reached")
 }
 
-func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid, f format) interface{} {
+func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid, f format) any {
 	switch f {
 	case formatBinary:
 		return binaryDecode(parameterStatus, s, typ)
@@ -69,7 +69,7 @@ func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid, f format) i
 	}
 }
 
-func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{} {
+func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) any {
 	switch typ {
 	case oid.T_bytea:
 		return s
@@ -93,7 +93,7 @@ func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) inter
 	panic("not reached")
 }
 
-func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{} {
+func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) any {
 	switch typ {
 	case oid.T_char, oid.T_varchar, oid.T_text:
 		return string(s)
@@ -135,7 +135,7 @@ func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interfa
 
 // appendEncodedText encodes item in text format as required by COPY
 // and appends to buf
-func appendEncodedText(parameterStatus *parameterStatus, buf []byte, x interface{}) []byte {
+func appendEncodedText(parameterStatus *parameterStatus, buf []byte, x any) []byte {
 	switch v := x.(type) {
 	case int64:
 		return strconv.AppendInt(buf, v, 10)
@@ -355,7 +355,7 @@ func disableInfinityTs() {
 // setting ("ISO, MDY"), the only one we currently support. This
 // accounts for the discrepancies between the parsing available with
 // time.Parse and the Postgres date formatting quirks.
-func parseTs(currentLocation *time.Location, str string) interface{} {
+func parseTs(currentLocation *time.Location, str string) any {
 	switch str {
 	case "-infinity":
 		if infinityTsEnabled {
@@ -618,7 +618,7 @@ type NullTime struct {
 }
 
 // Scan implements the Scanner interface.
-func (nt *NullTime) Scan(value interface{}) error {
+func (nt *NullTime) Scan(value any) error {
 	nt.Time, nt.Valid = value.(time.Time)
 	return nil
 }

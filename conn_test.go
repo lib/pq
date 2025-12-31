@@ -16,7 +16,7 @@ import (
 )
 
 type Fatalistic interface {
-	Fatal(args ...interface{})
+	Fatal(args ...any)
 }
 
 func forceBinaryParameters() bool {
@@ -549,7 +549,7 @@ func TestEncodeDecode(t *testing.T) {
 	var got2 string
 	var got3 = sql.NullInt64{Valid: true}
 	var got4 time.Time
-	var got5, got6, got7, got8 interface{}
+	var got5, got6, got7, got8 any
 
 	err = r.Scan(&got1, &got2, &got3, &got4, &got5, &got6, &got7, &got8)
 	if err != nil {
