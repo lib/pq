@@ -308,7 +308,7 @@ func TestTimestampWithTimeZone(t *testing.T) {
 		// use the full range of the Nanosecond argument
 		refTime := time.Date(2012, 11, 6, 10, 23, 42, 123456000, loc)
 
-		for _, pgTimeZone := range []string{"US/Eastern", "Australia/Darwin"} {
+		for _, pgTimeZone := range []string{"America/New_York", "Australia/Darwin"} {
 			// Switch Postgres's timezone to test different output timestamp formats
 			_, err = tx.Exec(fmt.Sprintf("set time zone '%s'", pgTimeZone))
 			if err != nil {
