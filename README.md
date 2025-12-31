@@ -1,10 +1,10 @@
 # pq - A pure Go postgres driver for Go's database/sql package
 
-[![GoDoc](https://godoc.org/github.com/lib/pq?status.svg)](https://pkg.go.dev/github.com/lib/pq?tab=doc)
+API docs: https://pkg.go.dev/github.com/lib/pq
 
-## Install
+Install with:
 
-	go get github.com/lib/pq
+    go get github.com/lib/pq@latest
 
 ## Features
 
@@ -24,13 +24,3 @@
 ## Tests
 
 `go test` is used for testing.  See [TESTS.md](TESTS.md) for more details.
-
-## Status
-
-This package is currently in maintenance mode, which means:
-1.   It generally does not accept new features.
-2.   It does accept bug fixes and version compatability changes provided by the community.
-3.   Maintainers usually do not resolve reported issues.
-4.   Community members are encouraged to help each other with reported issues.
-
-For users that require new features or reliable resolution of reported bugs, we recommend using [pgx](https://github.com/jackc/pgx) which is under active development.
