@@ -34,7 +34,7 @@ func BenchmarkSelectSeries(b *testing.B) {
 	benchQuery(b, selectSeriesQuery, &result)
 }
 
-func benchQuery(b *testing.B, query string, result interface{}) {
+func benchQuery(b *testing.B, query string, result any) {
 	b.StopTimer()
 	db := openTestConn(b)
 	defer db.Close()
@@ -45,7 +45,7 @@ func benchQuery(b *testing.B, query string, result interface{}) {
 	}
 }
 
-func benchQueryLoop(b *testing.B, db *sql.DB, query string, result interface{}) {
+func benchQueryLoop(b *testing.B, db *sql.DB, query string, result any) {
 	rows, err := db.Query(query)
 	if err != nil {
 		b.Fatal(err)
@@ -181,7 +181,7 @@ func BenchmarkPreparedSelectSeries(b *testing.B) {
 	benchPreparedQuery(b, selectSeriesQuery, &result)
 }
 
-func benchPreparedQuery(b *testing.B, query string, result interface{}) {
+func benchPreparedQuery(b *testing.B, query string, result any) {
 	b.StopTimer()
 	db := openTestConn(b)
 	defer db.Close()
@@ -197,7 +197,7 @@ func benchPreparedQuery(b *testing.B, query string, result interface{}) {
 	}
 }
 
-func benchPreparedQueryLoop(b *testing.B, db *sql.DB, stmt *sql.Stmt, result interface{}) {
+func benchPreparedQueryLoop(b *testing.B, db *sql.DB, stmt *sql.Stmt, result any) {
 	rows, err := stmt.Query()
 	if err != nil {
 		b.Fatal(err)

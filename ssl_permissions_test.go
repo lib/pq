@@ -1,5 +1,4 @@
 //go:build !windows
-// +build !windows
 
 package pq
 
@@ -34,7 +33,7 @@ func (stat_t *stat_t_wrapper) IsDir() bool {
 	return true
 }
 
-func (stat_t *stat_t_wrapper) Sys() interface{} {
+func (stat_t *stat_t_wrapper) Sys() any {
 	return &stat_t.stat
 }
 

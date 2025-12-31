@@ -12,10 +12,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"os"
 	"os/user"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -44,7 +44,8 @@ var (
 
 // Compile time validation that our types implement the expected interfaces
 var (
-	_ driver.Driver = Driver{}
+	_ driver.Driver    = Driver{}
+	_ driver.Validator = &conn{}
 )
 
 // Driver is the Postgres database driver.
@@ -437,8 +438,10 @@ func dial(ctx context.Context, d Dialer, o values) (net.Conn, error) {
 func network(o values) (string, string) {
 	host := o["host"]
 
-	if strings.HasPrefix(host, "/") {
-		sockPath := path.Join(host, ".s.PGSQL."+o["port"])
+	// UNIX domain sockets are either represented by an (absolute) file system
+	// path or they live in the abstract name space (starting with an @).
+	if filepath.IsAbs(host) || strings.HasPrefix(host, "@") {
+		sockPath := filepath.Join(host, ".s.PGSQL."+o["port"])
 		return "unix", sockPath
 	}
 
@@ -778,9 +781,7 @@ func (noRows) RowsAffected() (int64, error) {
 
 // Decides which column formats to use for a prepared statement.  The input is
 // an array of type oids, one element per result column.
-func decideColumnFormats(
-	colTyps []fieldDesc, forceText bool,
-) (colFmts []format, colFmtData []byte) {
+func decideColumnFormats(colTyps []fieldDesc, forceText bool) (colFmts []format, colFmtData []byte) {
 	if len(colTyps) == 0 {
 		return nil, colFmtDataAllText
 	}
@@ -820,6 +821,9 @@ func decideColumnFormats(
 		return colFmts, colFmtDataAllText
 	} else {
 		colFmtData = make([]byte, 2+len(colFmts)*2)
+		if len(colFmts) > math.MaxUint16 {
+			errorf("too many columns (%d > math.MaxUint16)", len(colFmts))
+		}
 		binary.BigEndian.PutUint16(colFmtData, uint16(len(colFmts)))
 		for i, v := range colFmts {
 			binary.BigEndian.PutUint16(colFmtData[2+i*2:], uint16(v))

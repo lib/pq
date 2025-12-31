@@ -9,7 +9,7 @@ import (
 )
 
 type Fatalistic interface {
-	Fatal(args ...interface{})
+	Fatal(args ...any)
 }
 
 func openTestConn(t Fatalistic) *sql.DB {

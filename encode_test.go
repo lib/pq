@@ -308,7 +308,7 @@ func TestTimestampWithTimeZone(t *testing.T) {
 		// use the full range of the Nanosecond argument
 		refTime := time.Date(2012, 11, 6, 10, 23, 42, 123456000, loc)
 
-		for _, pgTimeZone := range []string{"US/Eastern", "Australia/Darwin"} {
+		for _, pgTimeZone := range []string{"America/New_York", "Australia/Darwin"} {
 			// Switch Postgres's timezone to test different output timestamp formats
 			_, err = tx.Exec(fmt.Sprintf("set time zone '%s'", pgTimeZone))
 			if err != nil {
@@ -394,7 +394,7 @@ func TestInfinityTimestamp(t *testing.T) {
 		Query                  string
 		Param                  string
 		ExpectedErrorStrRegexp *regexp.Regexp
-		ExpectedVal            interface{}
+		ExpectedVal            any
 	}
 	tc := testCases{
 		{"SELECT $1::timestamp", "-infinity", expectedErrorStrRegexp, "-infinity"},
@@ -412,7 +412,7 @@ func TestInfinityTimestamp(t *testing.T) {
 	}
 	// yield []byte
 	for _, q := range tc {
-		var resultI interface{}
+		var resultI any
 		err = db.QueryRow(q.Query, q.Param).Scan(&resultI)
 		if err != nil {
 			t.Errorf("Scanning -/+infinity, expected no error, got %q", err)

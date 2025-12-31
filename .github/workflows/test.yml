@@ -3,27 +3,21 @@ name: Test
 on: [push, pull_request]
 
 jobs:
+  staticcheck:
+    name:    'staticcheck'
+    runs-on: 'ubuntu-latest'
+    steps:
+      - uses: 'actions/checkout@v6'
+      - uses: 'dominikh/staticcheck-action@v1.3.1'
+        with: {version: '2025.1.1'}
+
   test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        postgres:
-          - '15'
-          - '14'
-          - '13'
-          - '12'
-          - '11'
-          - '10'
-          - '9.6'
-        go:
-          - '1.20'
-          - '1.19'
-          - '1.18'
-          - '1.17'
-          - '1.16'
-          - '1.15'
-          - '1.14'
+        postgres: ['17', '16', '15', '14']
+        go:       ['1.25', '1.18']
     steps:
     - name: setup postgres pre-reqs
       run: |
@@ -174,16 +168,16 @@ jobs:
         docker exec pg createuser -h localhost -U postgres -DRS pqgosslcert
 
     - name: check out code into the Go module directory
-      uses: actions/checkout@v3
+      uses: actions/checkout@v6
 
     - name: set up go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v6
       with:
         go-version: ${{ matrix.go }}
       id: go
 
     - name: set key perms
-      run: sudo chmod 600 certs/postgresql.key
+      run: sudo chmod 600 testdata/certs/postgresql.key
 
     - name: run tests
       env:
@@ -191,24 +185,10 @@ jobs:
         PGHOST: localhost
         PGPORT: 5432
         PQGOSSLTESTS: 1
-        PQSSLCERTTEST_PATH: certs
+        PQSSLCERTTEST_PATH: testdata/certs
       run: |
-        PQTEST_BINARY_PARAMETERS=no go test -race -v ./...
-        PQTEST_BINARY_PARAMETERS=yes go test -race -v ./...
-
-    - name: install goimports
-      run: go get golang.org/x/tools/cmd/goimports
-
-    - name: install staticcheck
-      run: |
-        wget https://github.com/dominikh/go-tools/releases/latest/download/staticcheck_linux_amd64.tar.gz -O - | tar -xz staticcheck
-
-    - name: run goimports
-      run: |
-        goimports -d -e . | awk '{ print } END { exit NR == 0 ? 0 : 1 }'
-
-    - name: run staticcheck
-      run: ./staticcheck/staticcheck -go 1.13 ./...
+        PQTEST_BINARY_PARAMETERS=no go test -race ./...
+        PQTEST_BINARY_PARAMETERS=yes go test -race ./...
 
     - name: build
       run: go build -v .
