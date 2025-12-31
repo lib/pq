@@ -884,13 +884,71 @@ Close:
 	return
 }
 
-func scanLinearArray(src, del []byte, typ string) (elems [][]byte, err error) {
-	dims, elems, err := parseArray(src, del)
-	if err != nil {
-		return nil, err
+// scanLinearArray parses a PostgreSQL array literal into a slice of byte slices.
+// It supports both standard 1-based arrays (e.g., "{1,2,3}") and non-1-based
+// arrays with explicit bounds (e.g., "[0:2]={1,2,3}").
+func scanLinearArray(src []byte, delim []byte, typeName string) (elems [][]byte, err error) {
+	// Check for non-1-based array prefix (e.g., "[0:2]=")
+	if len(src) > 0 && src[0] == '[' {
+		eqIdx := bytes.IndexByte(src, '=')
+		if eqIdx == -1 {
+			return nil, fmt.Errorf("pq: unable to parse array; expected '=' in dimension prefix")
+		}
+		// Skip the prefix and start parsing at the '{'
+		src = src[eqIdx+1:]
+		if len(src) == 0 || src[0] != '{' {
+			return nil, fmt.Errorf("pq: unable to parse array; expected '{' after dimension prefix")
+		}
 	}
-	if len(dims) > 1 {
-		return nil, fmt.Errorf("pq: cannot convert ARRAY%s to %s", strings.Replace(fmt.Sprint(dims), " ", "][", -1), typ)
+
+	// ...existing code for parsing the array...
+	var depth, start int
+	var quoted, afterValue bool
+
+	for i := 0; i < len(src); i++ {
+		switch {
+		case src[i] == '{' && !quoted:
+			if depth == 0 {
+				start = i + 1
+			}
+			depth++
+		case src[i] == '}' && !quoted:
+			depth--
+			if depth == 0 {
+				if start < i {
+					elems = append(elems, src[start:i])
+				}
+				return trimArray(elems), nil
+			} else if depth < 0 {
+				return nil, fmt.Errorf("pq: unable to parse %s; too many closing braces", typeName)
+			}
+		case src[i] == '"' && (i == 0 || src[i-1] != '\\'):
+			quoted = !quoted
+		case bytes.Equal(src[i:i+len(delim)], delim) && !quoted && depth == 1:
+			if !afterValue {
+				elems = append(elems, src[start:i])
+			}
+			start = i + len(delim)
+			afterValue = false
+		}
 	}
-	return elems, err
+
+	return nil, fmt.Errorf("pq: unable to parse %s; unexpected end of input", typeName)
+}
+
+// trimArray removes empty elements and unquotes quoted elements.
+func trimArray(elems [][]byte) [][]byte {
+	// ...existing code...
+	var result [][]byte
+	for _, elem := range elems {
+		if len(bytes.TrimSpace(elem)) == 0 {
+			continue
+		}
+		if elem[0] == '"' && elem[len(elem)-1] == '"' {
+			elem = bytes.Replace(elem[1:len(elem)-1], []byte(`\"`), []byte(`"`), -1)
+			elem = bytes.Replace(elem, []byte(`\\`), []byte(`\`), -1)
+		}
+		result = append(result, elem)
+	}
+	return result
 }

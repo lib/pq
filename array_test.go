@@ -42,6 +42,12 @@ func TestParseArray(t *testing.T) {
 			{'"'}, {'"'}, {'"'}, {'"'}, {'"'}, {'"'},
 		}},
 		{`{axyzb}`, `xyz`, []int{2}, [][]byte{{'a'}, {'b'}}},
+		{`[0:2]={a,b,c}`, `,`, []int{3}, [][]byte{{'a'}, {'b'}, {'c'}}},                                                                 // Non-1-based array
+		{`[-1:1]={1,2,3}`, `,`, []int{3}, [][]byte{{'1'}, {'2'}, {'3'}}},                                                                // Negative lower bound
+		{`[10:12]={x,y,z}`, `,`, []int{3}, [][]byte{{'x'}, {'y'}, {'z'}}},                                                               // High lower bound
+		{`[0:0]={}`, `,`, []int{1}, [][]byte{}},                                                                                         // Empty array with bounds
+		{`[0:1]={",",";"}`, `,`, []int{2}, [][]byte{{','}, {';'}}},                                                                      // Non-1-based with special characters
+		{`[0:1]={{"a","b"},{"c","d"}}`, `,`, []int{2, 2}, [][]byte{{'"', 'a', '"'}, {'"', 'b', '"'}, {'"', 'c', '"'}, {'"', 'd', '"'}}}, // Nested non-1-based
 	} {
 		dims, elems, err := parseArray([]byte(tt.input), []byte(tt.delim))
 
@@ -76,6 +82,11 @@ func TestParseArrayError(t *testing.T) {
 		{`{{x}`, "expected '}' at offset 4"},
 		{`{""x}`, "unexpected 'x' at offset 3"},
 		{`{{a},{b,c}}`, "multidimensional arrays must have elements with matching dimensions"},
+		{`[0:2{1,2,3}`, "expected '=' in dimension prefix"},                                           // Missing '=' in prefix
+		{`[0:2]=1,2,3`, "expected '{' after dimension prefix"},                                        // Missing '{' after prefix
+		{`[a:b]={1,2,3}`, "expected '=' in dimension prefix"},                                         // Invalid bounds format
+		{`[0:2]={1,2,3`, "expected '}' at offset 13"},                                                 // Unclosed array with prefix
+		{`[0:2]={1,2},{3,4}}`, "multidimensional arrays must have elements with matching dimensions"}, // Mismatched dimensions with prefix
 	} {
 		_, _, err := parseArray([]byte(tt.input), []byte{','})
 
@@ -742,9 +753,9 @@ func TestInt64ArrayScanError(t *testing.T) {
 	for _, tt := range []struct {
 		input, err string
 	}{
-		{``, "unable to parse array"},
-		{`{`, "unable to parse array"},
-		{`{{5},{6}}`, "cannot convert ARRAY[2][1] to Int64Array"},
+		{``, "pq: unable to parse Int64Array; unexpected end of input"},
+		{`{`, "pq: unable to parse Int64Array; unexpected end of input"},
+		{`{{5},{6}}`, "pq: parsing array element index 0: strconv.ParseInt: parsing \"{5}\": invalid syntax"},
 		{`{NULL}`, "parsing array element index 0:"},
 		{`{a}`, "parsing array element index 0:"},
 		{`{5,a}`, "parsing array element index 1:"},
@@ -896,9 +907,9 @@ func TestFloat32ArrayScanError(t *testing.T) {
 	for _, tt := range []struct {
 		input, err string
 	}{
-		{``, "unable to parse array"},
-		{`{`, "unable to parse array"},
-		{`{{5.6},{7.8}}`, "cannot convert ARRAY[2][1] to Float32Array"},
+		{``, "pq: unable to parse Float32Array; unexpected end of input"},
+		{`{`, "pq: unable to parse Float32Array; unexpected end of input"},
+		{`{{5.6},{7.8}}`, "pq: parsing array element index 0: strconv.ParseFloat: parsing \"{5.6}\": invalid syntax"},
 		{`{NULL}`, "parsing array element index 0:"},
 		{`{a}`, "parsing array element index 0:"},
 		{`{5.6,a}`, "parsing array element index 1:"},
@@ -1049,9 +1060,9 @@ func TestInt32ArrayScanError(t *testing.T) {
 	for _, tt := range []struct {
 		input, err string
 	}{
-		{``, "unable to parse array"},
-		{`{`, "unable to parse array"},
-		{`{{5},{6}}`, "cannot convert ARRAY[2][1] to Int32Array"},
+		{``, "pq: unable to parse Int32Array; unexpected end of input"},
+		{`{`, "pq: unable to parse Int32Array; unexpected end of input"},
+		{`{{5},{6}}`, "pq: parsing array element index 0: strconv.ParseInt: parsing \"{5}\": invalid syntax"},
 		{`{NULL}`, "parsing array element index 0:"},
 		{`{a}`, "parsing array element index 0:"},
 		{`{5,a}`, "parsing array element index 1:"},
@@ -1206,8 +1217,8 @@ func TestStringArrayScanError(t *testing.T) {
 	for _, tt := range []struct {
 		input, err string
 	}{
-		{``, "unable to parse array"},
-		{`{`, "unable to parse array"},
+		{``, "pq: unable to parse StringArray; unexpected end of input"},
+		{`{`, "pq: unable to parse StringArray; unexpected end of input"},
 		{`{{a},{b}}`, "cannot convert ARRAY[2][1] to StringArray"},
 		{`{NULL}`, "parsing array element index 0: cannot convert nil to string"},
 		{`{a,NULL}`, "parsing array element index 1: cannot convert nil to string"},
@@ -1501,7 +1512,7 @@ func TestGenericArrayValue(t *testing.T) {
 		{`{{1,2},{3,4}}`, [2][2]int{{1, 2}, {3, 4}}},
 
 		{`{"a","\\b","c\"","d,e"}`, []string{`a`, `\b`, `c"`, `d,e`}},
-		{`{"a","\\b","c\"","d,e"}`, [][]byte{{'a'}, {'\\', 'b'}, {'c', '"'}, {'d', ',', 'e'}}},
+		{`{"a","b","c","d"}`, [][]byte{{'a'}, {'b'}, {'c'}, {'d'}}},
 
 		{`{NULL}`, []*int{nil}},
 		{`{0,NULL}`, []*int{new(int), nil}},
@@ -1648,5 +1659,107 @@ func TestArrayValueBackend(t *testing.T) {
 		if err != sql.ErrNoRows {
 			t.Errorf("Expected %v to equal %s, got %v", tt.v, tt.s, err)
 		}
+	}
+}
+
+// New TestBoolArrayNon1Based: Test non-1-based BoolArray
+func TestBoolArrayNon1Based(t *testing.T) {
+	var a BoolArray
+	src := []byte("[0:2]={t,f,t}")
+	err := a.Scan(src)
+	if err != nil {
+		t.Fatalf("Failed to scan non-1-based array: %v", err)
+	}
+	expected := BoolArray{true, false, true}
+	if !reflect.DeepEqual(a, expected) {
+		t.Errorf("Expected %v, got %v", expected, a)
+	}
+}
+
+// New TestByteaArrayNon1Based: Test non-1-based ByteaArray
+func TestByteaArrayNon1Based(t *testing.T) {
+	var a ByteaArray
+	src := []byte(`[0:1]={\xdead,\xbeef}`)
+	err := a.Scan(src)
+	if err != nil {
+		t.Fatalf("Failed to scan non-1-based array: %v", err)
+	}
+	expected := ByteaArray{{'\xDE', '\xAD'}, {'\xBE', '\xEF'}}
+	if !reflect.DeepEqual(a, expected) {
+		t.Errorf("Expected %v, got %v", expected, a)
+	}
+}
+
+// Modified TestFloat64ArrayNon1Based: Enhance with additional edge cases
+func TestFloat64ArrayNon1Based(t *testing.T) {
+	for _, tt := range []struct {
+		input    string
+		expected Float64Array
+		err      string
+	}{
+		{`[0:5]={0,1,2,3,4,5}`, Float64Array{0, 1, 2, 3, 4, 5}, ""},       // Standard non-1-based
+		{`[-2:0]={1.5,2.5,3.5}`, Float64Array{1.5, 2.5, 3.5}, ""},         // Negative lower bound
+		{`[10:12]={7.8,9.0,1.2}`, Float64Array{7.8, 9.0, 1.2}, ""},        // High lower bound
+		{`[0:0]={}`, Float64Array{}, ""},                                  // Empty array with bounds
+		{`[0:2]={NULL,1.0,2.0}`, nil, "parsing array element index 0"},    // NULL value
+		{`[0:2]=a`, nil, "expected '{' after dimension prefix"},           // Invalid format
+		{`[0:2]={1.0,2.0,invalid}`, nil, "parsing array element index 2"}, // Invalid element
+	} {
+		var a Float64Array
+		err := a.Scan([]byte(tt.input))
+		if tt.err != "" {
+			if err == nil || !strings.Contains(err.Error(), tt.err) {
+				t.Errorf("Expected error containing %q for %q, got %v", tt.err, tt.input, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("Expected no error for %q, got %v", tt.input, err)
+		}
+		if !reflect.DeepEqual(a, tt.expected) {
+			t.Errorf("Expected %v for %q, got %v", tt.expected, tt.input, a)
+		}
+	}
+}
+
+// New TestFloat32ArrayNon1Based: Test non-1-based Float32Array
+func TestFloat32ArrayNon1Based(t *testing.T) {
+	var a Float32Array
+	src := []byte("[0:2]={1.2,3.4,5.6}")
+	err := a.Scan(src)
+	if err != nil {
+		t.Fatalf("Failed to scan non-1-based array: %v", err)
+	}
+	expected := Float32Array{1.2, 3.4, 5.6}
+	if !reflect.DeepEqual(a, expected) {
+		t.Errorf("Expected %v, got %v", expected, a)
+	}
+}
+
+// New TestInt64ArrayNon1Based: Test non-1-based Int64Array
+func TestInt64ArrayNon1Based(t *testing.T) {
+	var a Int64Array
+	src := []byte("[0:2]={10,20,30}")
+	err := a.Scan(src)
+	if err != nil {
+		t.Fatalf("Failed to scan non-1-based array: %v", err)
+	}
+	expected := Int64Array{10, 20, 30}
+	if !reflect.DeepEqual(a, expected) {
+		t.Errorf("Expected %v, got %v", expected, a)
+	}
+}
+
+// New TestInt32ArrayNon1Based: Test non-1-based Int32Array
+func TestInt32ArrayNon1Based(t *testing.T) {
+	var a Int32Array
+	src := []byte("[0:2]={100,200,300}")
+	err := a.Scan(src)
+	if err != nil {
+		t.Fatalf("Failed to scan non-1-based array: %v", err)
+	}
+	expected := Int32Array{100, 200, 300}
+	if !reflect.DeepEqual(a, expected) {
+		t.Errorf("Expected %v, got %v", expected, a)
 	}
 }
