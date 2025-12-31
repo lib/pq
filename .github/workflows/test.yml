@@ -177,7 +177,7 @@ jobs:
       id: go
 
     - name: set key perms
-      run: sudo chmod 600 certs/postgresql.key
+      run: sudo chmod 600 testdata/certs/postgresql.key
 
     - name: run tests
       env:
@@ -185,7 +185,7 @@ jobs:
         PGHOST: localhost
         PGPORT: 5432
         PQGOSSLTESTS: 1
-        PQSSLCERTTEST_PATH: certs
+        PQSSLCERTTEST_PATH: testdata/certs
       run: |
         PQTEST_BINARY_PARAMETERS=no go test -race ./...
         PQTEST_BINARY_PARAMETERS=yes go test -race ./...
