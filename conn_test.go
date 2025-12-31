@@ -197,15 +197,14 @@ localhost:*:*:*:pass_C
 
 	assertPassword := func(extra values, expected string) {
 		o := values{
-			"host":               "localhost",
-			"sslmode":            "disable",
-			"connect_timeout":    "20",
-			"user":               "majid",
-			"port":               "5432",
-			"extra_float_digits": "2",
-			"dbname":             "pqgotest",
-			"client_encoding":    "UTF8",
-			"datestyle":          "ISO, MDY",
+			"host":            "localhost",
+			"sslmode":         "disable",
+			"connect_timeout": "20",
+			"user":            "majid",
+			"port":            "5432",
+			"dbname":          "pqgotest",
+			"client_encoding": "UTF8",
+			"datestyle":       "ISO, MDY",
 		}
 		for k, v := range extra {
 			o[k] = v
