@@ -124,7 +124,7 @@ func TestArrayScanner(t *testing.T) {
 		t.Errorf("Expected *ByteaArray, got %T", s)
 	}
 
-	for _, tt := range []interface{}{
+	for _, tt := range []any{
 		&[]sql.Scanner{},
 		&[][]bool{},
 		&[][]float64{},
@@ -176,7 +176,7 @@ func TestArrayValuer(t *testing.T) {
 		t.Errorf("Expected *ByteaArray, got %T", v)
 	}
 
-	for _, tt := range []interface{}{
+	for _, tt := range []any{
 		nil,
 		[]driver.Value{},
 		[][]bool{},
@@ -255,7 +255,7 @@ func TestBoolArrayScanBytes(t *testing.T) {
 
 func BenchmarkBoolArrayScanBytes(b *testing.B) {
 	var a BoolArray
-	var x interface{} = []byte(`{t,f,t,f,t,f,t,f,t,f}`)
+	var x any = []byte(`{t,f,t,f,t,f,t,f,t,f}`)
 
 	for i := 0; i < b.N; i++ {
 		a = BoolArray{}
@@ -409,7 +409,7 @@ func TestByteaArrayScanBytes(t *testing.T) {
 
 func BenchmarkByteaArrayScanBytes(b *testing.B) {
 	var a ByteaArray
-	var x interface{} = []byte(`{"\\xfe","\\xff","\\xdead","\\xbeef","\\xfe","\\xff","\\xdead","\\xbeef","\\xfe","\\xff"}`)
+	var x any = []byte(`{"\\xfe","\\xff","\\xdead","\\xbeef","\\xfe","\\xff","\\xdead","\\xbeef","\\xfe","\\xff"}`)
 
 	for i := 0; i < b.N; i++ {
 		a = ByteaArray{}
@@ -563,7 +563,7 @@ func TestFloat64ArrayScanBytes(t *testing.T) {
 
 func BenchmarkFloat64ArrayScanBytes(b *testing.B) {
 	var a Float64Array
-	var x interface{} = []byte(`{1.2,3.4,5.6,7.8,9.01,2.34,5.67,8.90,1.234,5.678}`)
+	var x any = []byte(`{1.2,3.4,5.6,7.8,9.01,2.34,5.67,8.90,1.234,5.678}`)
 
 	for i := 0; i < b.N; i++ {
 		a = Float64Array{}
@@ -716,7 +716,7 @@ func TestInt64ArrayScanBytes(t *testing.T) {
 
 func BenchmarkInt64ArrayScanBytes(b *testing.B) {
 	var a Int64Array
-	var x interface{} = []byte(`{1,2,3,4,5,6,7,8,9,0}`)
+	var x any = []byte(`{1,2,3,4,5,6,7,8,9,0}`)
 
 	for i := 0; i < b.N; i++ {
 		a = Int64Array{}
@@ -870,7 +870,7 @@ func TestFloat32ArrayScanBytes(t *testing.T) {
 
 func BenchmarkFloat32ArrayScanBytes(b *testing.B) {
 	var a Float32Array
-	var x interface{} = []byte(`{1.2,3.4,5.6,7.8,9.01,2.34,5.67,8.90,1.234,5.678}`)
+	var x any = []byte(`{1.2,3.4,5.6,7.8,9.01,2.34,5.67,8.90,1.234,5.678}`)
 
 	for i := 0; i < b.N; i++ {
 		a = Float32Array{}
@@ -1023,7 +1023,7 @@ func TestInt32ArrayScanBytes(t *testing.T) {
 
 func BenchmarkInt32ArrayScanBytes(b *testing.B) {
 	var a Int32Array
-	var x interface{} = []byte(`{1,2,3,4,5,6,7,8,9,0}`)
+	var x any = []byte(`{1,2,3,4,5,6,7,8,9,0}`)
 
 	for i := 0; i < b.N; i++ {
 		a = Int32Array{}
@@ -1177,8 +1177,8 @@ func TestStringArrayScanBytes(t *testing.T) {
 
 func BenchmarkStringArrayScanBytes(b *testing.B) {
 	var a StringArray
-	var x interface{} = []byte(`{a,b,c,d,e,f,g,h,i,j}`)
-	var y interface{} = []byte(`{"\a","\b","\c","\d","\e","\f","\g","\h","\i","\j"}`)
+	var x any = []byte(`{a,b,c,d,e,f,g,h,i,j}`)
+	var y any = []byte(`{"\a","\b","\c","\d","\e","\f","\g","\h","\i","\j"}`)
 
 	for i := 0; i < b.N; i++ {
 		a = StringArray{}
@@ -1275,7 +1275,7 @@ func TestGenericArrayScanUnsupported(t *testing.T) {
 	var nsa [1]sql.NullString
 
 	for _, tt := range []struct {
-		src, dest interface{}
+		src, dest any
 		err       string
 	}{
 		{nil, nil, "destination <nil> is not a pointer to array or slice"},
@@ -1362,8 +1362,8 @@ func TestGenericArrayScanScannerSliceBytes(t *testing.T) {
 
 func BenchmarkGenericArrayScanScannerSliceBytes(b *testing.B) {
 	var a GenericArray
-	var x interface{} = []byte(`{a,b,c,d,e,f,g,h,i,j}`)
-	var y interface{} = []byte(`{"\a","\b","\c","\d","\e","\f","\g","\h","\i","\j"}`)
+	var x any = []byte(`{a,b,c,d,e,f,g,h,i,j}`)
+	var y any = []byte(`{"\a","\b","\c","\d","\e","\f","\g","\h","\i","\j"}`)
 
 	for i := 0; i < b.N; i++ {
 		a = GenericArray{new([]sql.NullString)}
@@ -1409,7 +1409,7 @@ func TestGenericArrayScanErrors(t *testing.T) {
 	var pss *[]string
 
 	for _, tt := range []struct {
-		src, dest interface{}
+		src, dest any
 		err       string
 	}{
 		{nil, pss, "destination *[]string is nil"},
@@ -1462,7 +1462,7 @@ func TestGenericArrayValue(t *testing.T) {
 		t.Errorf("Expected nil, got %q", result)
 	}
 
-	for _, tt := range []interface{}{
+	for _, tt := range []any{
 		[]bool(nil),
 		[][]int(nil),
 		[]*int(nil),
@@ -1486,7 +1486,7 @@ func TestGenericArrayValue(t *testing.T) {
 
 	for _, tt := range []struct {
 		result string
-		input  interface{}
+		input  any
 	}{
 		{`{}`, []bool{}},
 		{`{true}`, []bool{true}},
@@ -1530,12 +1530,12 @@ func TestGenericArrayValue(t *testing.T) {
 }
 
 func TestGenericArrayValueErrors(t *testing.T) {
-	v := []interface{}{func() {}}
+	v := []any{func() {}}
 	if _, err := (GenericArray{v}).Value(); err == nil {
 		t.Errorf("Expected error for %q, got nil", v)
 	}
 
-	v = []interface{}{nil, func() {}}
+	v = []any{nil, func() {}}
 	if _, err := (GenericArray{v}).Value(); err == nil {
 		t.Errorf("Expected error for %q, got nil", v)
 	}
@@ -1611,7 +1611,7 @@ func TestArrayScanBackend(t *testing.T) {
 	for _, tt := range []struct {
 		s string
 		d sql.Scanner
-		e interface{}
+		e any
 	}{
 		{`ARRAY[true, false]`, new(BoolArray), &BoolArray{true, false}},
 		{`ARRAY[E'\\xdead', E'\\xbeef']`, new(ByteaArray), &ByteaArray{{'\xDE', '\xAD'}, {'\xBE', '\xEF'}}},

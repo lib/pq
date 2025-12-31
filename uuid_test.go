@@ -34,7 +34,7 @@ func TestDecodeUUIDBackend(t *testing.T) {
 	defer db.Close()
 
 	var s = "a0ecc91d-a13f-4fe4-9fce-7e09777cc70a"
-	var scanned interface{}
+	var scanned any
 
 	err := db.QueryRow(`SELECT $1::uuid`, s).Scan(&scanned)
 	if err != nil {

@@ -394,7 +394,7 @@ func TestInfinityTimestamp(t *testing.T) {
 		Query                  string
 		Param                  string
 		ExpectedErrorStrRegexp *regexp.Regexp
-		ExpectedVal            interface{}
+		ExpectedVal            any
 	}
 	tc := testCases{
 		{"SELECT $1::timestamp", "-infinity", expectedErrorStrRegexp, "-infinity"},
@@ -412,7 +412,7 @@ func TestInfinityTimestamp(t *testing.T) {
 	}
 	// yield []byte
 	for _, q := range tc {
-		var resultI interface{}
+		var resultI any
 		err = db.QueryRow(q.Query, q.Param).Scan(&resultI)
 		if err != nil {
 			t.Errorf("Scanning -/+infinity, expected no error, got %q", err)

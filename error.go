@@ -461,12 +461,12 @@ type PGError interface {
 	Get(k byte) (v string)
 }
 
-func errorf(s string, args ...interface{}) {
+func errorf(s string, args ...any) {
 	panic(fmt.Errorf("pq: %s", fmt.Sprintf(s, args...)))
 }
 
 // TODO(ainar-g) Rename to errorf after removing panics.
-func fmterrorf(s string, args ...interface{}) error {
+func fmterrorf(s string, args ...any) error {
 	return fmt.Errorf("pq: %s", fmt.Sprintf(s, args...))
 }
 
