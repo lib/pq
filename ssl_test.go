@@ -87,15 +87,7 @@ func TestSSLVerifyFull(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	{
-		var x509err x509.UnknownAuthorityError
-		if !errors.As(err, &x509err) {
-			var x509err x509.HostnameError
-			if !errors.As(err, &x509err) {
-				t.Fatalf("expected x509.UnknownAuthorityError or x509.HostnameError, got %#+v", err)
-			}
-		}
-	}
+	assertInvalidCertificate(t, err)
 
 	rootCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "root.crt")
 	rootCert := "sslrootcert=" + rootCertPath + " "
@@ -172,7 +164,7 @@ func TestSSLVerifyCA(t *testing.T) {
 	{
 		_, err := openSSLConn(t, "host=postgres sslmode=verify-ca user=pqgossltest")
 		var x509err x509.UnknownAuthorityError
-		if !errors.As(err, &x509err) {
+		if !errors.As(err, &x509err) && err.Error() != errMacOsCertificateNotCompliant {
 			t.Fatalf("expected %T, got %#+v", x509.UnknownAuthorityError{}, err)
 		}
 	}
@@ -181,7 +173,7 @@ func TestSSLVerifyCA(t *testing.T) {
 	{
 		_, err := openSSLConn(t, "host=postgres sslmode=verify-ca user=pqgossltest sslrootcert=''")
 		var x509err x509.UnknownAuthorityError
-		if !errors.As(err, &x509err) {
+		if !errors.As(err, &x509err) && err.Error() != errMacOsCertificateNotCompliant {
 			t.Fatalf("expected %T, got %#+v", x509.UnknownAuthorityError{}, err)
 		}
 	}
@@ -297,6 +289,45 @@ func TestSSLClientCertificates(t *testing.T) {
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// Authenticate over SSL using inline client certificates
+func TestSSLInlineClientCertificates(t *testing.T) {
+	maybeSkipSSLTests(t)
+	// Environment sanity check: should fail without SSL
+	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
+
+	certpath, ok := os.LookupEnv("PQSSLCERTTEST_PATH")
+	if !ok {
+		t.Fatalf("PQSSLCERTTEST_PATH not present in environment")
+	}
+
+	sslcertBytes, err := os.ReadFile(filepath.Join(certpath, "postgresql.crt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sslcert := string(sslcertBytes)
+
+	sslkeyBytes, err := os.ReadFile(filepath.Join(certpath, "postgresql.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sslkey := string(sslkeyBytes)
+
+	db, err := openSSLConn(t, "sslmode=require user=pqgosslcert sslinline=true sslcert='"+sslcert+"' sslkey='"+sslkey+"'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query("SELECT 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

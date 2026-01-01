@@ -38,7 +38,7 @@ func (fd fieldDesc) Type() reflect.Type {
 	case oid.T_bytea:
 		return reflect.TypeOf([]byte(nil))
 	default:
-		return reflect.TypeOf(new(interface{})).Elem()
+		return reflect.TypeOf(new(any)).Elem()
 	}
 }
 

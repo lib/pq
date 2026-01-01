@@ -1,30 +1,27 @@
 //go:build go1.10
-// +build go1.10
 
 package pq_test
 
 import (
 	"database/sql"
-	"fmt"
+	"log"
 
 	"github.com/lib/pq"
 )
 
 func ExampleNewConnector() {
-	name := ""
-	connector, err := pq.NewConnector(name)
+	c, err := pq.NewConnector("postgres://")
 	if err != nil {
-		fmt.Println(err)
-		return
+		log.Fatalf("could not create connector: %v", err)
 	}
-	db := sql.OpenDB(connector)
+
+	db := sql.OpenDB(c)
 	defer db.Close()
 
 	// Use the DB
-	txn, err := db.Begin()
+	tx, err := db.Begin()
 	if err != nil {
-		fmt.Println(err)
-		return
+		log.Fatalf("could not start transaction: %v", err)
 	}
-	txn.Rollback()
+	tx.Rollback()
 }

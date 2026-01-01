@@ -1,5 +1,4 @@
 //go:build go1.9
-// +build go1.9
 
 package pq
 
@@ -15,7 +14,7 @@ func TestArrayArg(t *testing.T) {
 
 	for _, tc := range []struct {
 		pgType  string
-		in, out interface{}
+		in, out any
 	}{
 		{
 			pgType: "int[]",

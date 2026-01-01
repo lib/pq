@@ -16,7 +16,7 @@ import (
 )
 
 type Fatalistic interface {
-	Fatal(args ...interface{})
+	Fatal(args ...any)
 }
 
 func forceBinaryParameters() bool {
@@ -197,15 +197,14 @@ localhost:*:*:*:pass_C
 
 	assertPassword := func(extra values, expected string) {
 		o := values{
-			"host":               "localhost",
-			"sslmode":            "disable",
-			"connect_timeout":    "20",
-			"user":               "majid",
-			"port":               "5432",
-			"extra_float_digits": "2",
-			"dbname":             "pqgotest",
-			"client_encoding":    "UTF8",
-			"datestyle":          "ISO, MDY",
+			"host":            "localhost",
+			"sslmode":         "disable",
+			"connect_timeout": "20",
+			"user":            "majid",
+			"port":            "5432",
+			"dbname":          "pqgotest",
+			"client_encoding": "UTF8",
+			"datestyle":       "ISO, MDY",
 		}
 		for k, v := range extra {
 			o[k] = v
@@ -549,7 +548,7 @@ func TestEncodeDecode(t *testing.T) {
 	var got2 string
 	var got3 = sql.NullInt64{Valid: true}
 	var got4 time.Time
-	var got5, got6, got7, got8 interface{}
+	var got5, got6, got7, got8 any
 
 	err = r.Scan(&got1, &got2, &got3, &got4, &got5, &got6, &got7, &got8)
 	if err != nil {
@@ -731,6 +730,9 @@ func TestCloseBadConn(t *testing.T) {
 	host := os.Getenv("PGHOST")
 	if host == "" {
 		host = "localhost"
+	}
+	if host[0] == '/' {
+		t.Skip("cannot test bad connection close with a Unix-domain PGHOST")
 	}
 	port := os.Getenv("PGPORT")
 	if port == "" {

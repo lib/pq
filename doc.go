@@ -27,9 +27,7 @@ You can also connect to a database using a URL. For example:
 	connStr := "postgres://pqgotest:password@localhost/pqgotest?sslmode=verify-full"
 	db, err := sql.Open("postgres", connStr)
 
-
-Connection String Parameters
-
+# Connection String Parameters
 
 Similarly to libpq, when establishing a connection using pq you are expected to
 supply a connection string containing zero or more parameters.
@@ -42,42 +40,42 @@ them in the options parameter.
 For compatibility with libpq, the following special connection parameters are
 supported:
 
-	* dbname - The name of the database to connect to
-	* user - The user to sign in as
-	* password - The user's password
-	* host - The host to connect to. Values that start with / are for unix
-	  domain sockets. (default is localhost)
-	* port - The port to bind to. (default is 5432)
-	* sslmode - Whether or not to use SSL (default is require, this is not
-	  the default for libpq)
-	* fallback_application_name - An application_name to fall back to if one isn't provided.
-	* connect_timeout - Maximum wait for connection, in seconds. Zero or
-	  not specified means wait indefinitely.
-	* sslcert - Cert file location. The file must contain PEM encoded data.
-	* sslkey - Key file location. The file must contain PEM encoded data.
-	* sslrootcert - The location of the root certificate file. The file
-	  must contain PEM encoded data.
+  - dbname - The name of the database to connect to
+  - user - The user to sign in as
+  - password - The user's password
+  - host - The host to connect to. Values that start with / are for unix
+    domain sockets. (default is localhost)
+  - port - The port to bind to. (default is 5432)
+  - sslmode - Whether or not to use SSL (default is require, this is not
+    the default for libpq)
+  - fallback_application_name - An application_name to fall back to if one isn't provided.
+  - connect_timeout - Maximum wait for connection, in seconds. Zero or
+    not specified means wait indefinitely.
+  - sslcert - Cert file location. The file must contain PEM encoded data.
+  - sslkey - Key file location. The file must contain PEM encoded data.
+  - sslrootcert - The location of the root certificate file. The file
+    must contain PEM encoded data.
 
 Valid values for sslmode are:
 
-	* disable - No SSL
-	* require - Always SSL (skip verification)
-	* verify-ca - Always SSL (verify that the certificate presented by the
-	  server was signed by a trusted CA)
-	* verify-full - Always SSL (verify that the certification presented by
-	  the server was signed by a trusted CA and the server host name
-	  matches the one in the certificate)
+  - disable - No SSL
+  - require - Always SSL (skip verification)
+  - verify-ca - Always SSL (verify that the certificate presented by the
+    server was signed by a trusted CA)
+  - verify-full - Always SSL (verify that the certification presented by
+    the server was signed by a trusted CA and the server host name
+    matches the one in the certificate)
 
 See http://www.postgresql.org/docs/current/static/libpq-connect.html#LIBPQ-CONNSTRING
 for more information about connection string parameters.
 
 Use single quotes for values that contain whitespace:
 
-    "user=pqgotest password='with spaces'"
+	"user=pqgotest password='with spaces'"
 
 A backslash will escape the next character in values:
 
-    "user=space\ man password='it\'s valid'"
+	"user=space\ man password='it\'s valid'"
 
 Note that the connection parameter client_encoding (which sets the
 text encoding for the connection) may be set but must be "UTF8",
@@ -98,9 +96,7 @@ provided connection parameters.
 The pgpass mechanism as described in http://www.postgresql.org/docs/current/static/libpq-pgpass.html
 is supported, but on Windows PGPASSFILE must be specified explicitly.
 
-
-Queries
-
+# Queries
 
 database/sql does not dictate any specific format for parameter
 markers in query strings, and pq uses the Postgres-native ordinal markers,
@@ -125,9 +121,7 @@ For more details on RETURNING, see the Postgres documentation:
 
 For additional instructions on querying see the documentation for the database/sql package.
 
-
-Data Types
-
+# Data Types
 
 Parameters pass through driver.DefaultParameterConverter before they are handled
 by this package. When the binary_parameters connection option is enabled,
@@ -135,30 +129,27 @@ by this package. When the binary_parameters connection option is enabled,
 
 This package returns the following types for values from the PostgreSQL backend:
 
-	- integer types smallint, integer, and bigint are returned as int64
-	- floating-point types real and double precision are returned as float64
-	- character types char, varchar, and text are returned as string
-	- temporal types date, time, timetz, timestamp, and timestamptz are
-	  returned as time.Time
-	- the boolean type is returned as bool
-	- the bytea type is returned as []byte
+  - integer types smallint, integer, and bigint are returned as int64
+  - floating-point types real and double precision are returned as float64
+  - character types char, varchar, and text are returned as string
+  - temporal types date, time, timetz, timestamp, and timestamptz are
+    returned as time.Time
+  - the boolean type is returned as bool
+  - the bytea type is returned as []byte
 
 All other types are returned directly from the backend as []byte values in text format.
 
-
-Errors
-
+# Errors
 
 pq may return errors of type *pq.Error which can be interrogated for error details:
 
-        if err, ok := err.(*pq.Error); ok {
-            fmt.Println("pq error:", err.Code.Name())
-        }
+	if err, ok := err.(*pq.Error); ok {
+	    fmt.Println("pq error:", err.Code.Name())
+	}
 
 See the pq.Error type for details.
 
-
-Bulk imports
+# Bulk imports
 
 You can perform bulk imports by preparing a statement returned by pq.CopyIn (or
 pq.CopyInSchema) in an explicit transaction (sql.Tx). The returned statement
@@ -206,9 +197,7 @@ Usage example:
 		log.Fatal(err)
 	}
 
-
-Notifications
-
+# Notifications
 
 PostgreSQL supports a simple publish/subscribe model over database
 connections.  See http://www.postgresql.org/docs/current/static/sql-notify.html
@@ -241,9 +230,7 @@ bytes by the PostgreSQL server.
 You can find a complete, working example of Listener usage at
 https://godoc.org/github.com/lib/pq/example/listen.
 
-
-Kerberos Support
-
+# Kerberos Support
 
 If you need support for Kerberos authentication, add the following to your main
 package:
@@ -259,10 +246,10 @@ don't have to download unnecessary dependencies.
 
 When imported, additional connection string parameters are supported:
 
-	* krbsrvname - GSS (Kerberos) service name when constructing the
-	  SPN (default is `postgres`). This will be combined with the host
-	  to form the full SPN: `krbsrvname/host`.
-	* krbspn - GSS (Kerberos) SPN. This takes priority over
-	  `krbsrvname` if present.
+  - krbsrvname - GSS (Kerberos) service name when constructing the
+    SPN (default is `postgres`). This will be combined with the host
+    to form the full SPN: `krbsrvname/host`.
+  - krbspn - GSS (Kerberos) SPN. This takes priority over
+    `krbsrvname` if present.
 */
 package pq
