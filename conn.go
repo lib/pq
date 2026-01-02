@@ -1080,10 +1080,12 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 		r = &readBuf{}
 		t, err = cn.recvMessage(r)
 		if err != nil {
+			cn.forceClose()
 			panic(err)
 		}
 		switch t {
 		case 'E':
+			cn.forceClose()
 			panic(parseError(r))
 		case 'N':
 			if n := cn.noticeHandler; n != nil {
@@ -1163,6 +1165,16 @@ func (cn *conn) ssl(o values) error {
 
 	cn.c, err = upgrade(cn.c)
 	return err
+}
+
+// Close conn if error occured(timeout error) during the startup.
+func (cn *conn) forceClose() {
+	defer func() {
+		if cn.c != nil {
+			cn.c.Close()
+		}
+	}()
+	cn.sendSimpleMessage('X')
 }
 
 // isDriverSetting returns true iff a setting is purely for configuring the
