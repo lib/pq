@@ -9,10 +9,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lib/pq/internal/pqtest"
 )
 
 func TestMultipleSimpleQuery(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	rows, err := db.Query("select 1; set time zone default; select 2; select 3")
@@ -79,7 +81,7 @@ const contextRaceIterations = 100
 const cancelErrorCode ErrorCode = "57014"
 
 func TestContextCancelExec(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -117,7 +119,7 @@ func TestContextCancelExec(t *testing.T) {
 }
 
 func TestContextCancelQuery(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -162,7 +164,7 @@ func TestContextCancelQuery(t *testing.T) {
 // TestIssue617 tests that a failed query in QueryContext doesn't lead to a
 // goroutine leak.
 func TestIssue617(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	const N = 10
@@ -203,7 +205,7 @@ func TestIssue617(t *testing.T) {
 }
 
 func TestContextCancelBegin(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -259,7 +261,7 @@ func TestContextCancelBegin(t *testing.T) {
 }
 
 func TestTxOptions(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 	ctx := context.Background()
 

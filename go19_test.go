@@ -8,11 +8,13 @@ import (
 	"database/sql/driver"
 	"reflect"
 	"testing"
+
+	"github.com/lib/pq/internal/pqtest"
 )
 
 func TestPing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	if _, ok := reflect.TypeOf(db).MethodByName("Conn"); !ok {
@@ -76,7 +78,7 @@ func TestPing(t *testing.T) {
 }
 
 func TestCommitInFailedTransactionWithCancelContext(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())

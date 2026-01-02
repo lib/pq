@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/lib/pq/internal/pqtest"
 	"github.com/lib/pq/oid"
 )
 
@@ -170,7 +171,7 @@ func TestRowsColumnTypes(t *testing.T) {
 		},
 	}
 
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	rows, err := db.Query("SELECT 1 AS a, text 'bar' AS bar, 1.28::numeric(9, 2) AS dec")

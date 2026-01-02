@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/lib/pq/internal/pqtest"
 )
 
 func TestDecodeUUIDBinaryError(t *testing.T) {
@@ -30,7 +32,7 @@ func BenchmarkDecodeUUIDBinary(b *testing.B) {
 }
 
 func TestDecodeUUIDBackend(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	var s = "a0ecc91d-a13f-4fe4-9fce-7e09777cc70a"

@@ -16,14 +16,11 @@ const (
 )
 
 func assertInvalidCertificate(t *testing.T, err error) {
+	t.Helper()
 	switch x := err.(type) {
-	case x509.UnknownAuthorityError:
-		break
-	case x509.HostnameError:
-		break
-	case *tls.CertificateVerificationError:
+	case x509.UnknownAuthorityError, x509.HostnameError, *tls.CertificateVerificationError:
 		break
 	default:
-		t.Fatalf("expected x509.UnknownAuthorityError, x509.HostnameError or tls.CertificateVerificationError (go 1.20+), got %#+v", x)
+		t.Fatalf("wrong error type %T: %[1]s", x)
 	}
 }

@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+
+	"github.com/lib/pq/internal/pqtest"
 )
 
 func TestArrayArg(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	for _, tc := range []struct {

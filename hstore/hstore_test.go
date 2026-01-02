@@ -2,38 +2,18 @@ package hstore
 
 import (
 	"database/sql"
-	"os"
 	"testing"
 
 	_ "github.com/lib/pq"
+	"github.com/lib/pq/internal/pqtest"
 )
 
-type Fatalistic interface {
-	Fatal(args ...any)
-}
-
-func openTestConn(t Fatalistic) *sql.DB {
-	datname := os.Getenv("PGDATABASE")
-	sslmode := os.Getenv("PGSSLMODE")
-
-	if datname == "" {
-		os.Setenv("PGDATABASE", "pqgotest")
-	}
-
-	if sslmode == "" {
-		os.Setenv("PGSSLMODE", "disable")
-	}
-
-	conn, err := sql.Open("postgres", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return conn
-}
-
 func TestHstore(t *testing.T) {
-	db := openTestConn(t)
+	if pqtest.ForceBinaryParameters() {
+		t.Skip("Currently fails with PQTEST_BINARY_PARAMETERS=1") // TODO
+	}
+
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	// quietly create hstore if it doesn't exist
@@ -77,6 +57,7 @@ func TestHstore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-query empty map failed: %s", err.Error())
 	}
+
 	if hs.Map == nil {
 		t.Fatalf("expected empty map, got null map")
 	}

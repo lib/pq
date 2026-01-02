@@ -5,7 +5,6 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"strings"
 
 	_ "github.com/lib/pq"
+	"github.com/lib/pq/internal/pqtest"
 )
 
 // OID represent a postgres Object Identifier Type.
@@ -27,18 +27,7 @@ func (o OID) Name() string {
 }
 
 func main() {
-	datname := os.Getenv("PGDATABASE")
-	sslmode := os.Getenv("PGSSLMODE")
-
-	if datname == "" {
-		os.Setenv("PGDATABASE", "pqgotest")
-	}
-
-	if sslmode == "" {
-		os.Setenv("PGSSLMODE", "disable")
-	}
-
-	db, err := sql.Open("postgres", "")
+	db, err := pqtest.DB()
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/lib/pq/internal/pqtest"
 )
 
 func TestParseArray(t *testing.T) {
@@ -1605,7 +1607,7 @@ func BenchmarkGenericArrayValueStrings(b *testing.B) {
 }
 
 func TestArrayScanBackend(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	for _, tt := range []struct {
@@ -1619,18 +1621,20 @@ func TestArrayScanBackend(t *testing.T) {
 		{`ARRAY[1, 2, 3]`, new(Int64Array), &Int64Array{1, 2, 3}},
 		{`ARRAY['a', E'\\b', 'c"', 'd,e']`, new(StringArray), &StringArray{`a`, `\b`, `c"`, `d,e`}},
 	} {
-		err := db.QueryRow(`SELECT ` + tt.s).Scan(tt.d)
-		if err != nil {
-			t.Errorf("Expected no error when scanning %s into %T, got %v", tt.s, tt.d, err)
-		}
-		if !reflect.DeepEqual(tt.d, tt.e) {
-			t.Errorf("Expected %v when scanning %s into %T, got %v", tt.e, tt.s, tt.d, tt.d)
-		}
+		t.Run("", func(t *testing.T) {
+			err := db.QueryRow(`SELECT ` + tt.s).Scan(tt.d)
+			if err != nil {
+				t.Errorf("Expected no error when scanning %s into %T, got %v", tt.s, tt.d, err)
+			}
+			if !reflect.DeepEqual(tt.d, tt.e) {
+				t.Errorf("Expected %v when scanning %s into %T, got %v", tt.e, tt.s, tt.d, tt.d)
+			}
+		})
 	}
 }
 
 func TestArrayValueBackend(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	for _, tt := range []struct {

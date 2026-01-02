@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq/internal/pqtest"
 	"github.com/lib/pq/oid"
 )
 
@@ -36,7 +37,7 @@ func BenchmarkSelectSeries(b *testing.B) {
 
 func benchQuery(b *testing.B, query string, result any) {
 	b.StopTimer()
-	db := openTestConn(b)
+	db := pqtest.MustDB(b)
 	defer db.Close()
 	b.StartTimer()
 
@@ -183,7 +184,7 @@ func BenchmarkPreparedSelectSeries(b *testing.B) {
 
 func benchPreparedQuery(b *testing.B, query string, result any) {
 	b.StopTimer()
-	db := openTestConn(b)
+	db := pqtest.MustDB(b)
 	defer db.Close()
 	stmt, err := db.Prepare(query)
 	if err != nil {
@@ -345,7 +346,7 @@ func BenchmarkDecodeBool(b *testing.B) {
 }
 
 func TestDecodeBool(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	rows, err := db.Query("select true")
 	if err != nil {
 		t.Fatal(err)
@@ -416,7 +417,7 @@ func BenchmarkLocationCacheMultiThread(b *testing.B) {
 func BenchmarkResultParsing(b *testing.B) {
 	b.StopTimer()
 
-	db := openTestConn(b)
+	db := pqtest.MustDB(b)
 	defer db.Close()
 	_, err := db.Exec("BEGIN")
 	if err != nil {
