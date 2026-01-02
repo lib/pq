@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/lib/pq/internal/pqtest"
 )
 
 var errNilNotification = errors.New("nil notification")
@@ -65,9 +67,8 @@ func newTestListenerConn(t *testing.T) (*ListenerConn, <-chan *Notification) {
 	sslmode := os.Getenv("PGSSLMODE")
 
 	if datname == "" {
-		os.Setenv("PGDATABASE", "pqgotest")
+		os.Setenv("PGDATABASE", "pqgo")
 	}
-
 	if sslmode == "" {
 		os.Setenv("PGSSLMODE", "disable")
 	}
@@ -92,7 +93,7 @@ func TestConnListen(t *testing.T) {
 
 	defer l.Close()
 
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	ok, err := l.Listen("notify_test")
@@ -116,7 +117,7 @@ func TestConnUnlisten(t *testing.T) {
 
 	defer l.Close()
 
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	ok, err := l.Listen("notify_test")
@@ -155,7 +156,7 @@ func TestConnUnlistenAll(t *testing.T) {
 
 	defer l.Close()
 
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	ok, err := l.Listen("notify_test")
@@ -281,7 +282,7 @@ func TestListenerConnCloseWhileQueryIsExecuting(t *testing.T) {
 }
 
 func TestNotifyExtra(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	if getServerVersion(t, db) < 90000 {
@@ -337,7 +338,7 @@ func TestListenerListen(t *testing.T) {
 	l, _ := newTestListener(t)
 	defer l.Close()
 
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	err := l.Listen("notify_listen_test")
@@ -360,7 +361,7 @@ func TestListenerUnlisten(t *testing.T) {
 	l, _ := newTestListener(t)
 	defer l.Close()
 
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	err := l.Listen("notify_listen_test")
@@ -398,7 +399,7 @@ func TestListenerUnlistenAll(t *testing.T) {
 	l, _ := newTestListener(t)
 	defer l.Close()
 
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	err := l.Listen("notify_listen_test")
@@ -436,7 +437,7 @@ func TestListenerFailedQuery(t *testing.T) {
 	l, eventch := newTestListener(t)
 	defer l.Close()
 
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	err := l.Listen("notify_listen_test")
@@ -484,7 +485,7 @@ func TestListenerReconnect(t *testing.T) {
 	l, eventch := newTestListenerTimeout(t, 20*time.Millisecond, time.Hour)
 	defer l.Close()
 
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	err := l.Listen("notify_listen_test")

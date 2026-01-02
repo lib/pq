@@ -3,7 +3,6 @@ package pq
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"io/ioutil"
 	"net"
 	"os"
 	"os/user"
@@ -165,7 +164,7 @@ func sslCertificateAuthority(tlsConf *tls.Config, o values) error {
 			cert = []byte(sslrootcert)
 		} else {
 			var err error
-			cert, err = ioutil.ReadFile(sslrootcert)
+			cert, err = os.ReadFile(sslrootcert)
 			if err != nil {
 				return err
 			}

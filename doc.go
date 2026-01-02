@@ -11,7 +11,7 @@ using this package directly. For example:
 	)
 
 	func main() {
-		connStr := "user=pqgotest dbname=pqgotest sslmode=verify-full"
+		connStr := "user=pqgo dbname=pqgo sslmode=verify-full"
 		db, err := sql.Open("postgres", connStr)
 		if err != nil {
 			log.Fatal(err)
@@ -24,7 +24,7 @@ using this package directly. For example:
 
 You can also connect to a database using a URL. For example:
 
-	connStr := "postgres://pqgotest:password@localhost/pqgotest?sslmode=verify-full"
+	connStr := "postgres://pqgo:password@localhost/pqgo?sslmode=verify-full"
 	db, err := sql.Open("postgres", connStr)
 
 # Connection String Parameters
@@ -71,7 +71,7 @@ for more information about connection string parameters.
 
 Use single quotes for values that contain whitespace:
 
-	"user=pqgotest password='with spaces'"
+	"user=pqgo password='with spaces'"
 
 A backslash will escape the next character in values:
 

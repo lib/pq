@@ -15,16 +15,15 @@ const (
 )
 
 func assertInvalidCertificate(t *testing.T, err error) {
+	t.Helper()
+
 	if err.Error() == errMacOsCertificateNotCompliant {
 		return
 	}
-
 	switch x := err.(type) {
-	case x509.UnknownAuthorityError:
-		break
-	case x509.HostnameError:
+	case x509.UnknownAuthorityError, x509.HostnameError:
 		break
 	default:
-		t.Fatalf("expected x509.UnknownAuthorityError, x509.HostnameError, got %#+v", x)
+		t.Fatalf("wrong error type %T: %[1]s", x)
 	}
 }

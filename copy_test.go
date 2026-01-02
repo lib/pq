@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lib/pq/internal/pqtest"
 )
 
 func TestCopyInStmt(t *testing.T) {
@@ -47,7 +49,7 @@ func TestCopyInSchemaStmt(t *testing.T) {
 }
 
 func TestCopyInMultipleValues(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	txn, err := db.Begin()
@@ -106,7 +108,7 @@ func TestCopyInMultipleValues(t *testing.T) {
 }
 
 func TestCopyInRaiseStmtTrigger(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	if getServerVersion(t, db) < 90000 {
@@ -186,7 +188,7 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 }
 
 func TestCopyInTypes(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	txn, err := db.Begin()
@@ -245,7 +247,7 @@ func TestCopyInTypes(t *testing.T) {
 }
 
 func TestCopyInWrongType(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	txn, err := db.Begin()
@@ -280,7 +282,7 @@ func TestCopyInWrongType(t *testing.T) {
 }
 
 func TestCopyOutsideOfTxnError(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	_, err := db.Prepare(CopyIn("temp", "num"))
@@ -293,7 +295,7 @@ func TestCopyOutsideOfTxnError(t *testing.T) {
 }
 
 func TestCopyInBinaryError(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	txn, err := db.Begin()
@@ -318,7 +320,7 @@ func TestCopyInBinaryError(t *testing.T) {
 }
 
 func TestCopyFromError(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	txn, err := db.Begin()
@@ -343,7 +345,7 @@ func TestCopyFromError(t *testing.T) {
 }
 
 func TestCopySyntaxError(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	txn, err := db.Begin()
@@ -368,7 +370,7 @@ func TestCopySyntaxError(t *testing.T) {
 
 // Tests for connection errors in copyin.resploop()
 func TestCopyRespLoopConnectionError(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	txn, err := db.Begin()
@@ -454,7 +456,7 @@ func retry(t *testing.T, duration time.Duration, f func() error) {
 }
 
 func BenchmarkCopyIn(b *testing.B) {
-	db := openTestConn(b)
+	db := pqtest.MustDB(b)
 	defer db.Close()
 
 	txn, err := db.Begin()
