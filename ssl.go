@@ -3,11 +3,13 @@ package pq
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"net"
 	"os"
-	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 )
 
 // ssl generates a function to upgrade a net.Conn based on the "sslmode" and
@@ -103,26 +105,30 @@ func sslClientCertificates(tlsConf *tls.Config, o values) error {
 		return nil
 	}
 
-	// user.Current() might fail when cross-compiling. We have to ignore the
-	// error and continue without home directory defaults, since we wouldn't
-	// know from where to load them.
-	user, _ := user.Current()
+	home := getHome()
 
 	// In libpq, the client certificate is only loaded if the setting is not blank.
 	//
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1036-L1037
 	sslcert := o["sslcert"]
-	if len(sslcert) == 0 && user != nil {
-		sslcert = filepath.Join(user.HomeDir, ".postgresql", "postgresql.crt")
+	if len(sslcert) == 0 && home != "" {
+		if runtime.GOOS == "windows" {
+			sslcert = filepath.Join(sslcert, "postgresql.crt")
+		} else {
+			sslcert = filepath.Join(home, ".postgresql/postgresql.crt")
+		}
 	}
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1045
 	if len(sslcert) == 0 {
 		return nil
 	}
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1050:L1054
-	if _, err := os.Stat(sslcert); os.IsNotExist(err) {
-		return nil
-	} else if err != nil {
+	_, err := os.Stat(sslcert)
+	if err != nil {
+		perr := new(os.PathError)
+		if errors.As(err, &perr) && (perr.Err == syscall.ENOENT || perr.Err == syscall.ENOTDIR) {
+			return nil
+		}
 		return err
 	}
 
@@ -130,8 +136,12 @@ func sslClientCertificates(tlsConf *tls.Config, o values) error {
 	//
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1123-L1222
 	sslkey := o["sslkey"]
-	if len(sslkey) == 0 && user != nil {
-		sslkey = filepath.Join(user.HomeDir, ".postgresql", "postgresql.key")
+	if len(sslkey) == 0 && home != "" {
+		if runtime.GOOS == "windows" {
+			sslkey = filepath.Join(home, "postgresql.key")
+		} else {
+			sslkey = filepath.Join(home, ".postgresql/postgresql.key")
+		}
 	}
 
 	if len(sslkey) > 0 {

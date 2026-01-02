@@ -230,6 +230,33 @@ func (cn *conn) handleDriverSettings(o values) (err error) {
 	return boolSetting("binary_parameters", &cn.binaryParameters)
 }
 
+// Matches pqGetHomeDirectory() from PostgreSQL
+//
+// https://github.com/postgres/postgres/blob/2b117bb/src/interfaces/libpq/fe-connect.c#L8214
+func getHome() string {
+	if runtime.GOOS == "windows" {
+		// pq uses SHGetFolderPath(), which is deprecated but x/sys/windows has
+		// KnownFolderPath(). We don't really want to pull that in though, so
+		// use APPDATA env. This is also what PostgreSQL uses in some other
+		// codepaths (get_home_path() for example).
+		ad := os.Getenv("APPDATA")
+		if ad == "" {
+			return ""
+		}
+		return filepath.Join(ad, "postgresql")
+	}
+
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		u, err := user.Current()
+		if err != nil {
+			return ""
+		}
+		home = u.HomeDir
+	}
+	return home
+}
+
 // TODO: this should probably return errors instead of silently skipping it on
 // errors?
 func (cn *conn) handlePgpass(o values) {
@@ -240,18 +267,11 @@ func (cn *conn) handlePgpass(o values) {
 	// Get passfile from the options
 	filename := o["passfile"]
 	if filename == "" {
-		// XXX this code doesn't work on Windows where the default filename is
-		// XXX %APPDATA%\postgresql\pgpass.conf
-		// Prefer $HOME over user.Current due to glibc bug: golang.org/issue/13470
-		userHome := os.Getenv("HOME")
-		if userHome == "" {
-			user, err := user.Current()
-			if err != nil {
-				return
-			}
-			userHome = user.HomeDir
+		home := getHome()
+		if home == "" {
+			return
 		}
-		filename = filepath.Join(userHome, ".pgpass")
+		filename = filepath.Join(home, ".pgpass")
 	}
 
 	// On Win32, the directory is protected, so we don't have to check the file.
