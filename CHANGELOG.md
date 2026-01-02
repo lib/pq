@@ -1,0 +1,50 @@
+unreleased
+----------
+This version of kq requires Go 1.18 or newer.
+
+pq now supports only maintained PostgreSQL releases, which is PostgreSQL 14 and
+newer. Previously PostgreSQL 8.4 and newer were supported.
+
+### Features
+
+- Add support for NamedValueChecker interface ([#1125])
+
+### Fixes
+
+- Match HOME directory lookup logic with libpq: prefer $HOME over /etc/passwd,
+  ignore ENOTDIR errors, and use APPDATA on Windows ([#1214]).
+
+- Fix build with wasm ([#1184]), appengine ([#745]), and Plan 9 ([#1133]).
+
+- Deprecate and type alias `pq.NullTime` to `sql.NullTime` ([#1211]).
+
+- Enforce integer limits of the Postgres wire protocol ([#1161]).
+
+- Accept the `passfile` connection parameter to override `PGPASSFILE` ([#1129]).
+
+- Fix connecting to socket on Windows systems ([#1179]).
+
+- Don't perform a permission check on the .pgpass file on Windows ([#595]).
+
+- Warn about incorrect .pgpass permissions ([#595]).
+
+- Don't set extra_float_digits ([#1212]).
+
+[#595]: https://github.com/lib/pq/pull/595
+[#745]: https://github.com/lib/pq/pull/745
+[#1125]: https://github.com/lib/pq/pull/1125
+[#1129]: https://github.com/lib/pq/pull/1129
+[#1133]: https://github.com/lib/pq/pull/1133
+[#1161]: https://github.com/lib/pq/pull/1161
+[#1179]: https://github.com/lib/pq/pull/1179
+[#1184]: https://github.com/lib/pq/pull/1184
+[#1211]: https://github.com/lib/pq/pull/1211
+[#1212]: https://github.com/lib/pq/pull/1212
+[#1214]: https://github.com/lib/pq/pull/1214
+
+
+v1.10.9 (2023-04-26)
+--------------------
+- Fixes backwards incompat bug with 1.13.
+
+- Fixes pgpass issue
