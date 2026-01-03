@@ -35,26 +35,25 @@ func encode(parameterStatus *parameterStatus, x any, pgtypOid oid.Oid) []byte {
 	case float64:
 		return strconv.AppendFloat(nil, v, 'f', -1, 64)
 	case []byte:
+		if v == nil {
+			return nil
+		}
 		if pgtypOid == oid.T_bytea {
 			return encodeBytea(parameterStatus.serverVersion, v)
 		}
-
 		return v
 	case string:
 		if pgtypOid == oid.T_bytea {
 			return encodeBytea(parameterStatus.serverVersion, []byte(v))
 		}
-
 		return []byte(v)
 	case bool:
 		return strconv.AppendBool(nil, v)
 	case time.Time:
 		return formatTs(v)
-
 	default:
 		errorf("encode: unknown type for %T", v)
 	}
-
 	panic("not reached")
 }
 

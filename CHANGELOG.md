@@ -53,8 +53,11 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 - Handle ErrorResponse in readReadyForQuery and return proper error ([#1136]).
 
+- Treat nil []byte in query parameters as nil/NULL rather than `""` ([#838]).
+
 [#595]: https://github.com/lib/pq/pull/595
 [#745]: https://github.com/lib/pq/pull/745
+[#838]: https://github.com/lib/pq/pull/838
 [#949]: https://github.com/lib/pq/pull/949
 [#1125]: https://github.com/lib/pq/pull/1125
 [#1129]: https://github.com/lib/pq/pull/1129

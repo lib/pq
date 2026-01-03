@@ -1479,8 +1479,12 @@ func (st *stmt) exec(v []driver.NamedValue) {
 				w.int32(-1)
 			} else {
 				b := encode(&cn.parameterStatus, x.Value, st.paramTyps[i])
-				w.int32(len(b))
-				w.bytes(b)
+				if b == nil {
+					w.int32(-1)
+				} else {
+					w.int32(len(b))
+					w.bytes(b)
+				}
 			}
 		}
 	}
@@ -1746,9 +1750,8 @@ func md5s(s string) string {
 }
 
 func (cn *conn) sendBinaryParameters(b *writeBuf, args []driver.NamedValue) {
-	// Do one pass over the parameters to see if we're going to send any of
-	// them over in binary.  If we are, create a paramFormats array at the
-	// same time.
+	// Do one pass over the parameters to see if we're going to send any of them
+	// over in binary.  If we are, create a paramFormats array at the same time.
 	var paramFormats []int
 	for i, x := range args {
 		_, ok := x.Value.([]byte)
@@ -1771,6 +1774,8 @@ func (cn *conn) sendBinaryParameters(b *writeBuf, args []driver.NamedValue) {
 	b.int16(len(args))
 	for _, x := range args {
 		if x.Value == nil {
+			b.int32(-1)
+		} else if xx, ok := x.Value.([]byte); ok && xx == nil {
 			b.int32(-1)
 		} else {
 			datum := binaryEncode(&cn.parameterStatus, x.Value)
