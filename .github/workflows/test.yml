@@ -37,9 +37,34 @@ jobs:
       run: |
         echo 'PQTEST_BINARY_PARAMETERS=no  go test -race ./...'
         PQTEST_BINARY_PARAMETERS=no  go test -race ./...
-  
+
         echo 'PQTEST_BINARY_PARAMETERS=yes go test -race ./...'
         PQTEST_BINARY_PARAMETERS=yes go test -race ./...
+
+  pgbouncer:
+    runs-on: 'ubuntu-latest'
+    steps:
+    - uses: 'actions/checkout@v6'
+    - uses: 'actions/setup-go@v6'
+      with: {go-version: '1.25'}
+    - name: 'Start PostgreSQL'
+      run: |
+        docker compose up pg18 -d --wait || {
+          docker compose logs
+          exit 1
+        }
+        docker compose up pgbouncer -d --wait || {
+          docker compose logs
+          exit 1
+        }
+        echo '127.0.0.1 postgres' | sudo tee -a /etc/hosts
+    - name: 'Run tests'
+      run: |
+        echo 'PGPORT=6432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...'
+        PGPORT=6432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...
+
+        echo PGPORT=6432 'PQTEST_BINARY_PARAMETERS=yes go test -race ./...'
+        PGPORT=6432 PQTEST_BINARY_PARAMETERS=yes go test -race ./...
 
   # TODO: disabled for now as it's very slow and flaky.
   #macos:

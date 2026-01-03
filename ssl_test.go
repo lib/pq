@@ -48,6 +48,8 @@ func checkSSLSetup(t *testing.T, conninfo string) {
 
 // Connect over SSL and run a simple query to test the basics
 func TestSSLConnection(t *testing.T) {
+	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
+
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
@@ -64,6 +66,8 @@ func TestSSLConnection(t *testing.T) {
 
 // Test sslmode=verify-full
 func TestSSLVerifyFull(t *testing.T) {
+	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
+
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
@@ -96,6 +100,8 @@ func TestSSLVerifyFull(t *testing.T) {
 
 // Test sslmode=require sslrootcert=rootCertPath
 func TestSSLRequireWithRootCert(t *testing.T) {
+	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
+
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
@@ -131,6 +137,8 @@ func TestSSLRequireWithRootCert(t *testing.T) {
 
 // Test sslmode=verify-ca
 func TestSSLVerifyCA(t *testing.T) {
+	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
+
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
@@ -165,6 +173,8 @@ func TestSSLVerifyCA(t *testing.T) {
 
 // Authenticate over SSL using client certificates
 func TestSSLClientCertificates(t *testing.T) {
+	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
+
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
@@ -262,6 +272,8 @@ func TestSSLClientCertificates(t *testing.T) {
 
 // Authenticate over SSL using inline client certificates
 func TestSSLInlineClientCertificates(t *testing.T) {
+	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
+
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 

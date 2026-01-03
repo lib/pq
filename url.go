@@ -3,19 +3,13 @@ package pq
 import (
 	"fmt"
 	"net"
-	nurl "net/url"
+	neturl "net/url"
 	"sort"
 	"strings"
 )
 
-// ParseURL no longer needs to be used by clients of this library since supplying a URL as a
-// connection string to sql.Open() is now supported:
-//
-//	sql.Open("postgres", "postgres://bob:secret@1.2.3.4:5432/mydb?sslmode=verify-full")
-//
-// It remains exported here for backwards-compatibility.
-//
 // ParseURL converts a url to a connection string for driver.Open.
+//
 // Example:
 //
 //	"postgres://bob:secret@1.2.3.4:5432/mydb?sslmode=verify-full"
@@ -24,13 +18,10 @@ import (
 //
 //	"user=bob password=secret host=1.2.3.4 port=5432 dbname=mydb sslmode=verify-full"
 //
-// A minimal example:
-//
-//	"postgres://"
-//
-// This will be blank, causing driver.Open to use all of the defaults
+// Deprecated: directly passing an URL to sql.Open("postgres", "postgres://...")
+// now works, and calling this manually is no longer required.
 func ParseURL(url string) (string, error) {
-	u, err := nurl.Parse(url)
+	u, err := neturl.Parse(url)
 	if err != nil {
 		return "", err
 	}

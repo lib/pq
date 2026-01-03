@@ -14,44 +14,27 @@ func TestArrayArg(t *testing.T) {
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
-	for _, tc := range []struct {
+	tests := []struct {
 		pgType  string
 		in, out any
 	}{
-		{
-			pgType: "int[]",
-			in:     []int{245, 231},
-			out:    []int64{245, 231},
-		},
-		{
-			pgType: "int[]",
-			in:     &[]int{245, 231},
-			out:    []int64{245, 231},
-		},
-		{
-			pgType: "int[]",
-			in:     []int64{245, 231},
-		},
-		{
-			pgType: "int[]",
-			in:     &[]int64{245, 231},
-			out:    []int64{245, 231},
-		},
-		{
-			pgType: "varchar[]",
-			in:     []string{"hello", "world"},
-		},
-		{
-			pgType: "varchar[]",
-			in:     &[]string{"hello", "world"},
-			out:    []string{"hello", "world"},
-		},
-	} {
-		if tc.out == nil {
-			tc.out = tc.in
-		}
-		t.Run(fmt.Sprintf("%#v", tc.in), func(t *testing.T) {
-			r, err := db.Query(fmt.Sprintf("SELECT $1::%s", tc.pgType), tc.in)
+		{"int[]", []int{245, 231}, []int64{245, 231}},
+		{"int[]", &[]int{245, 231}, []int64{245, 231}},
+		{"int[]", []int64{245, 231}, nil},
+		{"int[]", &[]int64{245, 231}, []int64{245, 231}},
+		{"varchar[]", []string{"hello", "world"}, nil},
+		{"varchar[]", &[]string{"hello", "world"}, []string{"hello", "world"}},
+	}
+
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			if tt.out == nil {
+				tt.out = tt.in
+			}
+
+			// XXX: hangs in recvMessage()'s io.ReadFull
+			// Not when using -run=TestArrayArg though, then the next test hangs
+			r, err := db.Query(fmt.Sprintf("SELECT $1::%s", tt.pgType), tt.in)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -70,13 +53,13 @@ func TestArrayArg(t *testing.T) {
 				}
 			}()
 
-			got := reflect.New(reflect.TypeOf(tc.out))
-			if err := r.Scan(Array(got.Interface())); err != nil {
+			have := reflect.New(reflect.TypeOf(tt.out))
+			if err := r.Scan(Array(have.Interface())); err != nil {
 				t.Fatal(err)
 			}
 
-			if !reflect.DeepEqual(tc.out, got.Elem().Interface()) {
-				t.Errorf("got %v, want %v", got, tc.out)
+			if !reflect.DeepEqual(tt.out, have.Elem().Interface()) {
+				t.Errorf("\nhave: %v\nwant %v", have, tt.out)
 			}
 		})
 	}

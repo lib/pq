@@ -55,3 +55,8 @@ uses the following defaults:
 connection strings:
 
     PQTEST_BINARY_PARAMETERS=1 go test
+
+Tests can be run against pgbouncer with:
+
+    docker compose up -d pgbouncer pg18
+    PGPORT=6432 go test ./...
