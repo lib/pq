@@ -1287,29 +1287,13 @@ func (cn *conn) auth(r *readBuf, o values) {
 		w := cn.writeBuf('p')
 		w.string(o["password"])
 		cn.send(w)
-
-		t, r := cn.recv()
-		if t != 'R' {
-			errorf("unexpected password response: %q", t)
-		}
-
-		if r.int32() != 0 {
-			errorf("unexpected authentication response: %q", t)
-		}
+		return
 	case 5:
 		s := string(r.next(4))
 		w := cn.writeBuf('p')
 		w.string("md5" + md5s(md5s(o["password"]+o["user"])+s))
 		cn.send(w)
-
-		t, r := cn.recv()
-		if t != 'R' {
-			errorf("unexpected password response: %q", t)
-		}
-
-		if r.int32() != 0 {
-			errorf("unexpected authentication response: %q", t)
-		}
+		return
 	case 7: // GSSAPI, startup
 		if newGss == nil {
 			errorf("kerberos error: no GSSAPI provider registered (import github.com/lib/pq/auth/kerberos if you need Kerberos support)")
