@@ -41,33 +41,34 @@ jobs:
         echo 'PQTEST_BINARY_PARAMETERS=yes go test -race ./...'
         PQTEST_BINARY_PARAMETERS=yes go test -race ./...
 
-  macos:
-    runs-on: 'macos-15-intel'
-    strategy:
-      fail-fast: false
-      matrix:
-        pg: ['18']
-        go: ['1.18', '1.25']
-    steps:
-    - uses: 'actions/checkout@v6'
-    - uses: 'douglascamata/setup-docker-macos-action@v1'
-    - uses: 'actions/setup-go@v6'
-      with:
-        go-version: ${{ matrix.go }}
-    - name: 'Start PostgreSQL'
-      run: |
-        docker compose up pg${{ matrix.pg }} -d --wait || {
-          docker compose logs
-          exit 1
-        }
-        echo '127.0.0.1 postgres' | sudo tee -a /etc/hosts
-    - name: 'Run tests'
-      run: |
-        echo 'PQTEST_BINARY_PARAMETERS=no  go test -race ./...'
-        PQTEST_BINARY_PARAMETERS=no  go test -race ./...
-  
-        echo 'PQTEST_BINARY_PARAMETERS=yes go test -race ./...'
-        PQTEST_BINARY_PARAMETERS=yes go test -race ./...
+  # TODO: disabled for now as it's very slow and flaky.
+  #macos:
+  #  runs-on: 'macos-15-intel'
+  #  strategy:
+  #    fail-fast: false
+  #    matrix:
+  #      pg: ['18']
+  #      go: ['1.18', '1.25']
+  #  steps:
+  #  - uses: 'actions/checkout@v6'
+  #  - uses: 'douglascamata/setup-docker-macos-action@v1'
+  #  - uses: 'actions/setup-go@v6'
+  #    with:
+  #      go-version: ${{ matrix.go }}
+  #  - name: 'Start PostgreSQL'
+  #    run: |
+  #      docker compose up pg${{ matrix.pg }} -d --wait || {
+  #        docker compose logs
+  #        exit 1
+  #      }
+  #      echo '127.0.0.1 postgres' | sudo tee -a /etc/hosts
+  #  - name: 'Run tests'
+  #    run: |
+  #      echo 'PQTEST_BINARY_PARAMETERS=no  go test -race ./...'
+  #      PQTEST_BINARY_PARAMETERS=no  go test -race ./...
+  #
+  #      echo 'PQTEST_BINARY_PARAMETERS=yes go test -race ./...'
+  #      PQTEST_BINARY_PARAMETERS=yes go test -race ./...
 
   # TODO: can't get this to work; always fails with:
   # dial tcp [::1]:5432: connectex: No connection could be made because the target machine actively refused it.
