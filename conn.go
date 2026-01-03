@@ -24,6 +24,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/lib/pq/internal"
 	"github.com/lib/pq/oid"
 	"github.com/lib/pq/scram"
 )
@@ -888,7 +889,7 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 	}
 	defer cn.errRecover(&err)
 
-	if len(q) >= 4 && strings.EqualFold(q[:4], "COPY") {
+	if len(q) >= 4 && internal.StartsWithCOPY(q[:4]) {
 		s, err := cn.prepareCopyIn(q)
 		if err == nil {
 			cn.inCopy = true
