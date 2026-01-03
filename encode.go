@@ -95,7 +95,7 @@ func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) any {
 
 func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) any {
 	switch typ {
-	case oid.T_char, oid.T_varchar, oid.T_text:
+	case oid.T_char, oid.T_bpchar, oid.T_varchar, oid.T_text:
 		return string(s)
 	case oid.T_bytea:
 		b, err := parseBytea(s)

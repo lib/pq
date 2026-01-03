@@ -30,8 +30,11 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 - Don't set extra_float_digits ([#1212]).
 
+- Decode bpchar into a string ([#949]).
+
 [#595]: https://github.com/lib/pq/pull/595
 [#745]: https://github.com/lib/pq/pull/745
+[#949]: https://github.com/lib/pq/pull/949
 [#1125]: https://github.com/lib/pq/pull/1125
 [#1129]: https://github.com/lib/pq/pull/1129
 [#1133]: https://github.com/lib/pq/pull/1133
