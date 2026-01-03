@@ -583,8 +583,14 @@ func TestNoData(t *testing.T) {
 }
 
 func TestErrorDuringStartup(t *testing.T) {
-	// Don't use the normal connection setup, this is intended to
-	// blow up in the startup packet from a non-existent user.
+	// TODO: fails with wrong error:
+	//   wrong error code "protocol_violation": pq: "trust" authentication failed
+	// May be an issue in how pgbouncer is configured, or just that pgbouncer
+	// sends a different error.
+	pqtest.SkipPgbouncer(t)
+
+	// Don't use the normal connection setup, this is intended to blow up in the
+	// startup packet from a non-existent user.
 	db, err := pqtest.DB("user=thisuserreallydoesntexist")
 	if err != nil {
 		t.Fatal(err)
@@ -598,9 +604,10 @@ func TestErrorDuringStartup(t *testing.T) {
 
 	e, ok := err.(*Error)
 	if !ok {
-		t.Fatalf("expected Error, got %#v", err)
-	} else if e.Code.Name() != "invalid_authorization_specification" && e.Code.Name() != "invalid_password" {
-		t.Fatalf("expected invalid_authorization_specification or invalid_password, got %s (%+v)", e.Code.Name(), err)
+		t.Fatalf("wrong error type %T: %[1]s", err)
+	}
+	if e.Code.Name() != "invalid_authorization_specification" && e.Code.Name() != "invalid_password" {
+		t.Fatalf("wrong error code %q: %s", e.Code.Name(), err)
 	}
 }
 
@@ -1423,64 +1430,73 @@ func TestParseOpts(t *testing.T) {
 
 func TestRuntimeParameters(t *testing.T) {
 	tests := []struct {
-		conninfo string
-		param    string
-		expected string
-		success  bool
+		conninfo      string
+		param         string
+		want          string
+		success       bool
+		skipPgbouncer bool
 	}{
 		// invalid parameter
-		{"DOESNOTEXIST=foo", "", "", false},
+		{"DOESNOTEXIST=foo", "", "", false, false},
+
 		// we can only work with a specific value for these two
-		{"client_encoding=SQL_ASCII", "", "", false},
-		{"datestyle='ISO, YDM'", "", "", false},
+		{"client_encoding=SQL_ASCII", "", "", false, false},
+		{"datestyle='ISO, YDM'", "", "", false, false},
+
 		// "options" should work exactly as it does in libpq
-		{"options='-c search_path=pqgotest'", "search_path", "pqgotest", true},
+		// Skipped on pgbouncer as it errors with:
+		//   pq: unsupported startup parameter in options: search_path
+		{"options='-c search_path=pqgotest'", "search_path", "pqgotest", true, true},
+
 		// pq should override client_encoding in this case
-		{"options='-c client_encoding=SQL_ASCII'", "client_encoding", "UTF8", true},
+		// TODO: not set consistently with pgbouncer
+		{"options='-c client_encoding=SQL_ASCII'", "client_encoding", "UTF8", true, true},
+
 		// allow client_encoding to be set explicitly
-		{"client_encoding=UTF8", "client_encoding", "UTF8", true},
+		{"client_encoding=UTF8", "client_encoding", "UTF8", true, false},
+
 		// test a runtime parameter not supported by libpq
-		{"work_mem='139kB'", "work_mem", "139kB", true},
+		// Skipped on pgbouncer as it errors with:
+		//   pq: unsupported startup parameter: work_mem
+		{"work_mem='139kB'", "work_mem", "139kB", true, true},
+
 		// test fallback_application_name
-		{"application_name=foo fallback_application_name=bar", "application_name", "foo", true},
-		{"application_name='' fallback_application_name=bar", "application_name", "", true},
-		{"fallback_application_name=bar", "application_name", "bar", true},
+		{"application_name=foo fallback_application_name=bar", "application_name", "foo", true, false},
+		{"application_name='' fallback_application_name=bar", "application_name", "", true, false},
+		{"fallback_application_name=bar", "application_name", "bar", true, false},
 	}
 
-	for _, test := range tests {
-		db, err := pqtest.DB(test.conninfo)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		// application_name didn't exist before 9.0
-		if test.param == "application_name" && getServerVersion(t, db) < 90000 {
-			db.Close()
-			continue
-		}
-
-		tryGetParameterValue := func() (value string, success bool) {
-			defer db.Close()
-			row := db.QueryRow("SELECT current_setting($1)", test.param)
-			err = row.Scan(&value)
-			if err != nil {
-				return "", false
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			if tt.skipPgbouncer {
+				pqtest.SkipPgbouncer(t)
 			}
-			return value, true
-		}
+			db, err := pqtest.DB(tt.conninfo)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-		value, success := tryGetParameterValue()
-		if success != test.success && !success {
-			t.Fatalf("%v: unexpected error: %v", test.conninfo, err)
-		}
-		if success != test.success {
-			t.Fatalf("unexpected outcome %v (was expecting %v) for conninfo \"%s\"",
-				success, test.success, test.conninfo)
-		}
-		if value != test.expected {
-			t.Fatalf("bad value for %s: got %s, want %s with conninfo \"%s\"",
-				test.param, value, test.expected, test.conninfo)
-		}
+			tryGetParameterValue := func() (value string, success bool) {
+				defer db.Close()
+				row := db.QueryRow("SELECT current_setting($1)", tt.param)
+				err = row.Scan(&value)
+				if err != nil {
+					return "", false
+				}
+				return value, true
+			}
+
+			have, success := tryGetParameterValue()
+			if success != tt.success && !success {
+				t.Fatal(err)
+			}
+			if success != tt.success {
+				t.Fatalf("\nhave: %v\nwant: %v", success, tt.success)
+			}
+			if have != tt.want {
+				t.Fatalf("\nhave: %v\nwant: %v", have, tt.want)
+			}
+		})
 	}
 }
 

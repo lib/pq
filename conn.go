@@ -1494,7 +1494,6 @@ func (st *stmt) exec(v []driver.Value) {
 
 	cn.readBindResponse()
 	cn.postExecuteWorkaround()
-
 }
 
 func (st *stmt) NumInput() int {

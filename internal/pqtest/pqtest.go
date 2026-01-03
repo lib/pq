@@ -4,8 +4,20 @@ import (
 	"database/sql"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 )
+
+func Pgbouncer() bool {
+	return os.Getenv("PGPORT") == "6432"
+}
+
+func SkipPgbouncer(t testing.TB) {
+	t.Helper()
+	if Pgbouncer() {
+		t.Skip("skipped for pgbouncer (PGPORT=6432)")
+	}
+}
 
 func ForceBinaryParameters() bool {
 	v, ok := os.LookupEnv("PQTEST_BINARY_PARAMETERS")
@@ -22,17 +34,21 @@ func ForceBinaryParameters() bool {
 	}
 }
 
+var envOnce sync.Once
+
 func DSN(conninfo string) string {
-	defaultTo := func(k string, v string) {
-		if _, ok := os.LookupEnv(k); !ok {
-			os.Setenv(k, v)
+	envOnce.Do(func() {
+		defaultTo := func(k string, v string) {
+			if _, ok := os.LookupEnv(k); !ok {
+				os.Setenv(k, v)
+			}
 		}
-	}
-	defaultTo("PGHOST", "localhost")
-	defaultTo("PGDATABASE", "pqgo")
-	defaultTo("PGUSER", "pqgo")
-	defaultTo("PGSSLMODE", "disable")
-	defaultTo("PGCONNECT_TIMEOUT", "20")
+		defaultTo("PGHOST", "localhost")
+		defaultTo("PGDATABASE", "pqgo")
+		defaultTo("PGUSER", "pqgo")
+		defaultTo("PGSSLMODE", "disable")
+		defaultTo("PGCONNECT_TIMEOUT", "20")
+	})
 
 	if ForceBinaryParameters() &&
 		!strings.HasPrefix(conninfo, "postgres://") &&
@@ -53,4 +69,19 @@ func MustDB(t testing.TB) *sql.DB {
 		t.Fatal(err)
 	}
 	return conn
+}
+
+// ErrorContains checks if the error message in have contains the text in
+// want.
+//
+// This is safe when have is nil. Use an empty string for want if you want to
+// test that err is nil.
+func ErrorContains(have error, want string) bool {
+	if have == nil {
+		return want == ""
+	}
+	if want == "" {
+		return false
+	}
+	return strings.Contains(have.Error(), want)
 }
