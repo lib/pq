@@ -324,6 +324,7 @@ func TestSNISupport(t *testing.T) {
 		conn_param   string
 		hostname     string
 		expected_sni string
+		direct       bool
 	}{
 		{
 			name:         "SNI is set by default",
@@ -349,6 +350,19 @@ func TestSNISupport(t *testing.T) {
 			hostname:     "127.0.0.1",
 			expected_sni: "",
 		},
+		{
+			name:         "SNI is set for negotiated ssl",
+			conn_param:   "sslnegotiation=postgres",
+			hostname:     "localhost",
+			expected_sni: "localhost",
+		},
+		{
+			name:         "SNI is set for direct ssl",
+			conn_param:   "sslnegotiation=direct",
+			hostname:     "localhost",
+			expected_sni: "localhost",
+			direct:       true,
+		},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -362,7 +376,7 @@ func TestSNISupport(t *testing.T) {
 			}
 			serverErrChan := make(chan error, 1)
 			serverSNINameChan := make(chan string, 1)
-			go mockPostgresSSL(listener, serverErrChan, serverSNINameChan)
+			go mockPostgresSSL(listener, tt.direct, serverErrChan, serverSNINameChan)
 
 			defer listener.Close()
 			defer close(serverErrChan)
@@ -397,7 +411,7 @@ func TestSNISupport(t *testing.T) {
 //
 // Accepts postgres StartupMessage and handles TLS clientHello, then closes a connection.
 // While reading clientHello catch passed SNI data and report it to nameChan.
-func mockPostgresSSL(listener net.Listener, errChan chan error, nameChan chan string) {
+func mockPostgresSSL(listener net.Listener, direct bool, errChan chan error, nameChan chan string) {
 	var sniHost string
 
 	conn, err := listener.Accept()
@@ -413,23 +427,25 @@ func mockPostgresSSL(listener net.Listener, errChan chan error, nameChan chan st
 		return
 	}
 
-	// Receive StartupMessage with SSL Request
-	startupMessage := make([]byte, 8)
-	if _, err := io.ReadFull(conn, startupMessage); err != nil {
-		errChan <- err
-		return
-	}
-	// StartupMessage: first four bytes -- total len = 8, last four bytes SslRequestNumber
-	if !bytes.Equal(startupMessage, []byte{0, 0, 0, 0x8, 0x4, 0xd2, 0x16, 0x2f}) {
-		errChan <- fmt.Errorf("unexpected startup message: %#v", startupMessage)
-		return
-	}
+	if !direct {
+		// Receive StartupMessage with SSL Request
+		startupMessage := make([]byte, 8)
+		if _, err := io.ReadFull(conn, startupMessage); err != nil {
+			errChan <- err
+			return
+		}
+		// StartupMessage: first four bytes -- total len = 8, last four bytes SslRequestNumber
+		if !bytes.Equal(startupMessage, []byte{0, 0, 0, 0x8, 0x4, 0xd2, 0x16, 0x2f}) {
+			errChan <- fmt.Errorf("unexpected startup message: %#v", startupMessage)
+			return
+		}
 
-	// Respond with SSLOk
-	_, err = conn.Write([]byte("S"))
-	if err != nil {
-		errChan <- err
-		return
+		// Respond with SSLOk
+		_, err = conn.Write([]byte("S"))
+		if err != nil {
+			errChan <- err
+			return
+		}
 	}
 
 	// Set up TLS context to catch clientHello. It will always error out during handshake
