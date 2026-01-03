@@ -658,6 +658,10 @@ func (cn *conn) errRecover(err *error, query ...string) {
 	if *err == driver.ErrBadConn {
 		cn.err.set(driver.ErrBadConn)
 	}
+
+	if c.bad && c.c != nil {
+		c.c.Close()
+	}
 }
 
 func posToLine(pos int, lines []string) (line, col int) {
