@@ -114,106 +114,105 @@ func TestDataTypePrecisionScale(t *testing.T) {
 }
 
 func TestRowsColumnTypes(t *testing.T) {
-	columnTypesTests := []struct {
-		Name     string
-		TypeName string
-		Length   struct {
+	type (
+		length struct {
 			Len int64
 			OK  bool
 		}
-		DecimalSize struct {
+		decimalSize struct {
 			Precision int64
 			Scale     int64
 			OK        bool
 		}
-		ScanType reflect.Type
+	)
+	tests := []struct {
+		Name        string
+		TypeName    string
+		Length      length
+		DecimalSize decimalSize
+		ScanType    reflect.Type
 	}{
 		{
-			Name:     "a",
-			TypeName: "INT4",
-			Length: struct {
-				Len int64
-				OK  bool
-			}{
-				Len: 0,
-				OK:  false,
-			},
-			DecimalSize: struct {
-				Precision int64
-				Scale     int64
-				OK        bool
-			}{
-				Precision: 0,
-				Scale:     0,
-				OK:        false,
-			},
-			ScanType: reflect.TypeOf(int32(0)),
-		}, {
-			Name:     "bar",
-			TypeName: "TEXT",
-			Length: struct {
-				Len int64
-				OK  bool
-			}{
-				Len: math.MaxInt64,
-				OK:  true,
-			},
-			DecimalSize: struct {
-				Precision int64
-				Scale     int64
-				OK        bool
-			}{
-				Precision: 0,
-				Scale:     0,
-				OK:        false,
-			},
-			ScanType: reflect.TypeOf(""),
+			Name:        "a",
+			TypeName:    "INT4",
+			Length:      length{Len: 0, OK: false},
+			DecimalSize: decimalSize{Precision: 0, Scale: 0, OK: false},
+			ScanType:    reflect.TypeOf(int32(0)),
+		},
+		{
+			Name:        "bar",
+			TypeName:    "TEXT",
+			Length:      length{Len: math.MaxInt64, OK: true},
+			DecimalSize: decimalSize{Precision: 0, Scale: 0, OK: false},
+			ScanType:    reflect.TypeOf(""),
+		},
+		{
+			Name:        "dec",
+			TypeName:    "NUMERIC",
+			Length:      length{Len: 0, OK: false},
+			DecimalSize: decimalSize{Precision: 9, Scale: 2, OK: true},
+			ScanType:    reflect.TypeOf(new(any)).Elem(),
+		},
+		{
+			Name:        "f",
+			TypeName:    "FLOAT8",
+			Length:      length{Len: 0, OK: false},
+			DecimalSize: decimalSize{Precision: 0, Scale: 0, OK: false},
+			ScanType:    reflect.TypeOf(float64(0)),
 		},
 	}
 
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
-	rows, err := db.Query("SELECT 1 AS a, text 'bar' AS bar, 1.28::numeric(9, 2) AS dec")
+	rows, err := db.Query(`select
+		1 as a,
+		text 'bar' as bar,
+		1.28::numeric(9, 2) as dec,
+		3.1415::float8 as f
+	`)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 
 	columns, err := rows.ColumnTypes()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(columns) != 3 {
-		t.Errorf("expected 3 columns found %d", len(columns))
+	if len(columns) != 4 {
+		t.Errorf("expected 4 columns found %d", len(columns))
 	}
 
-	for i, tt := range columnTypesTests {
-		c := columns[i]
-		if c.Name() != tt.Name {
-			t.Errorf("(%d) got: %s, want: %s", i, c.Name(), tt.Name)
-		}
-		if c.DatabaseTypeName() != tt.TypeName {
-			t.Errorf("(%d) got: %s, want: %s", i, c.DatabaseTypeName(), tt.TypeName)
-		}
-		l, ok := c.Length()
-		if l != tt.Length.Len {
-			t.Errorf("(%d) got: %d, want: %d", i, l, tt.Length.Len)
-		}
-		if ok != tt.Length.OK {
-			t.Errorf("(%d) got: %t, want: %t", i, ok, tt.Length.OK)
-		}
-		p, s, ok := c.DecimalSize()
-		if p != tt.DecimalSize.Precision {
-			t.Errorf("(%d) got: %d, want: %d", i, p, tt.DecimalSize.Precision)
-		}
-		if s != tt.DecimalSize.Scale {
-			t.Errorf("(%d) got: %d, want: %d", i, s, tt.DecimalSize.Scale)
-		}
-		if ok != tt.DecimalSize.OK {
-			t.Errorf("(%d) got: %t, want: %t", i, ok, tt.DecimalSize.OK)
-		}
-		if c.ScanType() != tt.ScanType {
-			t.Errorf("(%d) got: %v, want: %v", i, c.ScanType(), tt.ScanType)
-		}
+	for i, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			c := columns[i]
+			if c.Name() != tt.Name {
+				t.Errorf("have: %s, want: %s", c.Name(), tt.Name)
+			}
+			if c.DatabaseTypeName() != tt.TypeName {
+				t.Errorf("have: %s, want: %s", c.DatabaseTypeName(), tt.TypeName)
+			}
+			l, ok := c.Length()
+			if l != tt.Length.Len {
+				t.Errorf("have: %d, want: %d", l, tt.Length.Len)
+			}
+			if ok != tt.Length.OK {
+				t.Errorf("have: %t, want: %t", ok, tt.Length.OK)
+			}
+			p, s, ok := c.DecimalSize()
+			if p != tt.DecimalSize.Precision {
+				t.Errorf("have: %d, want: %d", p, tt.DecimalSize.Precision)
+			}
+			if s != tt.DecimalSize.Scale {
+				t.Errorf("have: %d, want: %d", s, tt.DecimalSize.Scale)
+			}
+			if ok != tt.DecimalSize.OK {
+				t.Errorf("have: %t, want: %t", ok, tt.DecimalSize.OK)
+			}
+			if c.ScanType() != tt.ScanType {
+				t.Errorf("have: %v, want: %v", c.ScanType(), tt.ScanType)
+			}
+		})
 	}
 }
