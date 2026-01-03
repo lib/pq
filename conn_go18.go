@@ -9,9 +9,7 @@ import (
 	"time"
 )
 
-const (
-	watchCancelDialContextTimeout = time.Second * 10
-)
+const watchCancelDialContextTimeout = 10 * time.Second
 
 // Implement the "QueryerContext" interface
 func (cn *conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {

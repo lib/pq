@@ -47,6 +47,7 @@ func checkSSLSetup(t *testing.T, conninfo string) {
 
 // Connect over SSL and run a simple query to test the basics
 func TestSSLConnection(t *testing.T) {
+	t.Parallel()
 	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
 	pqtest.SkipPgpool(t)    // TODO: need to fix pgpool setup
 
@@ -66,6 +67,7 @@ func TestSSLConnection(t *testing.T) {
 
 // Test sslmode=verify-full
 func TestSSLVerifyFull(t *testing.T) {
+	t.Parallel()
 	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
 	pqtest.SkipPgpool(t)    // TODO: need to fix pgpool setup
 
@@ -101,6 +103,7 @@ func TestSSLVerifyFull(t *testing.T) {
 
 // Test sslmode=require sslrootcert=rootCertPath
 func TestSSLRequireWithRootCert(t *testing.T) {
+	t.Parallel()
 	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
 	pqtest.SkipPgpool(t)    // TODO: need to fix pgpool setup
 
@@ -139,6 +142,7 @@ func TestSSLRequireWithRootCert(t *testing.T) {
 
 // Test sslmode=verify-ca
 func TestSSLVerifyCA(t *testing.T) {
+	t.Parallel()
 	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
 	pqtest.SkipPgpool(t)    // TODO: need to fix pgpool setup
 
@@ -176,6 +180,7 @@ func TestSSLVerifyCA(t *testing.T) {
 
 // Authenticate over SSL using client certificates
 func TestSSLClientCertificates(t *testing.T) {
+	t.Parallel()
 	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
 	pqtest.SkipPgpool(t)    // TODO: need to fix pgpool setup
 
@@ -276,6 +281,7 @@ func TestSSLClientCertificates(t *testing.T) {
 
 // Authenticate over SSL using inline client certificates
 func TestSSLInlineClientCertificates(t *testing.T) {
+	t.Parallel()
 	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
 	pqtest.SkipPgpool(t)    // TODO: need to fix pgpool setup
 

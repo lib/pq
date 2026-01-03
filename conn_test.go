@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -17,9 +18,7 @@ import (
 	"github.com/lib/pq/internal/pqtest"
 )
 
-type Fatalistic interface {
-	Fatal(args ...any)
-}
+const cancelErrorCode ErrorCode = "57014"
 
 func getServerVersion(t *testing.T, db *sql.DB) int {
 	var version int
@@ -31,6 +30,7 @@ func getServerVersion(t *testing.T, db *sql.DB) int {
 }
 
 func TestReconnect(t *testing.T) {
+	t.Parallel()
 	db1 := pqtest.MustDB(t)
 	defer db1.Close()
 	tx, err := db1.Begin()
@@ -83,6 +83,7 @@ func TestCommitInFailedTransaction(t *testing.T) {
 }
 
 func TestOpenURL(t *testing.T) {
+	t.Parallel()
 	testURL := func(url string) {
 		db, err := pqtest.DB(url)
 		if err != nil {
@@ -635,6 +636,8 @@ func TestErrorDuringStartup(t *testing.T) {
 	//   wrong error code "internal_error": pq: unable to get session context
 	pqtest.SkipPgpool(t)
 
+	t.Parallel()
+
 	// Don't use the normal connection setup, this is intended to blow up in the
 	// startup packet from a non-existent user.
 	db, err := pqtest.DB("user=thisuserreallydoesntexist")
@@ -977,6 +980,7 @@ from (select gs.i
 }
 
 func TestSimpleQuery(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -992,6 +996,7 @@ func TestSimpleQuery(t *testing.T) {
 }
 
 func TestBindError(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -1014,6 +1019,7 @@ func TestBindError(t *testing.T) {
 }
 
 func TestParseErrorInExtendedQuery(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -1033,6 +1039,7 @@ func TestParseErrorInExtendedQuery(t *testing.T) {
 
 // TestReturning tests that an INSERT query using the RETURNING clause returns a row.
 func TestReturning(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -1068,6 +1075,7 @@ func TestReturning(t *testing.T) {
 }
 
 func TestIssue186(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -1112,6 +1120,7 @@ func TestIssue186(t *testing.T) {
 }
 
 func TestIssue196(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -1134,6 +1143,7 @@ func TestIssue196(t *testing.T) {
 // Test that any CommandComplete messages sent before the query results are
 // ignored.
 func TestIssue282(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -1151,6 +1161,7 @@ func TestIssue282(t *testing.T) {
 }
 
 func TestReadFloatPrecision(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -1227,29 +1238,23 @@ func TestXactMultiStmt(t *testing.T) {
 	}
 }
 
-var envParseTests = []struct {
-	Expected map[string]string
-	Env      []string
-}{
-	{
-		Env:      []string{"PGDATABASE=hello", "PGUSER=goodbye"},
-		Expected: map[string]string{"dbname": "hello", "user": "goodbye"},
-	},
-	{
-		Env:      []string{"PGDATESTYLE=ISO, MDY"},
-		Expected: map[string]string{"datestyle": "ISO, MDY"},
-	},
-	{
-		Env:      []string{"PGCONNECT_TIMEOUT=30"},
-		Expected: map[string]string{"connect_timeout": "30"},
-	},
-}
-
 func TestParseEnviron(t *testing.T) {
-	for i, tt := range envParseTests {
-		results := parseEnviron(tt.Env)
-		if !reflect.DeepEqual(tt.Expected, results) {
-			t.Errorf("%d: Expected: %#v Got: %#v", i, tt.Expected, results)
+	tests := []struct {
+		in   []string
+		want map[string]string
+	}{
+		{[]string{"PGDATABASE=hello", "PGUSER=goodbye"},
+			map[string]string{"dbname": "hello", "user": "goodbye"}},
+		{[]string{"PGDATESTYLE=ISO, MDY"},
+			map[string]string{"datestyle": "ISO, MDY"}},
+		{[]string{"PGCONNECT_TIMEOUT=30"},
+			map[string]string{"connect_timeout": "30"}},
+	}
+
+	for i, tt := range tests {
+		results := parseEnviron(tt.in)
+		if !reflect.DeepEqual(tt.want, results) {
+			t.Errorf("%d: want: %#v Got: %#v", i, tt.want, results)
 		}
 	}
 }
@@ -1293,13 +1298,8 @@ func TestParseComplete(t *testing.T) {
 	tpc("SELECT foo", "", 0, true) // invalid row count
 }
 
-// Test interface conformance.
-var (
-	_ driver.ExecerContext  = (*conn)(nil)
-	_ driver.QueryerContext = (*conn)(nil)
-)
-
 func TestNullAfterNonNull(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -1348,11 +1348,11 @@ func TestNullAfterNonNull(t *testing.T) {
 func Test64BitErrorChecking(t *testing.T) {
 	defer func() {
 		if err := recover(); err != nil {
-			t.Fatal("panic due to 0xFFFFFFFF != -1 " +
-				"when int is 64 bits")
+			t.Fatal("panic due to 0xFFFFFFFF != -1 when int is 64 bits")
 		}
 	}()
 
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -1402,6 +1402,7 @@ func TestCommit(t *testing.T) {
 }
 
 func TestErrorClass(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -1475,6 +1476,8 @@ func TestParseOpts(t *testing.T) {
 }
 
 func TestRuntimeParameters(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		conninfo      string
 		param         string
@@ -1681,24 +1684,26 @@ func TestRowsResultTag(t *testing.T) {
 	q := conn.(driver.QueryerContext)
 
 	for _, test := range tests {
-		if rows, err := q.QueryContext(context.Background(), test.query, nil); err != nil {
+		rows, err := q.QueryContext(context.Background(), test.query, nil)
+		if err != nil {
 			t.Fatalf("%s: %s", test.query, err)
-		} else {
-			r := rows.(ResultTag)
-			if tag := r.Tag(); tag != test.tag {
-				t.Fatalf("%s: unexpected tag %q", test.query, tag)
-			}
-			res := r.Result()
-			if ra, _ := res.RowsAffected(); ra != test.ra {
-				t.Fatalf("%s: unexpected rows affected: %d", test.query, ra)
-			}
-			rows.Close()
 		}
+
+		r := rows.(ResultTag)
+		if tag := r.Tag(); tag != test.tag {
+			t.Fatalf("%s: unexpected tag %q", test.query, tag)
+		}
+		res := r.Result()
+		if ra, _ := res.RowsAffected(); ra != test.ra {
+			t.Fatalf("%s: unexpected rows affected: %d", test.query, ra)
+		}
+		rows.Close()
 	}
 }
 
 // TestQuickClose tests that closing a query early allows a subsequent query to work.
 func TestQuickClose(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -1727,6 +1732,7 @@ func TestQuickClose(t *testing.T) {
 }
 
 func TestMultipleResult(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -1773,6 +1779,7 @@ func TestMultipleResult(t *testing.T) {
 }
 
 func TestMultipleEmptyResult(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -1803,6 +1810,7 @@ func TestMultipleEmptyResult(t *testing.T) {
 }
 
 func TestCopyInStmtAffectedRows(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -1831,8 +1839,7 @@ func TestCopyInStmtAffectedRows(t *testing.T) {
 }
 
 func TestConnPrepareContext(t *testing.T) {
-	db := pqtest.MustDB(t)
-	defer db.Close()
+	t.Parallel()
 
 	tests := []struct {
 		name string
@@ -1867,6 +1874,9 @@ func TestConnPrepareContext(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			db := pqtest.MustDB(t)
+			defer db.Close()
+
 			ctx, cancel := tt.ctx()
 			if cancel != nil {
 				defer cancel()
@@ -1883,8 +1893,9 @@ func TestConnPrepareContext(t *testing.T) {
 }
 
 func TestStmtQueryContext(t *testing.T) {
-	db := pqtest.MustDB(t)
-	defer db.Close()
+	if !pqtest.Pgpool() {
+		t.Parallel()
+	}
 
 	tests := []struct {
 		name           string
@@ -1919,6 +1930,10 @@ func TestStmtQueryContext(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			db := pqtest.MustDB(t)
+			defer db.Close()
+
 			ctx, cancel := tt.ctx()
 			if cancel != nil {
 				defer cancel()
@@ -1940,8 +1955,9 @@ func TestStmtQueryContext(t *testing.T) {
 }
 
 func TestStmtExecContext(t *testing.T) {
-	db := pqtest.MustDB(t)
-	defer db.Close()
+	if !pqtest.Pgpool() {
+		t.Parallel()
+	}
 
 	tests := []struct {
 		name           string
@@ -1976,6 +1992,10 @@ func TestStmtExecContext(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			db := pqtest.MustDB(t)
+			defer db.Close()
+
 			ctx, cancel := tt.ctx()
 			if cancel != nil {
 				defer cancel()
@@ -1993,5 +2013,421 @@ func TestStmtExecContext(t *testing.T) {
 				t.Errorf("stmt.QueryContext() got = %v, cancelExpected = %v", err.Error(), tt.cancelExpected)
 			}
 		})
+	}
+}
+
+func TestMultipleSimpleQuery(t *testing.T) {
+	t.Parallel()
+	db := pqtest.MustDB(t)
+	defer db.Close()
+
+	rows, err := db.Query("select 1; set time zone default; select 2; select 3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	var i int
+	for rows.Next() {
+		if err := rows.Scan(&i); err != nil {
+			t.Fatal(err)
+		}
+		if i != 1 {
+			t.Fatalf("expected 1, got %d", i)
+		}
+	}
+	if !rows.NextResultSet() {
+		t.Fatal("expected more result sets", rows.Err())
+	}
+	for rows.Next() {
+		if err := rows.Scan(&i); err != nil {
+			t.Fatal(err)
+		}
+		if i != 2 {
+			t.Fatalf("expected 2, got %d", i)
+		}
+	}
+
+	// Make sure that if we ignore a result we can still query.
+
+	rows, err = db.Query("select 4; select 5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if err := rows.Scan(&i); err != nil {
+			t.Fatal(err)
+		}
+		if i != 4 {
+			t.Fatalf("expected 4, got %d", i)
+		}
+	}
+	if !rows.NextResultSet() {
+		t.Fatal("expected more result sets", rows.Err())
+	}
+	for rows.Next() {
+		if err := rows.Scan(&i); err != nil {
+			t.Fatal(err)
+		}
+		if i != 5 {
+			t.Fatalf("expected 5, got %d", i)
+		}
+	}
+	if rows.NextResultSet() {
+		t.Fatal("unexpected result set")
+	}
+}
+
+func TestContextCancelExec(t *testing.T) {
+	t.Parallel()
+	pqtest.SkipPgpool(t) // TODO: flaky in CI
+	db := pqtest.MustDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Delay execution for just a bit until db.ExecContext has begun.
+	defer time.AfterFunc(time.Millisecond*10, cancel).Stop()
+
+	// Not canceled until after the exec has started.
+	if _, err := db.ExecContext(ctx, "select pg_sleep(1)"); err == nil {
+		t.Fatal("expected error")
+	} else if pgErr := (*Error)(nil); !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// Context is already canceled, so error should come before execution.
+	if _, err := db.ExecContext(ctx, "select pg_sleep(1)"); err == nil {
+		t.Fatal("expected error")
+	} else if err.Error() != "context canceled" {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	for i := 0; i < 100; i++ {
+		func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if _, err := db.ExecContext(ctx, "select 1"); err != nil {
+				t.Fatal(err)
+			}
+		}()
+
+		if _, err := db.Exec("select 1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestContextCancelQuery(t *testing.T) {
+	t.Parallel()
+	pqtest.SkipPgpool(t) // TODO: flaky in CI
+	db := pqtest.MustDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Delay execution for just a bit until db.QueryContext has begun.
+	defer time.AfterFunc(time.Millisecond*10, cancel).Stop()
+
+	// Not canceled until after the exec has started.
+	if _, err := db.QueryContext(ctx, "select pg_sleep(1)"); err == nil {
+		t.Fatal("expected error")
+	} else if pgErr := (*Error)(nil); !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// Context is already canceled, so error should come before execution.
+	if _, err := db.QueryContext(ctx, "select pg_sleep(1)"); err == nil {
+		t.Fatal("expected error")
+	} else if err.Error() != "context canceled" {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	for i := 0; i < 100; i++ {
+		func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			rows, err := db.QueryContext(ctx, "select 1")
+			cancel()
+			if err != nil {
+				t.Fatal(err)
+			} else if err := rows.Close(); err != nil && err != driver.ErrBadConn && err != context.Canceled {
+				t.Fatal(err)
+			}
+		}()
+
+		if rows, err := db.Query("select 1"); err != nil {
+			t.Fatal(err)
+		} else if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestIssue617 tests that a failed query in QueryContext doesn't lead to a
+// goroutine leak.
+func TestIssue617(t *testing.T) {
+	t.Parallel()
+
+	db := pqtest.MustDB(t)
+	defer db.Close()
+
+	const N = 10
+
+	numGoroutineStart := runtime.NumGoroutine()
+	for i := 0; i < N; i++ {
+		func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			_, err := db.QueryContext(ctx, `SELECT * FROM DOESNOTEXIST`)
+			pqErr, _ := err.(*Error)
+			// Expecting "pq: relation \"doesnotexist\" does not exist" error.
+			if err == nil || pqErr == nil || pqErr.Code != "42P01" {
+				t.Fatalf("expected undefined table error, got %v", err)
+			}
+		}()
+	}
+
+	// Give time for goroutines to terminate
+	delayTime := time.Millisecond * 50
+	waitTime := time.Second
+	iterations := int(waitTime / delayTime)
+
+	var numGoroutineFinish int
+	for i := 0; i < iterations; i++ {
+		time.Sleep(delayTime)
+
+		numGoroutineFinish = runtime.NumGoroutine()
+
+		// We use N/2 and not N because the GC and other actors may increase or
+		// decrease the number of goroutines.
+		if numGoroutineFinish-numGoroutineStart < N/2 {
+			return
+		}
+	}
+
+	t.Errorf("goroutine leak detected, was %d, now %d", numGoroutineStart, numGoroutineFinish)
+}
+
+func TestContextCancelBegin(t *testing.T) {
+	t.Parallel()
+	pqtest.SkipPgpool(t) // TODO: flaky in CI
+	db := pqtest.MustDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Delay execution for just a bit until tx.Exec has begun.
+	defer time.AfterFunc(time.Millisecond*10, cancel).Stop()
+
+	// Not canceled until after the exec has started.
+	if _, err := tx.Exec("select pg_sleep(1)"); err == nil {
+		t.Fatal("expected error")
+	} else if pgErr := (*Error)(nil); !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// Transaction is canceled, so expect an error.
+	if _, err := tx.Query("select pg_sleep(1)"); err == nil {
+		t.Fatal("expected error")
+	} else if err != sql.ErrTxDone {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// Context is canceled, so cannot begin a transaction.
+	if _, err := db.BeginTx(ctx, nil); err == nil {
+		t.Fatal("expected error")
+	} else if err.Error() != "context canceled" {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	for i := 0; i < 100; i++ {
+		func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			tx, err := db.BeginTx(ctx, nil)
+			cancel()
+			if err != nil {
+				t.Fatal(err)
+			} else if err, pgErr := tx.Rollback(), (*Error)(nil); err != nil &&
+				!(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) &&
+				err != sql.ErrTxDone && err != driver.ErrBadConn && err != context.Canceled {
+				t.Fatal(err)
+			}
+		}()
+
+		if tx, err := db.Begin(); err != nil {
+			t.Fatal(err)
+		} else if err := tx.Rollback(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestTxOptions(t *testing.T) {
+	t.Parallel()
+
+	// TODO: fails with:
+	// go18_test.go:296: wrong isolation level: read committed != read uncommitted
+	// go18_test.go:296: wrong isolation level: read committed != repeatable read
+	// go18_test.go:296: wrong isolation level: read committed != serializable
+	// go18_test.go:306: read/[write,only] not set: true != off for level serializable
+	// go18_test.go:296: wrong isolation level: read committed != serializable
+	pqtest.SkipPgpool(t)
+
+	db := pqtest.MustDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	tests := []struct {
+		level     sql.IsolationLevel
+		isolation string
+	}{
+		{sql.LevelDefault, ""},
+		{sql.LevelReadUncommitted, "read uncommitted"},
+		{sql.LevelReadCommitted, "read committed"},
+		{sql.LevelRepeatableRead, "repeatable read"},
+		{sql.LevelSerializable, "serializable"},
+	}
+
+	for _, tt := range tests {
+		for _, ro := range []bool{true, false} {
+			tx, err := db.BeginTx(ctx, &sql.TxOptions{
+				Isolation: tt.level,
+				ReadOnly:  ro,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var isolation string
+			err = tx.QueryRow("select current_setting('transaction_isolation')").Scan(&isolation)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if tt.isolation != "" && isolation != tt.isolation {
+				t.Errorf("wrong isolation level: %s != %s", isolation, tt.isolation)
+			}
+
+			var isRO string
+			err = tx.QueryRow("select current_setting('transaction_read_only')").Scan(&isRO)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if ro != (isRO == "on") {
+				t.Errorf("read/[write,only] not set: %t != %s for level %s",
+					ro, isRO, tt.isolation)
+			}
+
+			tx.Rollback()
+		}
+	}
+
+	_, err := db.BeginTx(ctx, &sql.TxOptions{
+		Isolation: sql.LevelLinearizable,
+	})
+	if err == nil {
+		t.Fatal("expected LevelLinearizable to fail")
+	}
+	if !strings.Contains(err.Error(), "isolation level not supported") {
+		t.Errorf("Expected error to mention isolation level, got %q", err)
+	}
+}
+
+func TestPing(t *testing.T) {
+	t.Parallel()
+	// TODO: hangs forever?
+	pqtest.SkipPgpool(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	db := pqtest.MustDB(t)
+	defer db.Close()
+
+	if _, ok := reflect.TypeOf(db).MethodByName("Conn"); !ok {
+		t.Skipf("Conn method undefined on type %T, skipping test (requires at least go1.9)", db)
+	}
+
+	if err := db.PingContext(ctx); err != nil {
+		t.Fatal("expected Ping to succeed")
+	}
+	defer cancel()
+
+	// grab a connection
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// start a transaction and read backend pid of our connection
+	tx, err := conn.BeginTx(ctx, &sql.TxOptions{
+		Isolation: sql.LevelDefault,
+		ReadOnly:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := tx.Query("SELECT pg_backend_pid()")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	// read the pid from result
+	var pid int
+	for rows.Next() {
+		if err := rows.Scan(&pid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rows.Err() != nil {
+		t.Fatal(err)
+	}
+	// Fail the transaction and make sure we can still ping.
+	if _, err := tx.Query("INVALID SQL"); err == nil {
+		t.Fatal("expected error")
+	}
+	if err := conn.PingContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+
+	// kill the process which handles our connection and test if the ping fails
+	if _, err := db.Exec("SELECT pg_terminate_backend($1)", pid); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.PingContext(ctx); err != driver.ErrBadConn {
+		t.Fatalf("expected error %s, instead got %s", driver.ErrBadConn, err)
+	}
+}
+
+func TestCommitInFailedTransactionWithCancelContext(t *testing.T) {
+	t.Parallel()
+	db := pqtest.MustDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	txn, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := txn.Query("SELECT error")
+	if err == nil {
+		rows.Close()
+		t.Fatal("expected failure")
+	}
+	err = txn.Commit()
+	if err != ErrInFailedTransaction {
+		t.Fatalf("expected ErrInFailedTransaction; got %#v", err)
 	}
 }

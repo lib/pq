@@ -302,9 +302,11 @@ func (c *locationCache) getLocation(offset int) *time.Location {
 	return location
 }
 
-var infinityTsEnabled = false
-var infinityTsNegative time.Time
-var infinityTsPositive time.Time
+var (
+	infinityTsEnabled  = false
+	infinityTsNegative time.Time
+	infinityTsPositive time.Time
+)
 
 const (
 	infinityTsEnabledAlready        = "pq: infinity timestamp enabled already"
@@ -343,9 +345,7 @@ func EnableInfinityTs(negative time.Time, positive time.Time) {
 	infinityTsPositive = positive
 }
 
-/*
- * Testing might want to toggle infinityTsEnabled
- */
+// Testing might want to toggle infinityTsEnabled
 func disableInfinityTs() {
 	infinityTsEnabled = false
 }

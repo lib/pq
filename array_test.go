@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"database/sql/driver"
+	"fmt"
 	"math/rand"
 	"reflect"
 	"strings"
@@ -1653,4 +1654,58 @@ func TestArrayValueBackend(t *testing.T) {
 			t.Errorf("Expected %v to equal %s, got %v", tt.v, tt.s, err)
 		}
 	}
+}
+
+func TestArrayArg(t *testing.T) {
+	db := pqtest.MustDB(t)
+	defer db.Close()
+
+	tests := []struct {
+		pgType  string
+		in, out any
+	}{
+		{"int[]", []int{245, 231}, []int64{245, 231}},
+		{"int[]", &[]int{245, 231}, []int64{245, 231}},
+		{"int[]", []int64{245, 231}, nil},
+		{"int[]", &[]int64{245, 231}, []int64{245, 231}},
+		{"varchar[]", []string{"hello", "world"}, nil},
+		{"varchar[]", &[]string{"hello", "world"}, []string{"hello", "world"}},
+	}
+
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			if tt.out == nil {
+				tt.out = tt.in
+			}
+
+			r, err := db.Query(fmt.Sprintf("SELECT $1::%s", tt.pgType), tt.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+
+			if !r.Next() {
+				if r.Err() != nil {
+					t.Fatal(r.Err())
+				}
+				t.Fatal("expected row")
+			}
+
+			defer func() {
+				if r.Next() {
+					t.Fatal("unexpected row")
+				}
+			}()
+
+			have := reflect.New(reflect.TypeOf(tt.out))
+			if err := r.Scan(Array(have.Interface())); err != nil {
+				t.Fatal(err)
+			}
+
+			if !reflect.DeepEqual(tt.out, have.Elem().Interface()) {
+				t.Errorf("\nhave: %v\nwant %v", have, tt.out)
+			}
+		})
+	}
+
 }
