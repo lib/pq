@@ -8,14 +8,20 @@ import (
 	"testing"
 )
 
-func Pgbouncer() bool {
-	return os.Getenv("PGPORT") == "6432"
-}
+func Pgbouncer() bool { return os.Getenv("PGPORT") == "6432" }
+func Pgpool() bool    { return os.Getenv("PGPORT") == "7432" }
 
 func SkipPgbouncer(t testing.TB) {
 	t.Helper()
 	if Pgbouncer() {
 		t.Skip("skipped for pgbouncer (PGPORT=6432)")
+	}
+}
+
+func SkipPgpool(t testing.TB) {
+	t.Helper()
+	if Pgpool() {
+		t.Skip("skipped for pgpool (PGPORT=7432)")
 	}
 }
 

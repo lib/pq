@@ -589,6 +589,10 @@ func TestErrorDuringStartup(t *testing.T) {
 	// sends a different error.
 	pqtest.SkipPgbouncer(t)
 
+	// TODO: this one also:
+	//   wrong error code "internal_error": pq: unable to get session context
+	pqtest.SkipPgpool(t)
+
 	// Don't use the normal connection setup, this is intended to blow up in the
 	// startup packet from a non-existent user.
 	db, err := pqtest.DB("user=thisuserreallydoesntexist")

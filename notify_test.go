@@ -498,6 +498,10 @@ func TestListenerReconnect(t *testing.T) {
 		if !pqtest.ErrorContains(err, "server conn crashed") {
 			t.Fatalf("unexpected error %T: %[1]s", err)
 		}
+	} else if pqtest.Pgpool() {
+		if !pqtest.ErrorContains(err, "unable to forward message to frontend") {
+			t.Fatalf("unexpected error %T: %[1]s", err)
+		}
 	} else {
 		if err != io.EOF {
 			t.Fatalf("unexpected error %T: %[1]s", err)

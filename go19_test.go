@@ -13,6 +13,9 @@ import (
 )
 
 func TestPing(t *testing.T) {
+	// TODO: hangs forever?
+	pqtest.SkipPgpool(t)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	db := pqtest.MustDB(t)
 	defer db.Close()

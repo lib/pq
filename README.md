@@ -60,3 +60,8 @@ Tests can be run against pgbouncer with:
 
     docker compose up -d pgbouncer pg18
     PGPORT=6432 go test ./...
+
+and pgpool with:
+
+    docker compose up -d pgpool pg18
+    PGPORT=7432 go test ./...
