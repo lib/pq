@@ -192,6 +192,54 @@ localhost:*:*:*:pass_C
 	assertPassword(values{"host": "server", "passfile": pgpassFile, "dbname": "some_db", "user": "some_user"}, "pass_A")
 }
 
+func TestExecNilSlice(t *testing.T) {
+	db := pqtest.MustDB(t)
+	defer db.Close()
+
+	_, err := db.Exec("create temp table x (b1 text, b2 text, b3 text)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var (
+		b1 []byte
+		b2 []string
+		b3 = []byte{}
+	)
+	_, err = db.Exec("insert into x (b1, b2, b3) values ($1, $2, $3)", b1, b2, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.Query(`select * from x`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if rows.Err() != nil {
+			t.Fatal(rows.Err())
+		}
+		var b1, b2, b3 *string
+		err = rows.Scan(&b1, &b2, &b3)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		deref := func(s *string) string {
+			if s == nil {
+				return "<nil>"
+			}
+			return fmt.Sprintf("%q", *s)
+		}
+
+		want := `b1=<nil>; b2=<nil>; b3=""`
+		have := fmt.Sprintf("b1=%s; b2=%s; b3=%s", deref(b1), deref(b2), deref(b3))
+		if want != have {
+			t.Errorf("\nwant: %s\nhave: %s", want, have)
+		}
+	}
+}
+
 func TestExec(t *testing.T) {
 	db := pqtest.MustDB(t)
 	defer db.Close()
@@ -205,7 +253,6 @@ func TestExec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	if n, _ := r.RowsAffected(); n != 1 {
 		t.Fatalf("expected 1 row affected, not %d", n)
 	}
@@ -214,29 +261,24 @@ func TestExec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	if n, _ := r.RowsAffected(); n != 3 {
 		t.Fatalf("expected 3 rows affected, not %d", n)
 	}
 
-	// SELECT doesn't send the number of returned rows in the command tag
-	// before 9.0
-	if getServerVersion(t, db) >= 90000 {
-		r, err = db.Exec("SELECT g FROM generate_series(1, 2) g")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n, _ := r.RowsAffected(); n != 2 {
-			t.Fatalf("expected 2 rows affected, not %d", n)
-		}
+	r, err = db.Exec("SELECT g FROM generate_series(1, 2) g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := r.RowsAffected(); n != 2 {
+		t.Fatalf("expected 2 rows affected, not %d", n)
+	}
 
-		r, err = db.Exec("SELECT g FROM generate_series(1, $1) g", 3)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n, _ := r.RowsAffected(); n != 3 {
-			t.Fatalf("expected 3 rows affected, not %d", n)
-		}
+	r, err = db.Exec("SELECT g FROM generate_series(1, $1) g", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := r.RowsAffected(); n != 3 {
+		t.Fatalf("expected 3 rows affected, not %d", n)
 	}
 }
 
