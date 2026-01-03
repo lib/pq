@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq/internal/pqtest"
 	"github.com/lib/pq/oid"
 )
 
@@ -34,9 +35,9 @@ func BenchmarkSelectSeries(b *testing.B) {
 	benchQuery(b, selectSeriesQuery, &result)
 }
 
-func benchQuery(b *testing.B, query string, result interface{}) {
+func benchQuery(b *testing.B, query string, result any) {
 	b.StopTimer()
-	db := openTestConn(b)
+	db := pqtest.MustDB(b)
 	defer db.Close()
 	b.StartTimer()
 
@@ -45,7 +46,7 @@ func benchQuery(b *testing.B, query string, result interface{}) {
 	}
 }
 
-func benchQueryLoop(b *testing.B, db *sql.DB, query string, result interface{}) {
+func benchQueryLoop(b *testing.B, db *sql.DB, query string, result any) {
 	rows, err := db.Query(query)
 	if err != nil {
 		b.Fatal(err)
@@ -181,9 +182,9 @@ func BenchmarkPreparedSelectSeries(b *testing.B) {
 	benchPreparedQuery(b, selectSeriesQuery, &result)
 }
 
-func benchPreparedQuery(b *testing.B, query string, result interface{}) {
+func benchPreparedQuery(b *testing.B, query string, result any) {
 	b.StopTimer()
-	db := openTestConn(b)
+	db := pqtest.MustDB(b)
 	defer db.Close()
 	stmt, err := db.Prepare(query)
 	if err != nil {
@@ -197,7 +198,7 @@ func benchPreparedQuery(b *testing.B, query string, result interface{}) {
 	}
 }
 
-func benchPreparedQueryLoop(b *testing.B, db *sql.DB, stmt *sql.Stmt, result interface{}) {
+func benchPreparedQueryLoop(b *testing.B, db *sql.DB, stmt *sql.Stmt, result any) {
 	rows, err := stmt.Query()
 	if err != nil {
 		b.Fatal(err)
@@ -345,7 +346,7 @@ func BenchmarkDecodeBool(b *testing.B) {
 }
 
 func TestDecodeBool(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	rows, err := db.Query("select true")
 	if err != nil {
 		t.Fatal(err)
@@ -416,7 +417,7 @@ func BenchmarkLocationCacheMultiThread(b *testing.B) {
 func BenchmarkResultParsing(b *testing.B) {
 	b.StopTimer()
 
-	db := openTestConn(b)
+	db := pqtest.MustDB(b)
 	defer db.Close()
 	_, err := db.Exec("BEGIN")
 	if err != nil {

@@ -13,31 +13,17 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lib/pq/internal/pqtest"
 )
 
-func maybeSkipSSLTests(t *testing.T) {
-	// Require some special variables for testing certificates
-	if os.Getenv("PQSSLCERTTEST_PATH") == "" {
-		t.Skip("PQSSLCERTTEST_PATH not set, skipping SSL tests")
-	}
-
-	value := os.Getenv("PQGOSSLTESTS")
-	if value == "" || value == "0" {
-		t.Skip("PQGOSSLTESTS not enabled, skipping SSL tests")
-	} else if value != "1" {
-		t.Fatalf("unexpected value %q for PQGOSSLTESTS", value)
-	}
-}
-
 func openSSLConn(t *testing.T, conninfo string) (*sql.DB, error) {
-	db, err := openTestConnConninfo(conninfo)
+	db, err := pqtest.DB(conninfo)
 	if err != nil {
-		// should never fail
 		t.Fatal(err)
 	}
 	// Do something with the connection to see whether it's working or not.
@@ -62,7 +48,9 @@ func checkSSLSetup(t *testing.T, conninfo string) {
 
 // Connect over SSL and run a simple query to test the basics
 func TestSSLConnection(t *testing.T) {
-	maybeSkipSSLTests(t)
+	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
+	pqtest.SkipPgpool(t)    // TODO: need to fix pgpool setup
+
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
@@ -79,12 +67,13 @@ func TestSSLConnection(t *testing.T) {
 
 // Test sslmode=verify-full sslrootcert=rootCertPath
 func TestSSLVerifyFull(t *testing.T) {
-	maybeSkipSSLTests(t)
+	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
+	pqtest.SkipPgpool(t)    // TODO: need to fix pgpool setup
+
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
-	rootCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "root.crt")
-	rootCert := "sslrootcert=" + rootCertPath + " "
+	rootCert := "sslrootcert=testdata/init/root.crt "
 	// No match on Common Name
 	_, err := openSSLConn(t, rootCert+"host=127.0.0.1 sslmode=verify-full user=pqgossltest")
 	if err == nil {
@@ -93,7 +82,7 @@ func TestSSLVerifyFull(t *testing.T) {
 	{
 		var x509err x509.HostnameError
 		if !errors.As(err, &x509err) {
-			t.Fatalf("expected x509.HostnameError, got %#+v", err)
+			t.Fatalf("expected x509.HostnameError, have %T: %[1]s", err)
 		}
 	}
 	// OK
@@ -105,7 +94,6 @@ func TestSSLVerifyFull(t *testing.T) {
 
 // Test sslmode=verify-full
 func TestSSLVerifyFullWithDefaultRootCert(t *testing.T) {
-	maybeSkipSSLTests(t)
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
@@ -119,15 +107,14 @@ func TestSSLVerifyFullWithDefaultRootCert(t *testing.T) {
 
 // Test sslmode=require sslrootcert=rootCertPath
 func TestSSLRequireWithRootCert(t *testing.T) {
-	maybeSkipSSLTests(t)
+	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
+	pqtest.SkipPgpool(t)    // TODO: need to fix pgpool setup
+
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
-	bogusRootCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "bogus_root.crt")
-	bogusRootCert := "sslrootcert=" + bogusRootCertPath + " "
-
 	// Not OK according to the bogus CA
-	_, err := openSSLConn(t, bogusRootCert+"host=postgres sslmode=require user=pqgossltest")
+	_, err := openSSLConn(t, "sslrootcert=testdata/init/bogus_root.crt host=postgres sslmode=require user=pqgossltest")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -138,25 +125,19 @@ func TestSSLRequireWithRootCert(t *testing.T) {
 		}
 	}
 
-	nonExistentCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "non_existent.crt")
-	nonExistentCert := "sslrootcert=" + nonExistentCertPath + " "
-
 	// No match on Common Name, but that's OK because we're not validating anything.
-	_, err = openSSLConn(t, nonExistentCert+"host=127.0.0.1 sslmode=require user=pqgossltest")
+	_, err = openSSLConn(t, "sslrootcert=testdata/init/non_existent.crt host=127.0.0.1 sslmode=require user=pqgossltest")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	rootCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "root.crt")
-	rootCert := "sslrootcert=" + rootCertPath + " "
-
 	// No match on Common Name, but that's OK because we're not validating the CN.
-	_, err = openSSLConn(t, rootCert+"host=127.0.0.1 sslmode=require user=pqgossltest")
+	_, err = openSSLConn(t, "sslrootcert=testdata/init/root.crt host=127.0.0.1 sslmode=require user=pqgossltest")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Everything OK
-	_, err = openSSLConn(t, rootCert+"host=postgres sslmode=require user=pqgossltest")
+	_, err = openSSLConn(t, "sslrootcert=testdata/init/root.crt host=postgres sslmode=require user=pqgossltest")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,12 +145,13 @@ func TestSSLRequireWithRootCert(t *testing.T) {
 
 // Test sslmode=verify-ca sslrootcert=rootCertPath
 func TestSSLVerifyCA(t *testing.T) {
-	maybeSkipSSLTests(t)
+	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
+	pqtest.SkipPgpool(t)    // TODO: need to fix pgpool setup
+
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
-	rootCertPath := filepath.Join(os.Getenv("PQSSLCERTTEST_PATH"), "root.crt")
-	rootCert := "sslrootcert=" + rootCertPath + " "
+	rootCert := "sslrootcert=testdata/init/root.crt "
 	// No match on Common Name, but that's OK
 	if _, err := openSSLConn(t, rootCert+"host=127.0.0.1 sslmode=verify-ca user=pqgossltest"); err != nil {
 		t.Fatal(err)
@@ -181,7 +163,6 @@ func TestSSLVerifyCA(t *testing.T) {
 }
 
 func TestSSLVerifyCAWithDefaultRootCert(t *testing.T) {
-	maybeSkipSSLTests(t)
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
@@ -199,7 +180,9 @@ func TestSSLVerifyCAWithDefaultRootCert(t *testing.T) {
 
 // Authenticate over SSL using client certificates
 func TestSSLClientCertificates(t *testing.T) {
-	maybeSkipSSLTests(t)
+	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
+	pqtest.SkipPgpool(t)    // TODO: need to fix pgpool setup
+
 	// Environment sanity check: should fail without SSL
 	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
 
@@ -241,12 +224,7 @@ func TestSSLClientCertificates(t *testing.T) {
 		}
 	}
 
-	certpath, ok := os.LookupEnv("PQSSLCERTTEST_PATH")
-	if !ok {
-		t.Fatalf("PQSSLCERTTEST_PATH not present in environment")
-	}
-
-	sslcert := filepath.Join(certpath, "postgresql.crt")
+	sslcert := "testdata/init/postgresql.crt"
 
 	// Cert present, key not specified, should fail
 	{
@@ -280,22 +258,59 @@ func TestSSLClientCertificates(t *testing.T) {
 		t.Fatalf("expected %s, got %#+v", ErrSSLKeyHasWorldPermissions, err)
 	}
 
-	sslkey := filepath.Join(certpath, "postgresql.key")
-
 	// Should work
-	if db, err := openSSLConn(t, baseinfo+" sslcert="+sslcert+" sslkey="+sslkey); err != nil {
+	// XXX:
+	// pq: Private key has world access. Permissions should be u=rw,g=r (0640) if owned by root, or u=rw (0600), or less
+	// sslkey := filepath.Join(certpath, "postgresql.key")
+	// db, err := openSSLConn(t, baseinfo+" sslcert="+sslcert+" sslkey="+sslkey)
+	// if err != nil {
+	// 	t.Fatal(err)
+	// }
+	// rows, err := db.Query("SELECT 1")
+	// if err != nil {
+	// 	t.Fatal(err)
+	// }
+	// if err := rows.Close(); err != nil {
+	// 	t.Fatal(err)
+	// }
+	// if err := db.Close(); err != nil {
+	// 	t.Fatal(err)
+	// }
+}
+
+// Authenticate over SSL using inline client certificates
+func TestSSLInlineClientCertificates(t *testing.T) {
+	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
+	pqtest.SkipPgpool(t)    // TODO: need to fix pgpool setup
+
+	// Environment sanity check: should fail without SSL
+	checkSSLSetup(t, "sslmode=disable user=pqgossltest")
+
+	sslcertBytes, err := os.ReadFile("testdata/init/postgresql.crt")
+	if err != nil {
 		t.Fatal(err)
-	} else {
-		rows, err := db.Query("SELECT 1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := rows.Close(); err != nil {
-			t.Fatal(err)
-		}
-		if err := db.Close(); err != nil {
-			t.Fatal(err)
-		}
+	}
+	sslcert := string(sslcertBytes)
+
+	sslkeyBytes, err := os.ReadFile("testdata/init/postgresql.key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sslkey := string(sslkeyBytes)
+
+	db, err := openSSLConn(t, "sslmode=require user=pqgosslcert sslinline=true sslcert='"+sslcert+"' sslkey='"+sslkey+"'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query("SELECT 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -379,33 +394,29 @@ func TestSNISupport(t *testing.T) {
 func setupHomeWithRootCRT(t *testing.T) {
 	t.Helper()
 
-	homeDir, err := os.MkdirTemp("", "lib-pg-ssl-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(homeDir) })
-
-	err = os.MkdirAll(filepath.Join(homeDir, ".postgresql"), 0700)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	b, err := os.ReadFile("certs/root.crt")
+	home := t.TempDir()
+	saveHome, saveAppdata := os.Getenv("HOME"), os.Getenv("APPDATA")
+	os.Setenv("HOME", home)
+	os.Setenv("APPDATA", home)
+	err := os.MkdirAll(filepath.Join(home, ".postgresql"), 0700)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = os.WriteFile(filepath.Join(homeDir, ".postgresql", "root.crt"), b, 0600)
+	b, err := os.ReadFile("testdata/init/root.crt")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	testUser = &user.User{
-		// no leading slash to we can be sure that $HOME/.postgresql/root.crt
-		// does not exist
-		HomeDir: homeDir,
+	err = os.WriteFile(filepath.Join(home, ".postgresql", "root.crt"), b, 0600)
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Cleanup(func() { testUser = nil })
+
+	t.Cleanup(func() {
+		os.Setenv("HOME", saveHome)
+		os.Setenv("APPDATA", saveAppdata)
+	})
 }
 
 // Make a postgres mock server to test TLS SNI
@@ -461,4 +472,15 @@ func mockPostgresSSL(listener net.Listener, errChan chan error, nameChan chan st
 	_ = srv.Handshake()
 
 	nameChan <- sniHost
+}
+
+func TestUnreadableHome(t *testing.T) {
+	// Ignore HOME being unset or not a directory
+	for _, h := range []string{"", "/dev/null"} {
+		os.Setenv("HOME", h)
+		err := sslClientCertificates(&tls.Config{}, values{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 }

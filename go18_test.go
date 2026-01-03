@@ -9,10 +9,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lib/pq/internal/pqtest"
 )
 
 func TestMultipleSimpleQuery(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	rows, err := db.Query("select 1; set time zone default; select 2; select 3")
@@ -79,7 +81,7 @@ const contextRaceIterations = 100
 const cancelErrorCode ErrorCode = "57014"
 
 func TestContextCancelExec(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -117,7 +119,7 @@ func TestContextCancelExec(t *testing.T) {
 }
 
 func TestContextCancelQuery(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -162,7 +164,7 @@ func TestContextCancelQuery(t *testing.T) {
 // TestIssue617 tests that a failed query in QueryContext doesn't lead to a
 // goroutine leak.
 func TestIssue617(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	const N = 10
@@ -203,7 +205,7 @@ func TestIssue617(t *testing.T) {
 }
 
 func TestContextCancelBegin(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -259,7 +261,15 @@ func TestContextCancelBegin(t *testing.T) {
 }
 
 func TestTxOptions(t *testing.T) {
-	db := openTestConn(t)
+	// TODO: fails with:
+	// go18_test.go:296: wrong isolation level: read committed != read uncommitted
+	// go18_test.go:296: wrong isolation level: read committed != repeatable read
+	// go18_test.go:296: wrong isolation level: read committed != serializable
+	// go18_test.go:306: read/[write,only] not set: true != off for level serializable
+	// go18_test.go:296: wrong isolation level: read committed != serializable
+	pqtest.SkipPgpool(t)
+
+	db := pqtest.MustDB(t)
 	defer db.Close()
 	ctx := context.Background()
 
@@ -267,32 +277,17 @@ func TestTxOptions(t *testing.T) {
 		level     sql.IsolationLevel
 		isolation string
 	}{
-		{
-			level:     sql.LevelDefault,
-			isolation: "",
-		},
-		{
-			level:     sql.LevelReadUncommitted,
-			isolation: "read uncommitted",
-		},
-		{
-			level:     sql.LevelReadCommitted,
-			isolation: "read committed",
-		},
-		{
-			level:     sql.LevelRepeatableRead,
-			isolation: "repeatable read",
-		},
-		{
-			level:     sql.LevelSerializable,
-			isolation: "serializable",
-		},
+		{sql.LevelDefault, ""},
+		{sql.LevelReadUncommitted, "read uncommitted"},
+		{sql.LevelReadCommitted, "read committed"},
+		{sql.LevelRepeatableRead, "repeatable read"},
+		{sql.LevelSerializable, "serializable"},
 	}
 
-	for _, test := range tests {
+	for _, tt := range tests {
 		for _, ro := range []bool{true, false} {
 			tx, err := db.BeginTx(ctx, &sql.TxOptions{
-				Isolation: test.level,
+				Isolation: tt.level,
 				ReadOnly:  ro,
 			})
 			if err != nil {
@@ -305,8 +300,8 @@ func TestTxOptions(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if test.isolation != "" && isolation != test.isolation {
-				t.Errorf("wrong isolation level: %s != %s", isolation, test.isolation)
+			if tt.isolation != "" && isolation != tt.isolation {
+				t.Errorf("wrong isolation level: %s != %s", isolation, tt.isolation)
 			}
 
 			var isRO string
@@ -317,7 +312,7 @@ func TestTxOptions(t *testing.T) {
 
 			if ro != (isRO == "on") {
 				t.Errorf("read/[write,only] not set: %t != %s for level %s",
-					ro, isRO, test.isolation)
+					ro, isRO, tt.isolation)
 			}
 
 			tx.Rollback()

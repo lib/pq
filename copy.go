@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 )
 
@@ -140,6 +141,9 @@ awaitCopyInResponse:
 }
 
 func (ci *copyin) flush(buf []byte) {
+	if len(buf)-1 > math.MaxUint32 {
+		panic("too many columns")
+	}
 	// set message length (without message identifier)
 	binary.BigEndian.PutUint32(buf[1:], uint32(len(buf)-1))
 

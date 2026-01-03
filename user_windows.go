@@ -1,4 +1,5 @@
-// Package pq is a pure Go Postgres driver for the database/sql package.
+//go:build windows && !appengine
+
 package pq
 
 import (

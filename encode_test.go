@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq/internal/pqtest"
 	"github.com/lib/pq/oid"
 )
 
@@ -122,7 +123,7 @@ func TestParseTsErrors(t *testing.T) {
 // Now test that sending the value into the database and parsing it back
 // returns the same time.Time value.
 func TestEncodeAndParseTs(t *testing.T) {
-	db, err := openTestConnConninfo("timezone='Etc/UTC'")
+	db, err := pqtest.DB("timezone='Etc/UTC'")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +181,7 @@ func TestFormatTs(t *testing.T) {
 }
 
 func TestFormatTsBackend(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	var str string
@@ -200,7 +201,7 @@ func TestFormatTsBackend(t *testing.T) {
 }
 
 func TestTimeWithoutTimezone(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	tx, err := db.Begin()
@@ -238,7 +239,7 @@ func TestTimeWithoutTimezone(t *testing.T) {
 }
 
 func TestTimeWithTimezone(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	tx, err := db.Begin()
@@ -281,7 +282,7 @@ func TestTimeWithTimezone(t *testing.T) {
 }
 
 func TestTimestampWithTimeZone(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	tx, err := db.Begin()
@@ -308,7 +309,7 @@ func TestTimestampWithTimeZone(t *testing.T) {
 		// use the full range of the Nanosecond argument
 		refTime := time.Date(2012, 11, 6, 10, 23, 42, 123456000, loc)
 
-		for _, pgTimeZone := range []string{"US/Eastern", "Australia/Darwin"} {
+		for _, pgTimeZone := range []string{"America/New_York", "Australia/Darwin"} {
 			// Switch Postgres's timezone to test different output timestamp formats
 			_, err = tx.Exec(fmt.Sprintf("set time zone '%s'", pgTimeZone))
 			if err != nil {
@@ -341,7 +342,7 @@ func TestTimestampWithTimeZone(t *testing.T) {
 }
 
 func TestTimestampWithOutTimezone(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	test := func(ts, pgts string) {
@@ -382,7 +383,7 @@ func TestTimestampWithOutTimezone(t *testing.T) {
 }
 
 func TestInfinityTimestamp(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 	var err error
 	var resultT time.Time
@@ -394,7 +395,7 @@ func TestInfinityTimestamp(t *testing.T) {
 		Query                  string
 		Param                  string
 		ExpectedErrorStrRegexp *regexp.Regexp
-		ExpectedVal            interface{}
+		ExpectedVal            any
 	}
 	tc := testCases{
 		{"SELECT $1::timestamp", "-infinity", expectedErrorStrRegexp, "-infinity"},
@@ -412,7 +413,7 @@ func TestInfinityTimestamp(t *testing.T) {
 	}
 	// yield []byte
 	for _, q := range tc {
-		var resultI interface{}
+		var resultI any
 		err = db.QueryRow(q.Query, q.Param).Scan(&resultI)
 		if err != nil {
 			t.Errorf("Scanning -/+infinity, expected no error, got %q", err)
@@ -510,7 +511,7 @@ func TestInfinityTimestamp(t *testing.T) {
 }
 
 func TestStringWithNul(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	hello0world := string("hello\x00world")
@@ -522,7 +523,7 @@ func TestStringWithNul(t *testing.T) {
 }
 
 func TestByteSliceToText(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	b := []byte("hello world")
@@ -540,7 +541,7 @@ func TestByteSliceToText(t *testing.T) {
 }
 
 func TestStringToBytea(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	b := "hello world"
@@ -558,7 +559,7 @@ func TestStringToBytea(t *testing.T) {
 }
 
 func TestTextByteSliceToUUID(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	b := []byte("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
@@ -566,7 +567,7 @@ func TestTextByteSliceToUUID(t *testing.T) {
 
 	var result string
 	err := row.Scan(&result)
-	if forceBinaryParameters() {
+	if pqtest.ForceBinaryParameters() {
 		pqErr := err.(*Error)
 		if pqErr == nil {
 			t.Errorf("Expected to get error")
@@ -585,7 +586,7 @@ func TestTextByteSliceToUUID(t *testing.T) {
 }
 
 func TestBinaryByteSlicetoUUID(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	b := []byte{'\xa0', '\xee', '\xbc', '\x99',
@@ -597,7 +598,7 @@ func TestBinaryByteSlicetoUUID(t *testing.T) {
 
 	var result string
 	err := row.Scan(&result)
-	if forceBinaryParameters() {
+	if pqtest.ForceBinaryParameters() {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -616,7 +617,7 @@ func TestBinaryByteSlicetoUUID(t *testing.T) {
 }
 
 func TestStringToUUID(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	s := "a0eebc99-9c0b-4ef8-bb00-6bb9bd380a11"
@@ -634,7 +635,7 @@ func TestStringToUUID(t *testing.T) {
 }
 
 func TestTextByteSliceToInt(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	expected := 12345678
@@ -643,7 +644,7 @@ func TestTextByteSliceToInt(t *testing.T) {
 
 	var result int
 	err := row.Scan(&result)
-	if forceBinaryParameters() {
+	if pqtest.ForceBinaryParameters() {
 		pqErr := err.(*Error)
 		if pqErr == nil {
 			t.Errorf("Expected to get error")
@@ -661,7 +662,7 @@ func TestTextByteSliceToInt(t *testing.T) {
 }
 
 func TestBinaryByteSliceToInt(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	expected := 12345678
@@ -670,7 +671,7 @@ func TestBinaryByteSliceToInt(t *testing.T) {
 
 	var result int
 	err := row.Scan(&result)
-	if forceBinaryParameters() {
+	if pqtest.ForceBinaryParameters() {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -690,7 +691,7 @@ func TestBinaryByteSliceToInt(t *testing.T) {
 func TestTextDecodeIntoString(t *testing.T) {
 	input := []byte("hello world")
 	want := string(input)
-	for _, typ := range []oid.Oid{oid.T_char, oid.T_varchar, oid.T_text} {
+	for _, typ := range []oid.Oid{oid.T_char, oid.T_bpchar, oid.T_varchar, oid.T_text} {
 		got := decode(&parameterStatus{}, input, typ, formatText)
 		if got != want {
 			t.Errorf("invalid string decoding output for %T(%+v), got %v but expected %v", typ, typ, got, want)
@@ -714,7 +715,7 @@ func TestByteaOutputFormatEncoding(t *testing.T) {
 }
 
 func TestByteaOutputFormats(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	if getServerVersion(t, db) < 90000 {

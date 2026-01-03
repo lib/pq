@@ -3,41 +3,30 @@ package pq
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"io/ioutil"
+	"errors"
 	"net"
 	"os"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 )
-
-var testUser *user.User // for replacing user.Current() in tests
 
 // ssl generates a function to upgrade a net.Conn based on the "sslmode" and
 // related settings. The function is nil when no upgrade should take place.
 func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
-	var usr *user.User
-	// usr.Current() might fail when cross-compiling. We have to ignore the
-	// error and continue without home directory defaults, since we wouldn't
-	// know from where to load certificates.
-	if testUser != nil {
-		usr = new(user.User)
-		*usr = *testUser
-	} else {
-		usr, _ = user.Current()
-	}
+	home := getHome()
 
 	verifyCaOnly := false
 	tlsConf := tls.Config{}
 
-	if usr != nil && o["sslmode"] != "disable" && o["sslrootcert"] == "" {
+	if home != "" && o["sslmode"] != "disable" && o["sslrootcert"] == "" {
 		// https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLROOTCERT
 		// https://www.postgresql.org/docs/current/libpq-ssl.html#LIBQ-SSL-CERTIFICATES
 		if runtime.GOOS == "windows" {
-			o["sslrootcert"] = filepath.Join(usr.HomeDir, "AppData", "Roaming", "postgresql", "root.crt")
+			o["sslrootcert"] = filepath.Join(home, "root.crt")
 		} else {
-			o["sslrootcert"] = filepath.Join(usr.HomeDir, ".postgresql", "root.crt")
+			o["sslrootcert"] = filepath.Join(home, ".postgresql", "root.crt")
 		}
 	}
 
@@ -86,7 +75,7 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 		tlsConf.ServerName = o["host"]
 	}
 
-	err := sslClientCertificates(&tlsConf, o, usr)
+	err := sslClientCertificates(&tlsConf, o)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +107,7 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 // "sslkey" settings, or if they aren't set, from the .postgresql directory
 // in the user's home directory. The configured files must exist and have
 // the correct permissions.
-func sslClientCertificates(tlsConf *tls.Config, o values, user *user.User) error {
+func sslClientCertificates(tlsConf *tls.Config, o values) error {
 	sslinline := o["sslinline"]
 	if sslinline == "true" {
 		cert, err := tls.X509KeyPair([]byte(o["sslcert"]), []byte(o["sslkey"]))
@@ -129,21 +118,30 @@ func sslClientCertificates(tlsConf *tls.Config, o values, user *user.User) error
 		return nil
 	}
 
+	home := getHome()
+
 	// In libpq, the client certificate is only loaded if the setting is not blank.
 	//
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1036-L1037
 	sslcert := o["sslcert"]
-	if len(sslcert) == 0 && user != nil {
-		sslcert = filepath.Join(user.HomeDir, ".postgresql", "postgresql.crt")
+	if len(sslcert) == 0 && home != "" {
+		if runtime.GOOS == "windows" {
+			sslcert = filepath.Join(sslcert, "postgresql.crt")
+		} else {
+			sslcert = filepath.Join(home, ".postgresql/postgresql.crt")
+		}
 	}
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1045
 	if len(sslcert) == 0 {
 		return nil
 	}
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1050:L1054
-	if _, err := os.Stat(sslcert); os.IsNotExist(err) {
-		return nil
-	} else if err != nil {
+	_, err := os.Stat(sslcert)
+	if err != nil {
+		perr := new(os.PathError)
+		if errors.As(err, &perr) && (perr.Err == syscall.ENOENT || perr.Err == syscall.ENOTDIR) {
+			return nil
+		}
 		return err
 	}
 
@@ -151,8 +149,12 @@ func sslClientCertificates(tlsConf *tls.Config, o values, user *user.User) error
 	//
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1123-L1222
 	sslkey := o["sslkey"]
-	if len(sslkey) == 0 && user != nil {
-		sslkey = filepath.Join(user.HomeDir, ".postgresql", "postgresql.key")
+	if len(sslkey) == 0 && home != "" {
+		if runtime.GOOS == "windows" {
+			sslkey = filepath.Join(home, "postgresql.key")
+		} else {
+			sslkey = filepath.Join(home, ".postgresql/postgresql.key")
+		}
 	}
 
 	if len(sslkey) > 0 {
@@ -185,7 +187,7 @@ func sslCertificateAuthority(tlsConf *tls.Config, o values) error {
 			cert = []byte(sslrootcert)
 		} else {
 			var err error
-			cert, err = ioutil.ReadFile(sslrootcert)
+			cert, err = os.ReadFile(sslrootcert)
 			if err != nil {
 				return err
 			}

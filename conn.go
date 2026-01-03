@@ -12,11 +12,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"os"
 	"os/user"
-	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,7 +45,8 @@ var (
 
 // Compile time validation that our types implement the expected interfaces
 var (
-	_ driver.Driver = Driver{}
+	_ driver.Driver    = Driver{}
+	_ driver.Validator = &conn{}
 )
 
 // Driver is the Postgres database driver.
@@ -228,34 +230,62 @@ func (cn *conn) handleDriverSettings(o values) (err error) {
 	return boolSetting("binary_parameters", &cn.binaryParameters)
 }
 
+// Matches pqGetHomeDirectory() from PostgreSQL
+//
+// https://github.com/postgres/postgres/blob/2b117bb/src/interfaces/libpq/fe-connect.c#L8214
+func getHome() string {
+	if runtime.GOOS == "windows" {
+		// pq uses SHGetFolderPath(), which is deprecated but x/sys/windows has
+		// KnownFolderPath(). We don't really want to pull that in though, so
+		// use APPDATA env. This is also what PostgreSQL uses in some other
+		// codepaths (get_home_path() for example).
+		ad := os.Getenv("APPDATA")
+		if ad == "" {
+			return ""
+		}
+		return filepath.Join(ad, "postgresql")
+	}
+
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		u, err := user.Current()
+		if err != nil {
+			return ""
+		}
+		home = u.HomeDir
+	}
+	return home
+}
+
+// TODO: this should probably return errors instead of silently skipping it on
+// errors?
 func (cn *conn) handlePgpass(o values) {
 	// if a password was supplied, do not process .pgpass
 	if _, ok := o["password"]; ok {
 		return
 	}
-	filename := os.Getenv("PGPASSFILE")
+	// Get passfile from the options
+	filename := o["passfile"]
 	if filename == "" {
-		// XXX this code doesn't work on Windows where the default filename is
-		// XXX %APPDATA%\postgresql\pgpass.conf
-		// Prefer $HOME over user.Current due to glibc bug: golang.org/issue/13470
-		userHome := os.Getenv("HOME")
-		if userHome == "" {
-			user, err := user.Current()
-			if err != nil {
-				return
-			}
-			userHome = user.HomeDir
+		home := getHome()
+		if home == "" {
+			return
 		}
-		filename = filepath.Join(userHome, ".pgpass")
+		filename = filepath.Join(home, ".pgpass")
 	}
-	fileinfo, err := os.Stat(filename)
-	if err != nil {
-		return
-	}
-	mode := fileinfo.Mode()
-	if mode&(0x77) != 0 {
-		// XXX should warn about incorrect .pgpass permissions as psql does
-		return
+
+	// On Win32, the directory is protected, so we don't have to check the file.
+	if runtime.GOOS != "windows" {
+		fi, err := os.Stat(filename)
+		if err != nil {
+			return
+		}
+		if fi.Mode().Perm()&(0x77) != 0 {
+			fmt.Fprintf(os.Stderr,
+				"WARNING: password file %q has group or world access; permissions should be u=rw (0600) or less\n",
+				filename)
+			return
+		}
 	}
 	file, err := os.Open(filename)
 	if err != nil {
@@ -436,8 +466,10 @@ func dial(ctx context.Context, d Dialer, o values) (net.Conn, error) {
 func network(o values) (string, string) {
 	host := o["host"]
 
-	if strings.HasPrefix(host, "/") {
-		sockPath := path.Join(host, ".s.PGSQL."+o["port"])
+	// UNIX domain sockets are either represented by an (absolute) file system
+	// path or they live in the abstract name space (starting with an @).
+	if filepath.IsAbs(host) || strings.HasPrefix(host, "@") {
+		sockPath := filepath.Join(host, ".s.PGSQL."+o["port"])
 		return "unix", sockPath
 	}
 
@@ -777,9 +809,7 @@ func (noRows) RowsAffected() (int64, error) {
 
 // Decides which column formats to use for a prepared statement.  The input is
 // an array of type oids, one element per result column.
-func decideColumnFormats(
-	colTyps []fieldDesc, forceText bool,
-) (colFmts []format, colFmtData []byte) {
+func decideColumnFormats(colTyps []fieldDesc, forceText bool) (colFmts []format, colFmtData []byte) {
 	if len(colTyps) == 0 {
 		return nil, colFmtDataAllText
 	}
@@ -819,6 +849,9 @@ func decideColumnFormats(
 		return colFmts, colFmtDataAllText
 	} else {
 		colFmtData = make([]byte, 2+len(colFmts)*2)
+		if len(colFmts) > math.MaxUint16 {
+			errorf("too many columns (%d > math.MaxUint16)", len(colFmts))
+		}
 		binary.BigEndian.PutUint16(colFmtData, uint16(len(colFmts)))
 		for i, v := range colFmts {
 			binary.BigEndian.PutUint16(colFmtData[2+i*2:], uint16(v))
@@ -1461,7 +1494,6 @@ func (st *stmt) exec(v []driver.Value) {
 
 	cn.readBindResponse()
 	cn.postExecuteWorkaround()
-
 }
 
 func (st *stmt) NumInput() int {
@@ -2038,6 +2070,8 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("user")
 		case "PGPASSWORD":
 			accrue("password")
+		case "PGPASSFILE":
+			accrue("passfile")
 		case "PGSERVICE", "PGSERVICEFILE", "PGREALM":
 			unsupported()
 		case "PGOPTIONS":

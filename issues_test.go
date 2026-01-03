@@ -6,10 +6,12 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/lib/pq/internal/pqtest"
 )
 
 func TestIssue494(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	query := `CREATE TEMP TABLE t (i INT PRIMARY KEY)`
@@ -34,7 +36,7 @@ func TestIssue494(t *testing.T) {
 func TestIssue1046(t *testing.T) {
 	ctxTimeout := time.Second * 2
 
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), ctxTimeout)
@@ -61,7 +63,7 @@ func TestIssue1046(t *testing.T) {
 }
 
 func TestIssue1062(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	// Ensure that cancelling a QueryRowContext does not result in an ErrBadConn.
@@ -104,7 +106,7 @@ func connIsValid(t *testing.T, db *sql.DB) {
 }
 
 func TestQueryCancelRace(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	// cancel a query while executing on Postgres: must return the cancelled error code
@@ -126,7 +128,7 @@ func TestQueryCancelRace(t *testing.T) {
 
 // Test cancelling a scan after it is started. This broke with 1.10.4.
 func TestQueryCancelledReused(t *testing.T) {
-	db := openTestConn(t)
+	db := pqtest.MustDB(t)
 	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
