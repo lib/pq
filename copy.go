@@ -106,7 +106,7 @@ awaitCopyInResponse:
 			err = errCopyToNotSupported
 			break awaitCopyInResponse
 		case 'E':
-			err = parseError(r)
+			err = parseError(r, q)
 		case 'Z':
 			if err == nil {
 				ci.setBad(driver.ErrBadConn)
@@ -170,14 +170,14 @@ func (ci *copyin) resploop() {
 			ci.setResult(res)
 		case 'N':
 			if n := ci.cn.noticeHandler; n != nil {
-				n(parseError(&r))
+				n(parseError(&r, ""))
 			}
 		case 'Z':
 			ci.cn.processReadyForQuery(&r)
 			ci.done <- true
 			return
 		case 'E':
-			err := parseError(&r)
+			err := parseError(&r, "")
 			ci.setError(err)
 		default:
 			ci.setBad(driver.ErrBadConn)
