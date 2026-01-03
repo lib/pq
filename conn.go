@@ -1998,7 +1998,8 @@ func parseStatementRowDescribe(r *readBuf) (colNames []string, colTyps []fieldDe
 	colTyps = make([]fieldDesc, n)
 	for i := range colNames {
 		colNames[i] = r.string()
-		r.next(6)
+		colTyps[i].TableOID = r.oid()
+		colTyps[i].AtribNr = r.int16()
 		colTyps[i].OID = r.oid()
 		colTyps[i].Len = r.int16()
 		colTyps[i].Mod = r.int32()
@@ -2015,7 +2016,8 @@ func parsePortalRowDescribe(r *readBuf) rowsHeader {
 	colTyps := make([]fieldDesc, n)
 	for i := range colNames {
 		colNames[i] = r.string()
-		r.next(6)
+		colTyps[i].TableOID = r.oid()
+		colTyps[i].AtribNr = r.int16()
 		colTyps[i].OID = r.oid()
 		colTyps[i].Len = r.int16()
 		colTyps[i].Mod = r.int32()
