@@ -1,6 +1,7 @@
 package pq
 
 import (
+	"crypto"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -14,7 +15,7 @@ import (
 
 // ssl generates a function to upgrade a net.Conn based on the "sslmode" and
 // related settings. The function is nil when no upgrade should take place.
-func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
+func ssl(o values) (func(net.Conn) (*tls.Conn, error), error) {
 	verifyCaOnly := false
 	tlsConf := tls.Config{}
 	switch mode := o["sslmode"]; mode {
@@ -78,7 +79,7 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 	// also initiates renegotiations and cannot be reconfigured.
 	tlsConf.Renegotiation = tls.RenegotiateFreelyAsClient
 
-	return func(conn net.Conn) (net.Conn, error) {
+	return func(conn net.Conn) (*tls.Conn, error) {
 		client := tls.Client(conn, &tlsConf)
 		if verifyCaOnly {
 			err := sslVerifyCertificateAuthority(client, &tlsConf)
@@ -219,4 +220,29 @@ func sslnegotiation(o values) bool {
 		return false
 	}
 	return true
+}
+
+func tlsServerEndPoint(conn *tls.Conn) ([]byte, error) {
+	err := conn.Handshake()
+	if err != nil {
+		return nil, err
+	}
+
+	cert := conn.ConnectionState().PeerCertificates[0]
+
+	// choose the channel binding hash type
+	// Use the same hash type used for the certificate signature, except for MD5 and SHA-1 which
+	// use SHA256
+	hashType := crypto.SHA256
+	switch cert.SignatureAlgorithm {
+	case x509.SHA384WithRSA, x509.ECDSAWithSHA384, x509.SHA384WithRSAPSS:
+		hashType = crypto.SHA384
+	case x509.SHA512WithRSA, x509.ECDSAWithSHA512, x509.SHA512WithRSAPSS:
+		hashType = crypto.SHA512
+	}
+
+	hasher := hashType.New()
+	_, _ = hasher.Write(cert.Raw)
+	data := hasher.Sum(nil)
+	return data, nil
 }

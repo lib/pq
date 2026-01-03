@@ -39,6 +39,20 @@ func (b *readBuf) string() string {
 	return string(s)
 }
 
+func (b *readBuf) strings() []string {
+	ss := []string{}
+	for (*b)[0] != 0 {
+		i := bytes.IndexByte(*b, 0)
+		if i < 0 {
+			errorf("invalid message format; expected string terminator")
+		}
+		s := (*b)[:i]
+		*b = (*b)[i+1:]
+		ss = append(ss, string(s))
+	}
+	return ss
+}
+
 func (b *readBuf) next(n int) (v []byte) {
 	v = (*b)[:n]
 	*b = (*b)[n:]
