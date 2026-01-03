@@ -6,6 +6,9 @@ import (
 	"io"
 	"net"
 	"runtime"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 )
 
 // Error severities
@@ -21,25 +24,99 @@ const (
 
 // Error represents an error communicating with the server.
 //
+// The [Error] method only returns the error message and error code:
+//
+//	pq: invalid input syntax for type json (22P02)
+//
+// The [ErrorWithDetail] method also includes the error Detail, Hint, and
+// location context (if any):
+//
+//	ERROR:   invalid input syntax for type json (22P02)
+//	DETAIL:  Token "asd" is invalid.
+//	CONTEXT: line 5, column 8:
+//
+//	 3 | 'def',
+//	 4 | 123,
+//	 5 | 'foo', 'asd'::jsonb
+//	            ^
+//
 // See http://www.postgresql.org/docs/current/static/protocol-error-fields.html for details of the fields
 type Error struct {
-	Severity         string
-	Code             ErrorCode
-	Message          string
-	Detail           string
-	Hint             string
-	Position         string
+	// [Efatal], [Epanic], [Ewarning], [Enotice], [Edebug], [Einfo], or [Elog].
+	// Always present.
+	Severity string
+
+	// SQLSTATE code. Always present.
+	Code ErrorCode
+
+	// Primary human-readable error message. This should be accurate but terse
+	// (typically one line). Always present.
+	Message string
+
+	// Optional secondary error message carrying more detail about the problem.
+	// Might run to multiple lines.
+	Detail string
+
+	// Optional suggestion what to do about the problem. This is intended to
+	// differ from Detail in that it offers advice (potentially inappropriate)
+	// rather than hard facts. Might run to multiple lines.
+	Hint string
+
+	// error position as an index into the original query string, as decimal
+	// ASCII integer. The first character has index 1, and positions are
+	// measured in characters not bytes.
+	Position string
+
+	// This is defined the same as the Position field, but it is used when the
+	// cursor position refers to an internally generated command rather than the
+	// one submitted by the client. The InternalQuery field will always appear
+	// when this field appears.
 	InternalPosition string
-	InternalQuery    string
-	Where            string
-	Schema           string
-	Table            string
-	Column           string
-	DataTypeName     string
-	Constraint       string
-	File             string
-	Line             string
-	Routine          string
+
+	// Text of a failed internally-generated command. This could be, for
+	// example, an SQL query issued by a PL/pgSQL function.
+	InternalQuery string
+
+	// An indication of the context in which the error occurred. Presently this
+	// includes a call stack traceback of active procedural language functions
+	// and internally-generated queries. The trace is one entry per line, most
+	// recent first.
+	Where string
+
+	// If the error was associated with a specific database object, the name of
+	// the schema containing that object, if any.
+	Schema string
+
+	// If the error was associated with a specific table, the name of the table.
+	// (Refer to the schema name field for the name of the table's schema.)
+	Table string
+
+	// If the error was associated with a specific table column, the name of the
+	// column. (Refer to the schema and table name fields to identify the
+	// table.)
+	Column string
+
+	// If the error was associated with a specific data type, the name of the
+	// data type. (Refer to the schema name field for the name of the data
+	// type's schema.)
+	DataTypeName string
+
+	// If the error was associated with a specific constraint, the name of the
+	// constraint. Refer to fields listed above for the associated table or
+	// domain. (For this purpose, indexes are treated as constraints, even if
+	// they weren't created with constraint syntax.)
+	Constraint string
+
+	// File name of the source-code location where the error was reported.
+	File string
+
+	// Line number of the source-code location where the error was reported.
+	Line string
+
+	// Name of the source-code routine reporting the error.
+	Routine string
+
+	query string
 }
 
 // ErrorCode is a five-character error code.
@@ -353,8 +430,8 @@ var errorCodeNames = map[ErrorCode]string{
 	"XX002": "index_corrupted",
 }
 
-func parseError(r *readBuf) *Error {
-	err := new(Error)
+func parseError(r *readBuf, q string) *Error {
+	err := &Error{query: q}
 	for t := r.byte(); t != 0; t = r.byte() {
 		msg := r.string()
 		switch t {
@@ -398,63 +475,121 @@ func parseError(r *readBuf) *Error {
 }
 
 // Fatal returns true if the Error Severity is fatal.
-func (err *Error) Fatal() bool {
-	return err.Severity == Efatal
+func (e *Error) Fatal() bool {
+	return e.Severity == Efatal
 }
 
 // SQLState returns the SQLState of the error.
-func (err *Error) SQLState() string {
-	return string(err.Code)
+func (e *Error) SQLState() string {
+	return string(e.Code)
 }
 
-// Get implements the legacy PGError interface. New code should use the fields
-// of the Error struct directly.
-func (err *Error) Get(k byte) (v string) {
+// Get implements the legacy PGError interface.
+//
+// Deprecated: new code should use the fields of the Error struct directly.
+func (e *Error) Get(k byte) (v string) {
 	switch k {
 	case 'S':
-		return err.Severity
+		return e.Severity
 	case 'C':
-		return string(err.Code)
+		return string(e.Code)
 	case 'M':
-		return err.Message
+		return e.Message
 	case 'D':
-		return err.Detail
+		return e.Detail
 	case 'H':
-		return err.Hint
+		return e.Hint
 	case 'P':
-		return err.Position
+		return e.Position
 	case 'p':
-		return err.InternalPosition
+		return e.InternalPosition
 	case 'q':
-		return err.InternalQuery
+		return e.InternalQuery
 	case 'W':
-		return err.Where
+		return e.Where
 	case 's':
-		return err.Schema
+		return e.Schema
 	case 't':
-		return err.Table
+		return e.Table
 	case 'c':
-		return err.Column
+		return e.Column
 	case 'd':
-		return err.DataTypeName
+		return e.DataTypeName
 	case 'n':
-		return err.Constraint
+		return e.Constraint
 	case 'F':
-		return err.File
+		return e.File
 	case 'L':
-		return err.Line
+		return e.Line
 	case 'R':
-		return err.Routine
+		return e.Routine
 	}
 	return ""
 }
 
-func (err *Error) Error() string {
-	return "pq: " + err.Message
+func (e *Error) Error() string {
+	if e.Code != "" {
+		return "pq: " + e.Message + " (" + string(e.Code) + ")"
+	}
+	return "pq: " + e.Message
 }
 
-// PGError is an interface used by previous versions of pq. It is provided
-// only to support legacy code. New code should use the Error type.
+// ErrorWithDetail returns the error message with detailed information and
+// location context (if any).
+//
+// See the documentation on [Error].
+func (e *Error) ErrorWithDetail() string {
+	b := new(strings.Builder)
+	b.Grow(len(e.Message) + len(e.Detail) + len(e.Hint) + 30)
+	b.WriteString("ERROR:   ")
+	b.WriteString(e.Message)
+	if e.Code != "" {
+		b.WriteString(" (")
+		b.WriteString(string(e.Code))
+		b.WriteByte(')')
+	}
+	if e.Detail != "" {
+		b.WriteString("\nDETAIL:  ")
+		b.WriteString(e.Detail)
+	}
+	if e.Hint != "" {
+		b.WriteString("\nHINT:    ")
+		b.WriteString(e.Hint)
+	}
+
+	if e.query != "" && e.Position != "" {
+		b.Grow(512)
+		pos, err := strconv.Atoi(e.Position)
+		if err != nil {
+			return b.String()
+		}
+		lines := strings.Split(e.query, "\n")
+		line, col := posToLine(pos, lines)
+
+		fmt.Fprintf(b, "\nCONTEXT: line %d, column %d:\n\n", line, col)
+		if line > 2 {
+			fmt.Fprintf(b, "% 7d | %s\n", line-2, expandTab(lines[line-3]))
+		}
+		if line > 1 {
+			fmt.Fprintf(b, "% 7d | %s\n", line-1, expandTab(lines[line-2]))
+		}
+		/// Expand tabs, so that the ^ is at at the correct position, but leave
+		/// "column 10-13" intact. Adjusting this to the visual column would be
+		/// better, but we don't know the tabsize of the user in their editor,
+		/// which can be 8, 4, 2, or something else. We can't know. So leaving
+		/// it as the character index is probably the "most correct".
+		expanded := expandTab(lines[line-1])
+		diff := len(expanded) - len(lines[line-1])
+		fmt.Fprintf(b, "% 7d | %s\n", line, expanded)
+		fmt.Fprintf(b, "% 10s%s%s\n", "", strings.Repeat(" ", col-1+diff), "^")
+	}
+
+	return b.String()
+}
+
+// PGError is an interface used by previous versions of pq.
+//
+// Deprecated: use the Error type. This is never used.
 type PGError interface {
 	Error() string
 	Fatal() bool
@@ -483,15 +618,18 @@ func errRecoverNoErrBadConn(err *error) {
 	}
 }
 
-func (cn *conn) errRecover(err *error) {
-	e := recover()
-	switch v := e.(type) {
+func (cn *conn) errRecover(err *error, query ...string) {
+	r := recover()
+	switch v := r.(type) {
 	case nil:
 		// Do nothing
 	case runtime.Error:
 		cn.err.set(driver.ErrBadConn)
 		panic(v)
 	case *Error:
+		if len(query) > 0 && query[0] != "" {
+			v.query = query[0]
+		}
 		if v.Fatal() {
 			*err = driver.ErrBadConn
 		} else {
@@ -512,7 +650,7 @@ func (cn *conn) errRecover(err *error) {
 
 	default:
 		cn.err.set(driver.ErrBadConn)
-		panic(fmt.Sprintf("unknown error: %#v", e))
+		panic(fmt.Sprintf("unknown error: %#v", r))
 	}
 
 	// Any time we return ErrBadConn, we need to remember it since *Tx doesn't
@@ -520,4 +658,48 @@ func (cn *conn) errRecover(err *error) {
 	if *err == driver.ErrBadConn {
 		cn.err.set(driver.ErrBadConn)
 	}
+}
+
+func posToLine(pos int, lines []string) (line, col int) {
+	read := 0
+	for i := range lines {
+		line++
+		ll := utf8.RuneCountInString(lines[i]) + 1 // +1 for the removed newline
+		if read+ll >= pos {
+			col = pos - read
+			if col < 1 { // Should never happen, but just in case.
+				col = 1
+			}
+			break
+		}
+		read += ll
+	}
+	return line, col
+}
+
+func expandTab(s string) string {
+	var (
+		b    strings.Builder
+		l    int
+		fill = func(n int) string {
+			b := make([]byte, n)
+			for i := range b {
+				b[i] = ' '
+			}
+			return string(b)
+		}
+	)
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case '\t':
+			tw := 8 - l%8
+			b.WriteString(fill(tw))
+			l += tw
+		default:
+			b.WriteRune(r)
+			l += 1
+		}
+	}
+	return b.String()
 }

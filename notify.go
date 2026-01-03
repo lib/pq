@@ -210,9 +210,9 @@ func (l *ListenerConn) listenerConnLoop() (err error) {
 			// that, but we should make sure that the error we display is the
 			// one from the stray ErrorResponse, not io.ErrUnexpectedEOF.
 			if !l.setState(connStateExpectReadyForQuery) {
-				return parseError(r)
+				return parseError(r, "")
 			}
-			l.replyChan <- message{t, parseError(r)}
+			l.replyChan <- message{t, parseError(r, "")}
 
 		case 'C', 'I':
 			if !l.setState(connStateExpectReadyForQuery) {
@@ -232,7 +232,7 @@ func (l *ListenerConn) listenerConnLoop() (err error) {
 			// ignore
 		case 'N':
 			if n := l.cn.noticeHandler; n != nil {
-				n(parseError(r))
+				n(parseError(r, ""))
 			}
 		default:
 			return fmt.Errorf("unexpected message %q from server in listenerConnLoop", t)

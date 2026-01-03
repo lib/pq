@@ -717,7 +717,7 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 			// done
 			return
 		case 'E':
-			err = parseError(r)
+			err = parseError(r, q)
 		case 'I':
 			res = emptyRows
 		case 'T', 'D':
@@ -730,7 +730,7 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 }
 
 func (cn *conn) simpleQuery(q string) (res *rows, err error) {
-	defer cn.errRecover(&err)
+	defer cn.errRecover(&err, q)
 
 	b := cn.writeBuf('Q')
 	b.string(q)
@@ -769,7 +769,7 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 			return
 		case 'E':
 			res = nil
-			err = parseError(r)
+			err = parseError(r, q)
 		case 'D':
 			if res == nil {
 				cn.err.set(driver.ErrBadConn)
@@ -886,7 +886,7 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 	if err := cn.err.get(); err != nil {
 		return nil, err
 	}
-	defer cn.errRecover(&err)
+	defer cn.errRecover(&err, q)
 
 	if len(q) >= 4 && strings.EqualFold(q[:4], "COPY") {
 		s, err := cn.prepareCopyIn(q)
@@ -928,7 +928,7 @@ func (cn *conn) query(query string, args []driver.Value) (_ *rows, err error) {
 	if cn.inCopy {
 		return nil, errCopyInProgress
 	}
-	defer cn.errRecover(&err)
+	defer cn.errRecover(&err, query)
 
 	// Check to see if we can use the "simpleQuery" interface, which is
 	// *much* faster than going through prepare/exec
@@ -959,7 +959,7 @@ func (cn *conn) Exec(query string, args []driver.Value) (res driver.Result, err 
 	if err := cn.err.get(); err != nil {
 		return nil, err
 	}
-	defer cn.errRecover(&err)
+	defer cn.errRecover(&err, query)
 
 	// Check to see if we can use the "simpleExec" interface, which is
 	// *much* faster than going through prepare/exec
@@ -1084,10 +1084,10 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 		}
 		switch t {
 		case 'E':
-			panic(parseError(r))
+			panic(parseError(r, ""))
 		case 'N':
 			if n := cn.noticeHandler; n != nil {
-				n(parseError(r))
+				n(parseError(r, ""))
 			}
 		case 'A':
 			if n := cn.notificationHandler; n != nil {
@@ -1115,7 +1115,7 @@ func (cn *conn) recv1Buf(r *readBuf) byte {
 			}
 		case 'N':
 			if n := cn.noticeHandler; n != nil {
-				n(parseError(r))
+				n(parseError(r, ""))
 			}
 		case 'S':
 			cn.processParameterStatus(r)
@@ -1619,7 +1619,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 		t := conn.recv1Buf(&rs.rb)
 		switch t {
 		case 'E':
-			err = parseError(&rs.rb)
+			err = parseError(&rs.rb, "")
 		case 'C', 'I':
 			if t == 'C' {
 				rs.result, rs.tag = conn.parseComplete(rs.rb.string())
@@ -1857,7 +1857,7 @@ func (cn *conn) readParseResponse() {
 	case '1':
 		return
 	case 'E':
-		err := parseError(r)
+		err := parseError(r, "")
 		cn.readReadyForQuery()
 		panic(err)
 	default:
@@ -1886,7 +1886,7 @@ func (cn *conn) readStatementDescribeResponse() (
 			colNames, colTyps = parseStatementRowDescribe(r)
 			return paramTyps, colNames, colTyps
 		case 'E':
-			err := parseError(r)
+			err := parseError(r, "")
 			cn.readReadyForQuery()
 			panic(err)
 		default:
@@ -1904,7 +1904,7 @@ func (cn *conn) readPortalDescribeResponse() rowsHeader {
 	case 'n':
 		return rowsHeader{}
 	case 'E':
-		err := parseError(r)
+		err := parseError(r, "")
 		cn.readReadyForQuery()
 		panic(err)
 	default:
@@ -1920,7 +1920,7 @@ func (cn *conn) readBindResponse() {
 	case '2':
 		return
 	case 'E':
-		err := parseError(r)
+		err := parseError(r, "")
 		cn.readReadyForQuery()
 		panic(err)
 	default:
@@ -1943,7 +1943,7 @@ func (cn *conn) postExecuteWorkaround() {
 		t, r := cn.recv1()
 		switch t {
 		case 'E':
-			err := parseError(r)
+			err := parseError(r, "")
 			cn.readReadyForQuery()
 			panic(err)
 		case 'C', 'D', 'I':
@@ -1958,9 +1958,7 @@ func (cn *conn) postExecuteWorkaround() {
 }
 
 // Only for Exec(), since we ignore the returned data
-func (cn *conn) readExecuteResponse(
-	protocolState string,
-) (res driver.Result, commandTag string, err error) {
+func (cn *conn) readExecuteResponse(protocolState string) (res driver.Result, commandTag string, err error) {
 	for {
 		t, r := cn.recv1()
 		switch t {
@@ -1977,7 +1975,7 @@ func (cn *conn) readExecuteResponse(
 			}
 			return res, commandTag, err
 		case 'E':
-			err = parseError(r)
+			err = parseError(r, "")
 		case 'T', 'D', 'I':
 			if err != nil {
 				cn.err.set(driver.ErrBadConn)

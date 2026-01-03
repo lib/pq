@@ -9,10 +9,25 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 - Add support for NamedValueChecker interface ([#1125])
 
+- The `pq.Error.ErrorWithDetail()` method prints a more detailed multiline
+  message, with the Detail, Hint, and error position (if any) ([#1219]):
+
+      ERROR:   syntax error at or near ")" (42601)
+      CONTEXT: line 12, column 1:
+
+           10 |     name           varchar,
+           11 |     version        varchar,
+           12 | );
+                ^
+
 ### Fixes
 
 - Match HOME directory lookup logic with libpq: prefer $HOME over /etc/passwd,
   ignore ENOTDIR errors, and use APPDATA on Windows ([#1214]).
+
+- The `pq.Error.Error()` message now includes the SQLSTATE error code ([#1219]):
+
+      pq: syntax error at end of input (42601)
 
 - Fix build with wasm ([#1184]), appengine ([#745]), and Plan 9 ([#1133]).
 
@@ -47,6 +62,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 [#1211]: https://github.com/lib/pq/pull/1211
 [#1212]: https://github.com/lib/pq/pull/1212
 [#1214]: https://github.com/lib/pq/pull/1214
+[#1219]: https://github.com/lib/pq/pull/1219
 
 
 v1.10.9 (2023-04-26)
