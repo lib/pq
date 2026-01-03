@@ -19,6 +19,8 @@ func TestDataTypeName(t *testing.T) {
 		{oid.T_int2, "INT2"},
 		{oid.T_varchar, "VARCHAR"},
 		{oid.T_text, "TEXT"},
+		{oid.T_bit, "BIT"},
+		{oid.T_varbit, "VARBIT"},
 		{oid.T_bool, "BOOL"},
 		{oid.T_numeric, "NUMERIC"},
 		{oid.T_date, "DATE"},
@@ -47,6 +49,8 @@ func TestDataType(t *testing.T) {
 		{oid.T_int2, reflect.Int16},
 		{oid.T_varchar, reflect.String},
 		{oid.T_text, reflect.String},
+		{oid.T_bit, reflect.String},
+		{oid.T_varbit, reflect.String},
 		{oid.T_bool, reflect.Bool},
 		{oid.T_date, reflect.Struct},
 		{oid.T_time, reflect.Struct},
@@ -76,6 +80,8 @@ func TestDataTypeLength(t *testing.T) {
 		{oid.T_varchar, 65535, 9, 5, true},
 		{oid.T_text, 65535, -1, math.MaxInt64, true},
 		{oid.T_bytea, 65535, -1, math.MaxInt64, true},
+		{oid.T_bit, 0, 10, 10, true},
+		{oid.T_varbit, 0, 10, 10, true},
 	}
 
 	for i, tt := range tts {
@@ -160,6 +166,20 @@ func TestRowsColumnTypes(t *testing.T) {
 			DecimalSize: decimalSize{Precision: 0, Scale: 0, OK: false},
 			ScanType:    reflect.TypeOf(float64(0)),
 		},
+		{
+			Name:        "bit4",
+			TypeName:    "BIT",
+			Length:      length{Len: 4, OK: true},
+			DecimalSize: decimalSize{Precision: 0, Scale: 0, OK: false},
+			ScanType:    reflect.TypeOf(""),
+		},
+		{
+			Name:        "varbit10",
+			TypeName:    "VARBIT",
+			Length:      length{Len: 10, OK: true},
+			DecimalSize: decimalSize{Precision: 0, Scale: 0, OK: false},
+			ScanType:    reflect.TypeOf(""),
+		},
 	}
 
 	db := pqtest.MustDB(t)
@@ -169,7 +189,9 @@ func TestRowsColumnTypes(t *testing.T) {
 		1 as a,
 		text 'bar' as bar,
 		1.28::numeric(9, 2) as dec,
-		3.1415::float8 as f
+		3.1415::float8 as f,
+		'1111'::bit(4) as bit4,
+		'1111'::varbit(10) as varbit10
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +202,7 @@ func TestRowsColumnTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(columns) != 4 {
+	if len(columns) != 6 {
 		t.Errorf("expected 4 columns found %d", len(columns))
 	}
 

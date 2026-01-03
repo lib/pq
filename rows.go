@@ -33,7 +33,7 @@ func (fd fieldDesc) Type() reflect.Type {
 		return reflect.TypeOf(float64(0))
 	case oid.T_float4:
 		return reflect.TypeOf(float32(0))
-	case oid.T_varchar, oid.T_text:
+	case oid.T_varchar, oid.T_text, oid.T_varbit, oid.T_bit:
 		return reflect.TypeOf("")
 	case oid.T_bool:
 		return reflect.TypeOf(false)
@@ -56,6 +56,8 @@ func (fd fieldDesc) Length() (length int64, ok bool) {
 		return math.MaxInt64, true
 	case oid.T_varchar, oid.T_bpchar:
 		return int64(fd.Mod - headerSize), true
+	case oid.T_varbit, oid.T_bit:
+		return int64(fd.Mod), true
 	default:
 		return 0, false
 	}
