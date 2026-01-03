@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -45,8 +46,13 @@ var (
 
 // Compile time validation that our types implement the expected interfaces
 var (
-	_ driver.Driver    = Driver{}
-	_ driver.Validator = &conn{}
+	_ driver.Driver            = Driver{}
+	_ driver.Validator         = (*conn)(nil)
+	_ driver.NamedValueChecker = (*conn)(nil)
+	_ driver.Pinger            = (*conn)(nil)
+	_ driver.SessionResetter   = (*conn)(nil)
+	_ driver.ExecerContext     = (*conn)(nil)
+	_ driver.QueryerContext    = (*conn)(nil)
 )
 
 // Driver is the Postgres database driver.
@@ -922,6 +928,31 @@ func toNamedValue(v []driver.Value) []driver.NamedValue {
 		v2[i] = driver.NamedValue{Ordinal: i + 1, Value: v[i]}
 	}
 	return v2
+}
+
+// CheckNamedValue implements [driver.NamedValueChecker].
+func (c *conn) CheckNamedValue(nv *driver.NamedValue) error {
+	if _, ok := nv.Value.(driver.Valuer); ok {
+		// Ignore Valuer, for backward compatibility with pq.Array().
+		return driver.ErrSkip
+	}
+
+	// Ignoring []byte / []uint8.
+	if _, ok := nv.Value.([]uint8); ok {
+		return driver.ErrSkip
+	}
+
+	v := reflect.ValueOf(nv.Value)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() == reflect.Slice {
+		var err error
+		nv.Value, err = Array(v.Interface()).Value()
+		return err
+	}
+
+	return driver.ErrSkip
 }
 
 // Implement the "Queryer" interface
@@ -2140,11 +2171,6 @@ func alnumLowerASCII(ch rune) rune {
 	}
 	return -1 // discard
 }
-
-// The database/sql/driver package says:
-// All Conn implementations should implement the following interfaces: Pinger, SessionResetter, and Validator.
-var _ driver.Pinger = &conn{}
-var _ driver.SessionResetter = &conn{}
 
 func (cn *conn) ResetSession(ctx context.Context) error {
 	// Ensure bad connections are reported: From database/sql/driver:

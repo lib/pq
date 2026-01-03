@@ -13,6 +13,7 @@ import (
 )
 
 func TestScanTimestamp(t *testing.T) {
+
 	var nt NullTime
 	tn := time.Now()
 	nt.Scan(tn)
@@ -25,6 +26,7 @@ func TestScanTimestamp(t *testing.T) {
 }
 
 func TestScanNilTimestamp(t *testing.T) {
+
 	var nt NullTime
 	nt.Scan(nil)
 	if nt.Valid {
@@ -79,40 +81,43 @@ var timeTests = []struct {
 
 // Test that parsing the string results in the expected value.
 func TestParseTs(t *testing.T) {
-	for i, tt := range timeTests {
-		val, err := ParseTimestamp(nil, tt.str)
-		if err != nil {
-			t.Errorf("%d: got error: %v", i, err)
-		} else if val.String() != tt.timeval.String() {
-			t.Errorf("%d: expected to parse %q into %q; got %q",
-				i, tt.str, tt.timeval, val)
-		}
-	}
-}
+	for _, tt := range timeTests {
+		t.Run("", func(t *testing.T) {
+			val, err := ParseTimestamp(nil, tt.str)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-var timeErrorTests = []string{
-	"BC",
-	" BC",
-	"2001",
-	"2001-2-03",
-	"2001-02-3",
-	"2001-02-03 ",
-	"2001-02-03 B",
-	"2001-02-03 04",
-	"2001-02-03 04:",
-	"2001-02-03 04:05",
-	"2001-02-03 04:05 B",
-	"2001-02-03 04:05 BC",
-	"2001-02-03 04:05:",
-	"2001-02-03 04:05:6",
-	"2001-02-03 04:05:06 B",
-	"2001-02-03 04:05:06BC",
-	"2001-02-03 04:05:06.123 B",
+			if val.String() != tt.timeval.String() {
+				t.Errorf("expected to parse %q into %q; got %q", tt.str, tt.timeval, val)
+			}
+		})
+	}
 }
 
 // Test that parsing the string results in an error.
 func TestParseTsErrors(t *testing.T) {
-	for i, tt := range timeErrorTests {
+	tests := []string{
+		"BC",
+		" BC",
+		"2001",
+		"2001-2-03",
+		"2001-02-3",
+		"2001-02-03 ",
+		"2001-02-03 B",
+		"2001-02-03 04",
+		"2001-02-03 04:",
+		"2001-02-03 04:05",
+		"2001-02-03 04:05 B",
+		"2001-02-03 04:05 BC",
+		"2001-02-03 04:05:",
+		"2001-02-03 04:05:6",
+		"2001-02-03 04:05:06 B",
+		"2001-02-03 04:05:06BC",
+		"2001-02-03 04:05:06.123 B",
+	}
+
+	for i, tt := range tests {
 		_, err := ParseTimestamp(nil, tt)
 		if err == nil {
 			t.Errorf("%d: expected an error from parsing: %v", i, tt)
@@ -123,6 +128,7 @@ func TestParseTsErrors(t *testing.T) {
 // Now test that sending the value into the database and parsing it back
 // returns the same time.Time value.
 func TestEncodeAndParseTs(t *testing.T) {
+	t.Parallel()
 	db, err := pqtest.DB("timezone='Etc/UTC'")
 	if err != nil {
 		t.Fatal(err)
@@ -181,6 +187,7 @@ func TestFormatTs(t *testing.T) {
 }
 
 func TestFormatTsBackend(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -201,6 +208,7 @@ func TestFormatTsBackend(t *testing.T) {
 }
 
 func TestTimeWithoutTimezone(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -239,6 +247,9 @@ func TestTimeWithoutTimezone(t *testing.T) {
 }
 
 func TestTimeWithTimezone(t *testing.T) {
+	if !pqtest.Pgpool() {
+		t.Parallel()
+	}
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -282,6 +293,7 @@ func TestTimeWithTimezone(t *testing.T) {
 }
 
 func TestTimestampWithTimeZone(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -342,6 +354,7 @@ func TestTimestampWithTimeZone(t *testing.T) {
 }
 
 func TestTimestampWithOutTimezone(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -383,21 +396,20 @@ func TestTimestampWithOutTimezone(t *testing.T) {
 }
 
 func TestInfinityTimestamp(t *testing.T) {
+	// Can't be parallel as it calls disableInfinityTs() and modifies a global.
+	// t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
-	var err error
-	var resultT time.Time
 
 	expectedErrorStrRegexp := regexp.MustCompile(
 		`^sql: Scan error on column index 0(, name "timestamp(tz)?"|): unsupported`)
 
-	type testCases []struct {
+	tc := []struct {
 		Query                  string
 		Param                  string
 		ExpectedErrorStrRegexp *regexp.Regexp
 		ExpectedVal            any
-	}
-	tc := testCases{
+	}{
 		{"SELECT $1::timestamp", "-infinity", expectedErrorStrRegexp, "-infinity"},
 		{"SELECT $1::timestamptz", "-infinity", expectedErrorStrRegexp, "-infinity"},
 		{"SELECT $1::timestamp", "infinity", expectedErrorStrRegexp, "infinity"},
@@ -405,7 +417,8 @@ func TestInfinityTimestamp(t *testing.T) {
 	}
 	// try to assert []byte to time.Time
 	for _, q := range tc {
-		err = db.QueryRow(q.Query, q.Param).Scan(&resultT)
+		var resultT time.Time
+		err := db.QueryRow(q.Query, q.Param).Scan(&resultT)
 		if err == nil || !q.ExpectedErrorStrRegexp.MatchString(err.Error()) {
 			t.Errorf("Scanning -/+infinity, expected error to match regexp %q, got %q",
 				q.ExpectedErrorStrRegexp, err)
@@ -414,7 +427,7 @@ func TestInfinityTimestamp(t *testing.T) {
 	// yield []byte
 	for _, q := range tc {
 		var resultI any
-		err = db.QueryRow(q.Query, q.Param).Scan(&resultI)
+		err := db.QueryRow(q.Query, q.Param).Scan(&resultI)
 		if err != nil {
 			t.Errorf("Scanning -/+infinity, expected no error, got %q", err)
 		}
@@ -431,7 +444,8 @@ func TestInfinityTimestamp(t *testing.T) {
 	y2500 := time.Date(2500, time.January, 1, 0, 0, 0, 0, time.UTC)
 	EnableInfinityTs(y1500, y2500)
 
-	err = db.QueryRow("SELECT $1::timestamp", "infinity").Scan(&resultT)
+	var resultT time.Time
+	err := db.QueryRow("SELECT $1::timestamp", "infinity").Scan(&resultT)
 	if err != nil {
 		t.Errorf("Scanning infinity, expected no error, got %q", err)
 	}
@@ -511,6 +525,7 @@ func TestInfinityTimestamp(t *testing.T) {
 }
 
 func TestStringWithNul(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -523,6 +538,7 @@ func TestStringWithNul(t *testing.T) {
 }
 
 func TestByteSliceToText(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -541,6 +557,7 @@ func TestByteSliceToText(t *testing.T) {
 }
 
 func TestStringToBytea(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -559,6 +576,7 @@ func TestStringToBytea(t *testing.T) {
 }
 
 func TestTextByteSliceToUUID(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -586,6 +604,7 @@ func TestTextByteSliceToUUID(t *testing.T) {
 }
 
 func TestBinaryByteSlicetoUUID(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -617,6 +636,7 @@ func TestBinaryByteSlicetoUUID(t *testing.T) {
 }
 
 func TestStringToUUID(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -635,6 +655,7 @@ func TestStringToUUID(t *testing.T) {
 }
 
 func TestTextByteSliceToInt(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -662,6 +683,7 @@ func TestTextByteSliceToInt(t *testing.T) {
 }
 
 func TestBinaryByteSliceToInt(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -715,13 +737,9 @@ func TestByteaOutputFormatEncoding(t *testing.T) {
 }
 
 func TestByteaOutputFormats(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
-
-	if getServerVersion(t, db) < 90000 {
-		// skip
-		return
-	}
 
 	testByteaOutputFormat := func(f string, usePrepared bool) {
 		expectedData := []byte("\x5c\x78\x00\xff\x61\x62\x63\x01\x08")
@@ -829,30 +847,30 @@ func TestAppendEscapedTextExistingBuffer(t *testing.T) {
 	}
 }
 
-var formatAndParseTimestamp = []struct {
-	time     time.Time
-	expected string
-}{
-	{time.Time{}, "0001-01-01 00:00:00Z"},
-	{time.Date(2001, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 0)), "2001-02-03 04:05:06.123456789Z"},
-	{time.Date(2001, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 2*60*60)), "2001-02-03 04:05:06.123456789+02:00"},
-	{time.Date(2001, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", -6*60*60)), "2001-02-03 04:05:06.123456789-06:00"},
-	{time.Date(2001, time.February, 3, 4, 5, 6, 0, time.FixedZone("", -(7*60*60+30*60+9))), "2001-02-03 04:05:06-07:30:09"},
-
-	{time.Date(1, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 0)), "0001-02-03 04:05:06.123456789Z"},
-	{time.Date(1, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 2*60*60)), "0001-02-03 04:05:06.123456789+02:00"},
-	{time.Date(1, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", -6*60*60)), "0001-02-03 04:05:06.123456789-06:00"},
-
-	{time.Date(0, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 0)), "0001-02-03 04:05:06.123456789Z BC"},
-	{time.Date(0, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 2*60*60)), "0001-02-03 04:05:06.123456789+02:00 BC"},
-	{time.Date(0, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", -6*60*60)), "0001-02-03 04:05:06.123456789-06:00 BC"},
-
-	{time.Date(1, time.February, 3, 4, 5, 6, 0, time.FixedZone("", -(7*60*60+30*60+9))), "0001-02-03 04:05:06-07:30:09"},
-	{time.Date(0, time.February, 3, 4, 5, 6, 0, time.FixedZone("", -(7*60*60+30*60+9))), "0001-02-03 04:05:06-07:30:09 BC"},
-}
-
 func TestFormatAndParseTimestamp(t *testing.T) {
-	for _, val := range formatAndParseTimestamp {
+	tests := []struct {
+		time     time.Time
+		expected string
+	}{
+		{time.Time{}, "0001-01-01 00:00:00Z"},
+		{time.Date(2001, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 0)), "2001-02-03 04:05:06.123456789Z"},
+		{time.Date(2001, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 2*60*60)), "2001-02-03 04:05:06.123456789+02:00"},
+		{time.Date(2001, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", -6*60*60)), "2001-02-03 04:05:06.123456789-06:00"},
+		{time.Date(2001, time.February, 3, 4, 5, 6, 0, time.FixedZone("", -(7*60*60+30*60+9))), "2001-02-03 04:05:06-07:30:09"},
+
+		{time.Date(1, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 0)), "0001-02-03 04:05:06.123456789Z"},
+		{time.Date(1, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 2*60*60)), "0001-02-03 04:05:06.123456789+02:00"},
+		{time.Date(1, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", -6*60*60)), "0001-02-03 04:05:06.123456789-06:00"},
+
+		{time.Date(0, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 0)), "0001-02-03 04:05:06.123456789Z BC"},
+		{time.Date(0, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", 2*60*60)), "0001-02-03 04:05:06.123456789+02:00 BC"},
+		{time.Date(0, time.February, 3, 4, 5, 6, 123456789, time.FixedZone("", -6*60*60)), "0001-02-03 04:05:06.123456789-06:00 BC"},
+
+		{time.Date(1, time.February, 3, 4, 5, 6, 0, time.FixedZone("", -(7*60*60+30*60+9))), "0001-02-03 04:05:06-07:30:09"},
+		{time.Date(0, time.February, 3, 4, 5, 6, 0, time.FixedZone("", -(7*60*60+30*60+9))), "0001-02-03 04:05:06-07:30:09 BC"},
+	}
+
+	for _, val := range tests {
 		formattedTime := FormatTimestamp(val.time)
 		parsedTime, err := ParseTimestamp(nil, string(formattedTime))
 

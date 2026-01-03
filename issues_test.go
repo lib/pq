@@ -34,11 +34,12 @@ func TestIssue494(t *testing.T) {
 }
 
 func TestIssue1046(t *testing.T) {
-	ctxTimeout := time.Second * 2
+	t.Parallel()
 
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
+	ctxTimeout := time.Second * 2
 	ctx, cancel := context.WithTimeout(context.Background(), ctxTimeout)
 	defer cancel()
 
@@ -63,6 +64,9 @@ func TestIssue1046(t *testing.T) {
 }
 
 func TestIssue1062(t *testing.T) {
+	if !pqtest.Pgpool() {
+		t.Parallel()
+	}
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
@@ -128,6 +132,7 @@ func TestQueryCancelRace(t *testing.T) {
 
 // Test cancelling a scan after it is started. This broke with 1.10.4.
 func TestQueryCancelledReused(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
 
