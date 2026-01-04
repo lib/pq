@@ -302,9 +302,6 @@ func TestNotifyExtra(t *testing.T) {
 func newTestListenerTimeout(t *testing.T, min time.Duration, max time.Duration) (*Listener, <-chan ListenerEventType) {
 	t.Helper()
 
-	// Called for the side-effect of setting the environment.
-	pqtest.DSN("")
-
 	var (
 		ch = make(chan ListenerEventType, 16)
 		l  = NewListener("", min, max, func(t ListenerEventType, err error) { ch <- t })

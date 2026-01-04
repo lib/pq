@@ -99,19 +99,13 @@ var errListenerConnClosed = errors.New("pq: ListenerConn has been closed")
 // ListenerConn is a low-level interface for waiting for notifications.  You
 // should use Listener instead.
 type ListenerConn struct {
-	// guards cn and err
-	connectionLock sync.Mutex
-	cn             *conn
-	err            error
-
-	connState int32
-
-	// the sending goroutine will be holding this lock
-	senderLock sync.Mutex
-
+	connectionLock   sync.Mutex // guards cn and err
+	senderLock       sync.Mutex // the sending goroutine will be holding this lock
+	cn               *conn
+	err              error
+	connState        int32
 	notificationChan chan<- *Notification
-
-	replyChan chan message
+	replyChan        chan message
 }
 
 // NewListenerConn creates a new ListenerConn. Use NewListener instead.

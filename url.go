@@ -8,19 +8,7 @@ import (
 	"strings"
 )
 
-// ParseURL converts a url to a connection string for driver.Open.
-//
-// Example:
-//
-//	"postgres://bob:secret@1.2.3.4:5432/mydb?sslmode=verify-full"
-//
-// converts to:
-//
-//	"user=bob password=secret host=1.2.3.4 port=5432 dbname=mydb sslmode=verify-full"
-//
-// Deprecated: directly passing an URL to sql.Open("postgres", "postgres://...")
-// now works, and calling this manually is no longer required.
-func ParseURL(url string) (string, error) {
+func parseURL(url string) (string, error) {
 	u, err := neturl.Parse(url)
 	if err != nil {
 		return "", err
