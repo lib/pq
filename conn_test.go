@@ -18,6 +18,9 @@ import (
 	"github.com/lib/pq/internal/pqtest"
 )
 
+// Called for the side-effect of setting the environment.
+func init() { pqtest.DSN("") }
+
 const cancelErrorCode ErrorCode = "57014"
 
 func getServerVersion(t *testing.T, db *sql.DB) int {
@@ -2430,4 +2433,64 @@ func TestCommitInFailedTransactionWithCancelContext(t *testing.T) {
 	if err != ErrInFailedTransaction {
 		t.Fatalf("expected ErrInFailedTransaction; got %#v", err)
 	}
+}
+
+func TestAuth(t *testing.T) {
+	tests := []struct {
+		buf     readBuf
+		wantErr string
+	}{
+		{readBuf{0, 0, 0, 9}, `pq: unsupported authentication method: SSPI (9)`},
+		{readBuf{0, 0, 0, 99}, `unknown authentication response: <unknown> (99)`},
+	}
+
+	t.Parallel()
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			t.Run("unsupported auth", func(t *testing.T) {
+				err := (&conn{}).auth(&tt.buf, values{})
+				if !pqtest.ErrorContains(err, tt.wantErr) {
+					t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
+				}
+			})
+		})
+	}
+
+	t.Run("end to end", func(t *testing.T) {
+		pqtest.SkipPgbouncer(t) // TODO: need to properly set up auth
+		pqtest.SkipPgpool(t)    // TODO: need to properly set up auth
+
+		tests := []struct {
+			conn, wantErr string
+		}{
+			{"user=pqgomd5", `password authentication failed for user "pqgomd5"`},
+			{"user=pqgopassword", `empty password returned by client`},
+			{"user=pqgoscram", `password authentication failed for user "pqgoscram"`},
+
+			{"user=pqgomd5 password=wrong", `password authentication failed for user "pqgomd5"`},
+			{"user=pqgopassword password=wrong", `password authentication failed for user "pqgopassword"`},
+			{"user=pqgoscram    password=wrong", `password authentication failed for user "pqgoscram"`},
+
+			{"user=pqgomd5 password=wordpass", ``},
+			{"user=pqgopassword password=wordpass", ``},
+			{"user=pqgoscram password=wordpass", ``},
+
+			{"user=pqgounknown password=wordpass", `role "pqgounknown" does not exist`},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.conn, func(t *testing.T) {
+				t.Parallel()
+				db, err := pqtest.DB(tt.conn)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				err = db.Ping()
+				if !pqtest.ErrorContains(err, tt.wantErr) {
+					t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
+				}
+			})
+		}
+	})
 }

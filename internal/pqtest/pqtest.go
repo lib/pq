@@ -76,3 +76,54 @@ func MustDB(t testing.TB) *sql.DB {
 	}
 	return conn
 }
+
+func Exec(t testing.TB, db interface {
+	Exec(string, ...any) (sql.Result, error)
+}, q string, args ...any) {
+	t.Helper()
+	_, err := db.Exec(q, args...)
+	if err != nil {
+		t.Fatalf("pqtest.Exec: %s", err)
+	}
+}
+
+func Query(t testing.TB, db interface {
+	Query(string, ...any) (*sql.Rows, error)
+}, q string, args ...any) []map[string]any {
+	t.Helper()
+	rows, err := db.Query(q, args...)
+	if err != nil {
+		t.Fatalf("pqtest.Query: %s", err)
+	}
+
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("pqtest.Query: %s", err)
+	}
+
+	res := make([]map[string]any, 0, 16)
+	for rows.Next() {
+		if rows.Err() != nil {
+			t.Fatalf("pqtest.Query: %s", rows.Err())
+		}
+
+		var (
+			vals = make([]any, len(cols))
+			ptrs = make([]any, len(cols))
+		)
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		err := rows.Scan(ptrs...)
+		if err != nil {
+			t.Fatalf("pqtest.Query: %s", err)
+		}
+
+		r := map[string]any{}
+		for i, v := range vals {
+			r[cols[i]] = v
+		}
+		res = append(res, r)
+	}
+	return res
+}

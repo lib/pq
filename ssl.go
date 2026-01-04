@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -49,7 +50,7 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 	case "disable":
 		return nil, nil
 	default:
-		return nil, fmterrorf(`unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`, mode)
+		return nil, fmt.Errorf(`pq: unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`, mode)
 	}
 
 	// Set Server Name Indication (SNI), if enabled by connection parameters.
@@ -181,7 +182,7 @@ func sslCertificateAuthority(tlsConf *tls.Config, o values) error {
 		}
 
 		if !tlsConf.RootCAs.AppendCertsFromPEM(cert) {
-			return fmterrorf("couldn't parse pem in sslrootcert")
+			return errors.New("pq: couldn't parse pem in sslrootcert")
 		}
 	}
 

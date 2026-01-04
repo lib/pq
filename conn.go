@@ -25,6 +25,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/lib/pq/internal/proto"
 	"github.com/lib/pq/oid"
 	"github.com/lib/pq/scram"
 )
@@ -1262,15 +1263,17 @@ func (cn *conn) startup(o values) {
 	}
 
 	for {
-		t, r := cn.recv()
-		switch t {
-		case 'K':
+		switch t, r := cn.recv(); proto.ResponseCode(t) {
+		case proto.BackendKeyData:
 			cn.processBackendKeyData(r)
-		case 'S':
+		case proto.ParameterStatus:
 			cn.processParameterStatus(r)
-		case 'R':
-			cn.auth(r, o)
-		case 'Z':
+		case proto.AuthenticationRequest:
+			err := cn.auth(r, o)
+			if err != nil {
+				panic(err)
+			}
+		case proto.ReadyForQuery:
 			cn.processReadyForQuery(r)
 			return
 		default:
@@ -1279,48 +1282,55 @@ func (cn *conn) startup(o values) {
 	}
 }
 
-func (cn *conn) auth(r *readBuf, o values) {
-	switch code := r.int32(); code {
-	case 0:
-		// OK
-	case 3:
-		w := cn.writeBuf('p')
+func (cn *conn) auth(r *readBuf, o values) error {
+	switch code := proto.AuthCode(r.int32()); code {
+	default:
+		return fmt.Errorf("pq: unknown authentication response: %s", code)
+	case proto.AuthReqKrb4, proto.AuthReqKrb5, proto.AuthReqCrypt, proto.AuthReqSSPI:
+		return fmt.Errorf("pq: unsupported authentication method: %s", code)
+
+	case proto.AuthReqOk:
+		return nil
+
+	case proto.AuthReqPassword:
+		w := cn.writeBuf(byte(proto.PasswordMessage))
 		w.string(o["password"])
 		cn.send(w)
 
 		t, r := cn.recv()
-		if t != 'R' {
-			errorf("unexpected password response: %q", t)
+		if t != byte(proto.AuthenticationRequest) {
+			return fmt.Errorf("pq: unexpected password response: %q", t)
 		}
+		if r.int32() != int(proto.AuthReqOk) {
+			return fmt.Errorf("pq: unexpected authentication response: %q", t)
+		}
+		return nil
 
-		if r.int32() != 0 {
-			errorf("unexpected authentication response: %q", t)
-		}
-	case 5:
+	case proto.AuthReqMD5:
 		s := string(r.next(4))
-		w := cn.writeBuf('p')
+		w := cn.writeBuf(byte(proto.PasswordMessage))
 		w.string("md5" + md5s(md5s(o["password"]+o["user"])+s))
 		cn.send(w)
 
 		t, r := cn.recv()
-		if t != 'R' {
-			errorf("unexpected password response: %q", t)
+		if t != byte(proto.AuthenticationRequest) {
+			return fmt.Errorf("pq: unexpected password response: %q", t)
 		}
+		if r.int32() != int(proto.AuthReqOk) {
+			return fmt.Errorf("pq: unexpected authentication response: %q", t)
+		}
+		return nil
 
-		if r.int32() != 0 {
-			errorf("unexpected authentication response: %q", t)
-		}
-	case 7: // GSSAPI, startup
+	case proto.AuthReqGSS: // GSSAPI, startup
 		if newGss == nil {
-			errorf("kerberos error: no GSSAPI provider registered (import github.com/lib/pq/auth/kerberos if you need Kerberos support)")
+			return fmt.Errorf("pq: kerberos error: no GSSAPI provider registered (import github.com/lib/pq/auth/kerberos)")
 		}
 		cli, err := newGss()
 		if err != nil {
-			errorf("kerberos error: %s", err.Error())
+			return fmt.Errorf("pq: kerberos error: %w", err)
 		}
 
 		var token []byte
-
 		if spn, ok := o["krbspn"]; ok {
 			// Use the supplied SPN if provided..
 			token, err = cli.GetInitTokenFromSpn(spn)
@@ -1330,103 +1340,104 @@ func (cn *conn) auth(r *readBuf, o values) {
 			if val, ok := o["krbsrvname"]; ok {
 				service = val
 			}
-
 			token, err = cli.GetInitToken(o["host"], service)
 		}
 
 		if err != nil {
-			errorf("failed to get Kerberos ticket: %q", err)
+			return fmt.Errorf("pq: failed to get Kerberos ticket: %w", err)
 		}
 
-		w := cn.writeBuf('p')
+		w := cn.writeBuf(byte(proto.GSSResponse))
 		w.bytes(token)
 		cn.send(w)
 
 		// Store for GSSAPI continue message
 		cn.gss = cli
+		return nil
 
-	case 8: // GSSAPI continue
-
+	case proto.AuthReqGSSCont: // GSSAPI continue
 		if cn.gss == nil {
-			errorf("GSSAPI protocol error")
+			return errors.New("pq: GSSAPI protocol error")
 		}
 
-		b := []byte(*r)
-
-		done, tokOut, err := cn.gss.Continue(b)
+		done, tokOut, err := cn.gss.Continue([]byte(*r))
 		if err == nil && !done {
-			w := cn.writeBuf('p')
+			w := cn.writeBuf(byte(proto.SASLInitialResponse))
 			w.bytes(tokOut)
 			cn.send(w)
 		}
 
-		// Errors fall through and read the more detailed message
-		// from the server..
+		// Errors fall through and read the more detailed message from the
+		// server.
+		return nil
 
-	case 10:
+	case proto.AuthReqSASL:
 		sc := scram.NewClient(sha256.New, o["user"], o["password"])
 		sc.Step(nil)
 		if sc.Err() != nil {
-			errorf("SCRAM-SHA-256 error: %s", sc.Err().Error())
+			return fmt.Errorf("pq: SCRAM-SHA-256 error: %w", sc.Err())
 		}
 		scOut := sc.Out()
 
-		w := cn.writeBuf('p')
+		w := cn.writeBuf(byte(proto.SASLResponse))
 		w.string("SCRAM-SHA-256")
 		w.int32(len(scOut))
 		w.bytes(scOut)
 		cn.send(w)
 
 		t, r := cn.recv()
-		if t != 'R' {
-			errorf("unexpected password response: %q", t)
+		if t != byte(proto.AuthenticationRequest) {
+			return fmt.Errorf("pq: unexpected password response: %q", t)
 		}
 
-		if r.int32() != 11 {
-			errorf("unexpected authentication response: %q", t)
+		if r.int32() != int(proto.AuthReqSASLCont) {
+			return fmt.Errorf("pq: unexpected authentication response: %q", t)
 		}
 
 		nextStep := r.next(len(*r))
 		sc.Step(nextStep)
 		if sc.Err() != nil {
-			errorf("SCRAM-SHA-256 error: %s", sc.Err().Error())
+			return fmt.Errorf("pq: SCRAM-SHA-256 error: %w", sc.Err())
 		}
 
 		scOut = sc.Out()
-		w = cn.writeBuf('p')
+		w = cn.writeBuf(byte(proto.SASLResponse))
 		w.bytes(scOut)
 		cn.send(w)
 
 		t, r = cn.recv()
-		if t != 'R' {
-			errorf("unexpected password response: %q", t)
+		if t != byte(proto.AuthenticationRequest) {
+			return fmt.Errorf("pq: unexpected password response: %q", t)
 		}
 
-		if r.int32() != 12 {
-			errorf("unexpected authentication response: %q", t)
+		if r.int32() != int(proto.AuthReqSASLFin) {
+			return fmt.Errorf("pq: unexpected authentication response: %q", t)
 		}
 
 		nextStep = r.next(len(*r))
 		sc.Step(nextStep)
 		if sc.Err() != nil {
-			errorf("SCRAM-SHA-256 error: %s", sc.Err().Error())
+			return fmt.Errorf("pq: SCRAM-SHA-256 error: %w", sc.Err())
 		}
 
-	default:
-		errorf("unknown authentication response: %d", code)
+		return nil
 	}
 }
 
 type format int
 
-const formatText format = 0
-const formatBinary format = 1
+const (
+	formatText   format = 0
+	formatBinary format = 1
+)
 
-// One result-column format code with the value 1 (i.e. all binary).
-var colFmtDataAllBinary = []byte{0, 1, 0, 1}
+var (
+	// One result-column format code with the value 1 (i.e. all binary).
+	colFmtDataAllBinary = []byte{0, 1, 0, 1}
 
-// No result-column format codes (i.e. all text).
-var colFmtDataAllText = []byte{0, 0}
+	// No result-column format codes (i.e. all text).
+	colFmtDataAllText = []byte{0, 0}
+)
 
 type stmt struct {
 	cn   *conn
