@@ -2,7 +2,10 @@
 
 package proto
 
-import "strconv"
+import (
+	"fmt"
+	"strconv"
+)
 
 // RequestCode is a request codes sent by the frontend.
 type RequestCode byte
@@ -25,6 +28,35 @@ const (
 	SASLInitialResponse = RequestCode('p')
 	SASLResponse        = RequestCode('p')
 )
+
+func (r RequestCode) String() string {
+	s, ok := map[RequestCode]string{
+		Bind:         "Bind",
+		Close:        "Close",
+		Describe:     "Describe",
+		Execute:      "Execute",
+		FunctionCall: "FunctionCall",
+		Flush:        "Flush",
+		Parse:        "Parse",
+		Query:        "Query",
+		Sync:         "Sync",
+		Terminate:    "Terminate",
+		CopyFail:     "CopyFail",
+		// These are all the same :-/
+		//GSSResponse:  "GSSResponse",
+		PasswordMessage: "PasswordMessage",
+		//SASLInitialResponse: "SASLInitialResponse",
+		//SASLResponse:        "SASLResponse",
+	}[r]
+	if !ok {
+		s = "<unknown>"
+	}
+	c := string(r)
+	if r <= 0x1f || r == 0x7f {
+		c = fmt.Sprintf("0x%x", string(r))
+	}
+	return "(" + c + ") " + s
+}
 
 // ResponseCode is a response codes sent by the backend.
 type ResponseCode byte
@@ -54,6 +86,41 @@ const (
 	ParameterDescription     = ResponseCode('t')
 	NegotiateProtocolVersion = ResponseCode('v')
 )
+
+func (r ResponseCode) String() string {
+	s, ok := map[ResponseCode]string{
+		ParseComplete:            "ParseComplete",
+		BindComplete:             "BindComplete",
+		CloseComplete:            "CloseComplete",
+		NotificationResponse:     "NotificationResponse",
+		CommandComplete:          "CommandComplete",
+		DataRow:                  "DataRow",
+		ErrorResponse:            "ErrorResponse",
+		CopyInResponse:           "CopyInResponse",
+		CopyOutResponse:          "CopyOutResponse",
+		EmptyQueryResponse:       "EmptyQueryResponse",
+		BackendKeyData:           "BackendKeyData",
+		NoticeResponse:           "NoticeResponse",
+		AuthenticationRequest:    "AuthRequest",
+		ParameterStatus:          "ParamStatus",
+		RowDescription:           "RowDescription",
+		FunctionCallResponse:     "FunctionCallResponse",
+		CopyBothResponse:         "CopyBothResponse",
+		ReadyForQuery:            "ReadyForQuery",
+		NoData:                   "NoData",
+		PortalSuspended:          "PortalSuspended",
+		ParameterDescription:     "ParamDescription",
+		NegotiateProtocolVersion: "NegotiateProtocolVersion",
+	}[r]
+	if !ok {
+		s = "<unknown>"
+	}
+	c := string(r)
+	if r <= 0x1f || r == 0x7f {
+		c = fmt.Sprintf("0x%x", string(r))
+	}
+	return "(" + c + ") " + s
+}
 
 // These are the codes sent by both the frontend and backend.
 // #define PqMsg_CopyDone				'c'

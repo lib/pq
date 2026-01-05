@@ -5,8 +5,11 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // Connector represents a fixed configuration for the pq driver with a given
@@ -114,4 +117,237 @@ func NewConnector(dsn string) (*Connector, error) {
 	}
 
 	return &Connector{opts: o, dialer: defaultDialer{}}, nil
+}
+
+func network(o values) (string, string) {
+	host := o["host"]
+
+	// UNIX domain sockets are either represented by an (absolute) file system
+	// path or they live in the abstract name space (starting with an @).
+	if filepath.IsAbs(host) || strings.HasPrefix(host, "@") {
+		sockPath := filepath.Join(host, ".s.PGSQL."+o["port"])
+		return "unix", sockPath
+	}
+
+	return "tcp", net.JoinHostPort(host, o["port"])
+}
+
+type values map[string]string
+
+// scanner implements a tokenizer for libpq-style option strings.
+type scanner struct {
+	s []rune
+	i int
+}
+
+// newScanner returns a new scanner initialized with the option string s.
+func newScanner(s string) *scanner {
+	return &scanner{[]rune(s), 0}
+}
+
+// Next returns the next rune.
+// It returns 0, false if the end of the text has been reached.
+func (s *scanner) Next() (rune, bool) {
+	if s.i >= len(s.s) {
+		return 0, false
+	}
+	r := s.s[s.i]
+	s.i++
+	return r, true
+}
+
+// SkipSpaces returns the next non-whitespace rune.
+// It returns 0, false if the end of the text has been reached.
+func (s *scanner) SkipSpaces() (rune, bool) {
+	r, ok := s.Next()
+	for unicode.IsSpace(r) && ok {
+		r, ok = s.Next()
+	}
+	return r, ok
+}
+
+// parseOpts parses the options from name and adds them to the values.
+//
+// The parsing code is based on conninfo_parse from libpq's fe-connect.c
+func parseOpts(name string, o values) error {
+	s := newScanner(name)
+
+	for {
+		var (
+			keyRunes, valRunes []rune
+			r                  rune
+			ok                 bool
+		)
+
+		if r, ok = s.SkipSpaces(); !ok {
+			break
+		}
+
+		// Scan the key
+		for !unicode.IsSpace(r) && r != '=' {
+			keyRunes = append(keyRunes, r)
+			if r, ok = s.Next(); !ok {
+				break
+			}
+		}
+
+		// Skip any whitespace if we're not at the = yet
+		if r != '=' {
+			r, ok = s.SkipSpaces()
+		}
+
+		// The current character should be =
+		if r != '=' || !ok {
+			return fmt.Errorf(`missing "=" after %q in connection info string"`, string(keyRunes))
+		}
+
+		// Skip any whitespace after the =
+		if r, ok = s.SkipSpaces(); !ok {
+			// If we reach the end here, the last value is just an empty string as per libpq.
+			o[string(keyRunes)] = ""
+			break
+		}
+
+		if r != '\'' {
+			for !unicode.IsSpace(r) {
+				if r == '\\' {
+					if r, ok = s.Next(); !ok {
+						return fmt.Errorf(`missing character after backslash`)
+					}
+				}
+				valRunes = append(valRunes, r)
+
+				if r, ok = s.Next(); !ok {
+					break
+				}
+			}
+		} else {
+		quote:
+			for {
+				if r, ok = s.Next(); !ok {
+					return fmt.Errorf(`unterminated quoted string literal in connection string`)
+				}
+				switch r {
+				case '\'':
+					break quote
+				case '\\':
+					r, _ = s.Next()
+					fallthrough
+				default:
+					valRunes = append(valRunes, r)
+				}
+			}
+		}
+
+		o[string(keyRunes)] = string(valRunes)
+	}
+
+	return nil
+}
+
+// parseEnviron tries to mimic some of libpq's environment handling
+//
+// To ease testing, it does not directly reference os.Environ, but is
+// designed to accept its output.
+//
+// Environment-set connection information is intended to have a higher
+// precedence than a library default but lower than any explicitly
+// passed information (such as in the URL or connection string).
+func parseEnviron(env []string) (out map[string]string) {
+	out = make(map[string]string)
+
+	for _, v := range env {
+		parts := strings.SplitN(v, "=", 2)
+
+		accrue := func(keyname string) {
+			out[keyname] = parts[1]
+		}
+		unsupported := func() {
+			panic(fmt.Sprintf("setting %v not supported", parts[0]))
+		}
+
+		// The order of these is the same as is seen in the
+		// PostgreSQL 9.1 manual. Unsupported but well-defined
+		// keys cause a panic; these should be unset prior to
+		// execution. Options which pq expects to be set to a
+		// certain value are allowed, but must be set to that
+		// value if present (they can, of course, be absent).
+		switch parts[0] {
+		case "PGHOST":
+			accrue("host")
+		case "PGHOSTADDR":
+			unsupported()
+		case "PGPORT":
+			accrue("port")
+		case "PGDATABASE":
+			accrue("dbname")
+		case "PGUSER":
+			accrue("user")
+		case "PGPASSWORD":
+			accrue("password")
+		case "PGPASSFILE":
+			accrue("passfile")
+		case "PGSERVICE", "PGSERVICEFILE", "PGREALM":
+			unsupported()
+		case "PGOPTIONS":
+			accrue("options")
+		case "PGAPPNAME":
+			accrue("application_name")
+		case "PGSSLMODE":
+			accrue("sslmode")
+		case "PGSSLCERT":
+			accrue("sslcert")
+		case "PGSSLKEY":
+			accrue("sslkey")
+		case "PGSSLROOTCERT":
+			accrue("sslrootcert")
+		case "PGSSLSNI":
+			accrue("sslsni")
+		case "PGREQUIRESSL", "PGSSLCRL":
+			unsupported()
+		case "PGREQUIREPEER":
+			unsupported()
+		case "PGGSSLIB":
+			if newGss == nil {
+				unsupported()
+			}
+			accrue("gsslib")
+		case "PGKRBSRVNAME":
+			if newGss == nil {
+				unsupported()
+			}
+			accrue("krbsrvname")
+		case "PGCONNECT_TIMEOUT":
+			accrue("connect_timeout")
+		case "PGCLIENTENCODING":
+			accrue("client_encoding")
+		case "PGDATESTYLE":
+			accrue("datestyle")
+		case "PGTZ":
+			accrue("timezone")
+		case "PGGEQO":
+			accrue("geqo")
+		case "PGSYSCONFDIR", "PGLOCALEDIR":
+			unsupported()
+		}
+	}
+
+	return out
+}
+
+// isUTF8 returns whether name is a fuzzy variation of the string "UTF-8".
+func isUTF8(name string) bool {
+	// Recognize all sorts of silly things as "UTF-8", like Postgres does
+	s := strings.Map(alnumLowerASCII, name)
+	return s == "utf8" || s == "unicode"
+}
+
+func alnumLowerASCII(ch rune) rune {
+	if 'A' <= ch && ch <= 'Z' {
+		return ch + ('a' - 'A')
+	}
+	if 'a' <= ch && ch <= 'z' || '0' <= ch && ch <= '9' {
+		return ch
+	}
+	return -1 // discard
 }

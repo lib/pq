@@ -1241,27 +1241,6 @@ func TestXactMultiStmt(t *testing.T) {
 	}
 }
 
-func TestParseEnviron(t *testing.T) {
-	tests := []struct {
-		in   []string
-		want map[string]string
-	}{
-		{[]string{"PGDATABASE=hello", "PGUSER=goodbye"},
-			map[string]string{"dbname": "hello", "user": "goodbye"}},
-		{[]string{"PGDATESTYLE=ISO, MDY"},
-			map[string]string{"datestyle": "ISO, MDY"}},
-		{[]string{"PGCONNECT_TIMEOUT=30"},
-			map[string]string{"connect_timeout": "30"}},
-	}
-
-	for i, tt := range tests {
-		results := parseEnviron(tt.in)
-		if !reflect.DeepEqual(tt.want, results) {
-			t.Errorf("%d: want: %#v Got: %#v", i, tt.want, results)
-		}
-	}
-}
-
 func TestParseComplete(t *testing.T) {
 	tpc := func(commandTag string, command string, affectedRows int64, shouldFail bool) {
 		defer func() {
@@ -1549,30 +1528,6 @@ func TestRuntimeParameters(t *testing.T) {
 				t.Fatalf("\nhave: %v\nwant: %v", have, tt.want)
 			}
 		})
-	}
-}
-
-func TestIsUTF8(t *testing.T) {
-	var cases = []struct {
-		name string
-		want bool
-	}{
-		{"unicode", true},
-		{"utf-8", true},
-		{"utf_8", true},
-		{"UTF-8", true},
-		{"UTF8", true},
-		{"utf8", true},
-		{"u n ic_ode", true},
-		{"ut_f%8", true},
-		{"ubf8", false},
-		{"punycode", false},
-	}
-
-	for _, test := range cases {
-		if g := isUTF8(test.name); g != test.want {
-			t.Errorf("isUTF8(%q) = %v want %v", test.name, g, test.want)
-		}
 	}
 }
 

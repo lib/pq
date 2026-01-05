@@ -23,7 +23,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/lib/pq/internal/proto"
 	"github.com/lib/pq/oid"
@@ -47,13 +46,19 @@ var (
 
 // Compile time validation that our types implement the expected interfaces
 var (
-	_ driver.Driver            = Driver{}
-	_ driver.Validator         = (*conn)(nil)
-	_ driver.NamedValueChecker = (*conn)(nil)
-	_ driver.Pinger            = (*conn)(nil)
-	_ driver.SessionResetter   = (*conn)(nil)
-	_ driver.ExecerContext     = (*conn)(nil)
-	_ driver.QueryerContext    = (*conn)(nil)
+	_ driver.Driver             = Driver{}
+	_ driver.ConnBeginTx        = (*conn)(nil)
+	_ driver.ConnPrepareContext = (*conn)(nil)
+	_ driver.Execer             = (*conn)(nil) //lint:ignore SA1019 x
+	_ driver.ExecerContext      = (*conn)(nil)
+	_ driver.NamedValueChecker  = (*conn)(nil)
+	_ driver.Pinger             = (*conn)(nil)
+	_ driver.Queryer            = (*conn)(nil) //lint:ignore SA1019 x
+	_ driver.QueryerContext     = (*conn)(nil)
+	_ driver.SessionResetter    = (*conn)(nil)
+	_ driver.Validator          = (*conn)(nil)
+	_ driver.StmtExecContext    = (*stmt)(nil)
+	_ driver.StmtQueryContext   = (*stmt)(nil)
 )
 
 // Driver is the Postgres database driver.
@@ -69,6 +74,13 @@ func (d Driver) Open(name string) (driver.Conn, error) {
 func init() {
 	sql.Register("postgres", &Driver{})
 }
+
+var debugProto = func() bool {
+	// Check for exactly "1" (rather than mere existence) so we can add
+	// options/flags in the future. I don't know if we ever want that, but it's
+	// nice to leave the option open.
+	return os.Getenv("PQGO_DEBUG") == "1"
+}()
 
 type parameterStatus struct {
 	// server version in the same format as server_version_num, or 0 if
@@ -470,132 +482,6 @@ func dial(ctx context.Context, d Dialer, o values) (net.Conn, error) {
 	return d.Dial(network, address)
 }
 
-func network(o values) (string, string) {
-	host := o["host"]
-
-	// UNIX domain sockets are either represented by an (absolute) file system
-	// path or they live in the abstract name space (starting with an @).
-	if filepath.IsAbs(host) || strings.HasPrefix(host, "@") {
-		sockPath := filepath.Join(host, ".s.PGSQL."+o["port"])
-		return "unix", sockPath
-	}
-
-	return "tcp", net.JoinHostPort(host, o["port"])
-}
-
-type values map[string]string
-
-// scanner implements a tokenizer for libpq-style option strings.
-type scanner struct {
-	s []rune
-	i int
-}
-
-// newScanner returns a new scanner initialized with the option string s.
-func newScanner(s string) *scanner {
-	return &scanner{[]rune(s), 0}
-}
-
-// Next returns the next rune.
-// It returns 0, false if the end of the text has been reached.
-func (s *scanner) Next() (rune, bool) {
-	if s.i >= len(s.s) {
-		return 0, false
-	}
-	r := s.s[s.i]
-	s.i++
-	return r, true
-}
-
-// SkipSpaces returns the next non-whitespace rune.
-// It returns 0, false if the end of the text has been reached.
-func (s *scanner) SkipSpaces() (rune, bool) {
-	r, ok := s.Next()
-	for unicode.IsSpace(r) && ok {
-		r, ok = s.Next()
-	}
-	return r, ok
-}
-
-// parseOpts parses the options from name and adds them to the values.
-//
-// The parsing code is based on conninfo_parse from libpq's fe-connect.c
-func parseOpts(name string, o values) error {
-	s := newScanner(name)
-
-	for {
-		var (
-			keyRunes, valRunes []rune
-			r                  rune
-			ok                 bool
-		)
-
-		if r, ok = s.SkipSpaces(); !ok {
-			break
-		}
-
-		// Scan the key
-		for !unicode.IsSpace(r) && r != '=' {
-			keyRunes = append(keyRunes, r)
-			if r, ok = s.Next(); !ok {
-				break
-			}
-		}
-
-		// Skip any whitespace if we're not at the = yet
-		if r != '=' {
-			r, ok = s.SkipSpaces()
-		}
-
-		// The current character should be =
-		if r != '=' || !ok {
-			return fmt.Errorf(`missing "=" after %q in connection info string"`, string(keyRunes))
-		}
-
-		// Skip any whitespace after the =
-		if r, ok = s.SkipSpaces(); !ok {
-			// If we reach the end here, the last value is just an empty string as per libpq.
-			o[string(keyRunes)] = ""
-			break
-		}
-
-		if r != '\'' {
-			for !unicode.IsSpace(r) {
-				if r == '\\' {
-					if r, ok = s.Next(); !ok {
-						return fmt.Errorf(`missing character after backslash`)
-					}
-				}
-				valRunes = append(valRunes, r)
-
-				if r, ok = s.Next(); !ok {
-					break
-				}
-			}
-		} else {
-		quote:
-			for {
-				if r, ok = s.Next(); !ok {
-					return fmt.Errorf(`unterminated quoted string literal in connection string`)
-				}
-				switch r {
-				case '\'':
-					break quote
-				case '\\':
-					r, _ = s.Next()
-					fallthrough
-				default:
-					valRunes = append(valRunes, r)
-				}
-			}
-		}
-
-		o[string(keyRunes)] = string(valRunes)
-	}
-
-	return nil
-}
-
 func (cn *conn) isInTransaction() bool {
 	return cn.txnStatus == txnStatusIdleInTransaction ||
 		cn.txnStatus == txnStatusInFailedTransaction
@@ -707,6 +593,11 @@ func (cn *conn) gname() string {
 }
 
 func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err error) {
+	if debugProto {
+		fmt.Fprintf(os.Stderr, "         START conn.simpleExec\n")
+		defer fmt.Fprintf(os.Stderr, "         END conn.simpleExec\n")
+	}
+
 	b := cn.writeBuf('Q')
 	b.string(q)
 	cn.send(b)
@@ -737,6 +628,10 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 }
 
 func (cn *conn) simpleQuery(q string) (res *rows, err error) {
+	if debugProto {
+		fmt.Fprintf(os.Stderr, "         START conn.simpleQuery\n")
+		defer fmt.Fprintf(os.Stderr, "         END conn.simpleQuery\n")
+	}
 	defer cn.errRecover(&err, q)
 
 	b := cn.writeBuf('Q')
@@ -868,6 +763,11 @@ func decideColumnFormats(colTyps []fieldDesc, forceText bool) (colFmts []format,
 }
 
 func (cn *conn) prepareTo(q, stmtName string) *stmt {
+	if debugProto {
+		fmt.Fprintf(os.Stderr, "         START conn.prepareTo\n")
+		defer fmt.Fprintf(os.Stderr, "         END conn.prepareTo\n")
+	}
+
 	st := &stmt{cn: cn, name: stmtName}
 
 	b := cn.writeBuf('P')
@@ -962,6 +862,10 @@ func (cn *conn) Query(query string, args []driver.Value) (driver.Rows, error) {
 }
 
 func (cn *conn) query(query string, args []driver.NamedValue) (_ *rows, err error) {
+	if debugProto {
+		fmt.Fprintf(os.Stderr, "         START conn.query\n")
+		defer fmt.Fprintf(os.Stderr, "         END conn.query\n")
+	}
 	if err := cn.err.get(); err != nil {
 		return nil, err
 	}
@@ -1039,6 +943,16 @@ func (se *safeRetryError) Error() string {
 }
 
 func (cn *conn) send(m *writeBuf) {
+	if debugProto {
+		w := m.wrap()
+		for len(w) > 0 { // Can contain multiple messages.
+			c := proto.RequestCode(w[0])
+			l := int(binary.BigEndian.Uint32(w[1:5])) - 4
+			fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n", c, l, w[5:l+5])
+			w = w[l+5:]
+		}
+	}
+
 	n, err := cn.c.Write(m.wrap())
 	if err != nil {
 		if n == 0 {
@@ -1049,6 +963,13 @@ func (cn *conn) send(m *writeBuf) {
 }
 
 func (cn *conn) sendStartupPacket(m *writeBuf) error {
+	if debugProto {
+		w := m.wrap()
+		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n",
+			"Startup",
+			int(binary.BigEndian.Uint32(w[1:5]))-4,
+			w[5:])
+	}
 	_, err := cn.c.Write((m.wrap())[1:])
 	return err
 }
@@ -1057,6 +978,10 @@ func (cn *conn) sendStartupPacket(m *writeBuf) error {
 // message should have no payload.  This method does not use the scratch
 // buffer.
 func (cn *conn) sendSimpleMessage(typ byte) (err error) {
+	if debugProto {
+		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n",
+			proto.RequestCode(typ), 0, []byte{})
+	}
 	_, err = cn.c.Write([]byte{typ, '\x00', '\x00', '\x00', '\x04'})
 	return err
 }
@@ -1107,6 +1032,10 @@ func (cn *conn) recvMessage(r *readBuf) (byte, error) {
 		return 0, err
 	}
 	*r = y
+	if debugProto {
+		fmt.Fprintf(os.Stderr, "SERVER ← %-20s %5d  %q\n",
+			proto.ResponseCode(t), n, y)
+	}
 	return t, nil
 }
 
@@ -1503,6 +1432,10 @@ func (st *stmt) Exec(v []driver.Value) (driver.Result, error) {
 }
 
 func (st *stmt) exec(v []driver.NamedValue) {
+	if debugProto {
+		fmt.Fprintf(os.Stderr, "         START stmt.exec\n")
+		defer fmt.Fprintf(os.Stderr, "         END stmt.exec\n")
+	}
 	if len(v) >= 65536 {
 		errorf("got %d parameters but PostgreSQL only supports 65535 parameters", len(v))
 	}
@@ -2078,113 +2011,6 @@ func parsePortalRowDescribe(r *readBuf) rowsHeader {
 		colFmts:  colFmts,
 		colTyps:  colTyps,
 	}
-}
-
-// parseEnviron tries to mimic some of libpq's environment handling
-//
-// To ease testing, it does not directly reference os.Environ, but is
-// designed to accept its output.
-//
-// Environment-set connection information is intended to have a higher
-// precedence than a library default but lower than any explicitly
-// passed information (such as in the URL or connection string).
-func parseEnviron(env []string) (out map[string]string) {
-	out = make(map[string]string)
-
-	for _, v := range env {
-		parts := strings.SplitN(v, "=", 2)
-
-		accrue := func(keyname string) {
-			out[keyname] = parts[1]
-		}
-		unsupported := func() {
-			panic(fmt.Sprintf("setting %v not supported", parts[0]))
-		}
-
-		// The order of these is the same as is seen in the
-		// PostgreSQL 9.1 manual. Unsupported but well-defined
-		// keys cause a panic; these should be unset prior to
-		// execution. Options which pq expects to be set to a
-		// certain value are allowed, but must be set to that
-		// value if present (they can, of course, be absent).
-		switch parts[0] {
-		case "PGHOST":
-			accrue("host")
-		case "PGHOSTADDR":
-			unsupported()
-		case "PGPORT":
-			accrue("port")
-		case "PGDATABASE":
-			accrue("dbname")
-		case "PGUSER":
-			accrue("user")
-		case "PGPASSWORD":
-			accrue("password")
-		case "PGPASSFILE":
-			accrue("passfile")
-		case "PGSERVICE", "PGSERVICEFILE", "PGREALM":
-			unsupported()
-		case "PGOPTIONS":
-			accrue("options")
-		case "PGAPPNAME":
-			accrue("application_name")
-		case "PGSSLMODE":
-			accrue("sslmode")
-		case "PGSSLCERT":
-			accrue("sslcert")
-		case "PGSSLKEY":
-			accrue("sslkey")
-		case "PGSSLROOTCERT":
-			accrue("sslrootcert")
-		case "PGSSLSNI":
-			accrue("sslsni")
-		case "PGREQUIRESSL", "PGSSLCRL":
-			unsupported()
-		case "PGREQUIREPEER":
-			unsupported()
-		case "PGGSSLIB":
-			if newGss == nil {
-				unsupported()
-			}
-			accrue("gsslib")
-		case "PGKRBSRVNAME":
-			if newGss == nil {
-				unsupported()
-			}
-			accrue("krbsrvname")
-		case "PGCONNECT_TIMEOUT":
-			accrue("connect_timeout")
-		case "PGCLIENTENCODING":
-			accrue("client_encoding")
-		case "PGDATESTYLE":
-			accrue("datestyle")
-		case "PGTZ":
-			accrue("timezone")
-		case "PGGEQO":
-			accrue("geqo")
-		case "PGSYSCONFDIR", "PGLOCALEDIR":
-			unsupported()
-		}
-	}
-
-	return out
-}
-
-// isUTF8 returns whether name is a fuzzy variation of the string "UTF-8".
-func isUTF8(name string) bool {
-	// Recognize all sorts of silly things as "UTF-8", like Postgres does
-	s := strings.Map(alnumLowerASCII, name)
-	return s == "utf8" || s == "unicode"
-}
-
-func alnumLowerASCII(ch rune) rune {
-	if 'A' <= ch && ch <= 'Z' {
-		return ch + ('a' - 'A')
-	}
-	if 'a' <= ch && ch <= 'z' || '0' <= ch && ch <= '9' {
-		return ch
-	}
-	return -1 // discard
 }
 
 func (cn *conn) ResetSession(ctx context.Context) error {
