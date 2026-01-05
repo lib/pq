@@ -64,13 +64,13 @@ func DSN(conninfo string) string {
 	return conninfo
 }
 
-func DB(conninfo string) (*sql.DB, error) {
-	return sql.Open("postgres", DSN(conninfo))
+func DB(conninfo ...string) (*sql.DB, error) {
+	return sql.Open("postgres", DSN(strings.Join(conninfo, " ")))
 }
 
-func MustDB(t testing.TB) *sql.DB {
+func MustDB(t testing.TB, conninfo ...string) *sql.DB {
 	t.Helper()
-	conn, err := DB("")
+	conn, err := DB(conninfo...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,9 +87,9 @@ func Exec(t testing.TB, db interface {
 	}
 }
 
-func Query(t testing.TB, db interface {
+func Query[T any](t testing.TB, db interface {
 	Query(string, ...any) (*sql.Rows, error)
-}, q string, args ...any) []map[string]any {
+}, q string, args ...any) []map[string]T {
 	t.Helper()
 	rows, err := db.Query(q, args...)
 	if err != nil {
@@ -101,14 +101,14 @@ func Query(t testing.TB, db interface {
 		t.Fatalf("pqtest.Query: %s", err)
 	}
 
-	res := make([]map[string]any, 0, 16)
+	res := make([]map[string]T, 0, 16)
 	for rows.Next() {
 		if rows.Err() != nil {
 			t.Fatalf("pqtest.Query: %s", rows.Err())
 		}
 
 		var (
-			vals = make([]any, len(cols))
+			vals = make([]T, len(cols))
 			ptrs = make([]any, len(cols))
 		)
 		for i := range vals {
@@ -119,7 +119,7 @@ func Query(t testing.TB, db interface {
 			t.Fatalf("pqtest.Query: %s", err)
 		}
 
-		r := map[string]any{}
+		r := map[string]T{}
 		for i, v := range vals {
 			r[cols[i]] = v
 		}

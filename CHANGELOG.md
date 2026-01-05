@@ -22,6 +22,9 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
            12 | );
                 ^
 
+- Add `PQGO_DEBUG=1` print the communication with PostgreSQL to stderr, to aid
+  in debugging, testing, and bug reports ([#1223]).
+
 ### Fixes
 
 - Match HOME directory lookup logic with libpq: prefer $HOME over /etc/passwd,
@@ -77,6 +80,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 [#1212]: https://github.com/lib/pq/pull/1212
 [#1214]: https://github.com/lib/pq/pull/1214
 [#1219]: https://github.com/lib/pq/pull/1219
+[#1223]: https://github.com/lib/pq/pull/1223
 
 
 v1.10.9 (2023-04-26)
