@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lib/pq/internal/pqsql"
 	"github.com/lib/pq/internal/proto"
 	"github.com/lib/pq/oid"
 	"github.com/lib/pq/scram"
@@ -795,7 +796,7 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 	}
 	defer cn.errRecover(&err, q)
 
-	if len(q) >= 4 && strings.EqualFold(q[:4], "COPY") {
+	if pqsql.StartsWithCopy(q) {
 		s, err := cn.prepareCopyIn(q)
 		if err == nil {
 			cn.inCopy = true

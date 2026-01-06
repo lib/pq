@@ -125,7 +125,7 @@ server:5432:some_db:some_user:pass_A
 *:5432:some_db:some_user:pass_B
 localhost:*:*:*:pass_C
 *:*:*:*:pass_fallback
-`)
+	`)
 	if err != nil {
 		t.Fatalf("Unexpected error writing pgpass file %#v", err)
 	}
@@ -289,8 +289,6 @@ func TestStatment(t *testing.T) {
 	if i != 1 {
 		t.Fatalf("expected 1, got %d", i)
 	}
-
-	// st1
 
 	r1, err := st1.Query()
 	if err != nil {
@@ -876,13 +874,14 @@ func TestQueryRowBugWorkaround(t *testing.T) {
 		t.Fatalf("could not disable check_function_bodies: %s", err)
 	}
 	_, err = tx.Exec(`
-CREATE OR REPLACE FUNCTION bad_function()
-RETURNS integer
--- hack to prevent the function from being inlined
-SET check_function_bodies TO TRUE
-AS $$
-	SELECT text 'bad'
-$$ LANGUAGE sql`)
+		CREATE OR REPLACE FUNCTION bad_function()
+		RETURNS integer
+		-- hack to prevent the function from being inlined
+		SET check_function_bodies TO TRUE
+		AS $$
+			SELECT text 'bad'
+		$$ LANGUAGE sql
+	`)
 	if err != nil {
 		t.Fatalf("could not create function: %s", err)
 	}
@@ -907,11 +906,11 @@ $$ LANGUAGE sql`)
 	// Also test that simpleQuery()'s workaround works when the query fails
 	// after a row has been received.
 	rows, err := db.Query(`
-select
-	(select generate_series(1, ss.i))
-from (select gs.i
-      from generate_series(1, 2) gs(i)
-      order by gs.i limit 2) ss`)
+		select (select generate_series(1, ss.i))
+		from (select gs.i
+			from generate_series(1, 2) gs(i)
+			order by gs.i limit 2) ss
+	`)
 	if err != nil {
 		t.Fatalf("query failed: %s", err)
 	}
