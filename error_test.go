@@ -31,21 +31,21 @@ func TestError(t *testing.T) {
 			ERROR:   cannot copy from view "x" (42809)
 			HINT:    Try the COPY (SELECT ...) TO variant.
 		`},
-		{`select columndoesntexist`, `pq: column "columndoesntexist" does not exist (42703)`, `
+		{`select columndoesntexist`, `pq: column "columndoesntexist" does not exist at column 8 (42703)`, `
 			ERROR:   column "columndoesntexist" does not exist (42703)
 			CONTEXT: line 1, column 8:
 
 			      1 | select columndoesntexist
 			                 ^
 		`},
-		{`select !@#`, "pq: syntax error at end of input (42601)", `
+		{`select !@#`, "pq: syntax error at end of input at column 11 (42601)", `
 			ERROR:   syntax error at end of input (42601)
 			CONTEXT: line 1, column 11:
 
 			      1 | select !@#
 			                    ^
 		`},
-		{"select 'asd',\n\t'asd'::jsonb", "pq: invalid input syntax for type json (22P02)", `
+		{"select 'asd',\n\t'asd'::jsonb", "pq: invalid input syntax for type json at position 2:2 (22P02)", `
 			ERROR:   invalid input syntax for type json (22P02)
 			DETAIL:  Token "asd" is invalid.
 			CONTEXT: line 2, column 2:
@@ -54,7 +54,7 @@ func TestError(t *testing.T) {
 			      2 |         'asd'::jsonb
 			                  ^
 		`},
-		{"select 'asd'\n,'zxc',\n'def',\n123,\n'foo', 'asd'::jsonb", "pq: invalid input syntax for type json (22P02)", `
+		{"select 'asd'\n,'zxc',\n'def',\n123,\n'foo', 'asd'::jsonb", "pq: invalid input syntax for type json at position 5:8 (22P02)", `
 			ERROR:   invalid input syntax for type json (22P02)
 			DETAIL:  Token "asd" is invalid.
 			CONTEXT: line 5, column 8:
@@ -64,14 +64,14 @@ func TestError(t *testing.T) {
 			      5 | 'foo', 'asd'::jsonb
 			                 ^
 		`},
-		{"select '€€€', a", `pq: column "a" does not exist (42703)`, `
+		{"select '€€€', a", `pq: column "a" does not exist at column 15 (42703)`, `
 			ERROR:   column "a" does not exist (42703)
 			CONTEXT: line 1, column 15:
 
 			      1 | select '€€€', a
 			                        ^
 		`},
-		{"select '€€€',\n'€',a", `pq: column "a" does not exist (42703)`, `
+		{"select '€€€',\n'€',a", `pq: column "a" does not exist at position 2:5 (42703)`, `
 			ERROR:   column "a" does not exist (42703)
 			CONTEXT: line 2, column 5:
 
@@ -93,7 +93,7 @@ func TestError(t *testing.T) {
 			    version        varchar,
 			);
 			create unique index "systems#name#version"  on systems(name, version);
-		`), `pq: syntax error at or near ")" (42601)`, `
+		`), `pq: syntax error at or near ")" at position 12:1 (42601)`, `
 			ERROR:   syntax error at or near ")" (42601)
 			CONTEXT: line 12, column 1:
 
@@ -106,7 +106,7 @@ func TestError(t *testing.T) {
 		{pqtest.NormalizeIndent(`
 			create table browsers (browser_id serial, name varchar, version varchar); create unique index "browsers#name#version" on browsers(name, version);
 			create table systems (system_id serial, name varchar, version varchar,); create unique index "systems#name#version"  on systems(name, version);
-		`), `pq: syntax error at or near ")" (42601)`, `
+		`), `pq: syntax error at or near ")" at position 2:71 (42601)`, `
 			ERROR:   syntax error at or near ")" (42601)
 			CONTEXT: line 2, column 71:
 
@@ -116,27 +116,68 @@ func TestError(t *testing.T) {
 		`},
 	}
 
+	t.Parallel()
 	db := pqtest.MustDB(t)
-
 	for _, tt := range tests {
-		_, err := db.Exec(tt.in)
-		if err == nil {
-			t.Fatal("no error?")
+		t.Run("", func(t *testing.T) {
+			_, err := db.Exec(tt.in)
+			if err == nil {
+				t.Fatal("no error?")
+			}
+			pqErr := new(Error)
+			if !errors.As(err, &pqErr) {
+				t.Fatalf("wrong error %T: %[1]s", err)
+			}
+
+			if err.Error() != tt.want {
+				t.Errorf("\nhave: %s\nwant: %s", err.Error(), tt.want)
+			}
+			tt.wantDetail = pqtest.NormalizeIndent(tt.wantDetail)
+			if pqErr.query != "" && pqErr.Position != "" {
+				tt.wantDetail += "\n"
+			}
+			if pqErr.ErrorWithDetail() != tt.wantDetail {
+				t.Errorf("\nhave:\n%s\nwant:\n%s", pqErr.ErrorWithDetail(), tt.wantDetail)
+			}
+		})
+	}
+}
+
+func BenchmarkError(b *testing.B) {
+	db := pqtest.MustDB(b)
+	_, err := db.Exec(pqtest.NormalizeIndent(`
+		create table browsers (
+			browser_id     serial,
+			name           varchar,
+			version        varchar
+		);
+		create unique index "browsers#name#version" on browsers(name, version);
+
+		create table systems (
+			system_id      serial,
+			name           varchar,
+			version        varchar,
+		);
+		create unique index "systems#name#version"  on systems(name, version);
+	`))
+	if err == nil {
+		b.Fatal("err is nil?")
+	}
+
+	b.ResetTimer()
+	b.Run("error", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = err.Error()
 		}
+	})
+	b.Run("errorWithDetail", func(b *testing.B) {
 		pqErr := new(Error)
 		if !errors.As(err, &pqErr) {
-			t.Fatalf("wrong error %T: %[1]s", err)
+			b.Fatalf("not pq.Error: %T", err)
 		}
-
-		if err.Error() != tt.want {
-			t.Errorf("\nhave: %s\nwant: %s", err.Error(), tt.want)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = pqErr.ErrorWithDetail()
 		}
-		tt.wantDetail = pqtest.NormalizeIndent(tt.wantDetail)
-		if pqErr.query != "" && pqErr.Position != "" {
-			tt.wantDetail += "\n"
-		}
-		if pqErr.ErrorWithDetail() != tt.wantDetail {
-			t.Errorf("\nhave:\n%s\nwant:\n%s", pqErr.ErrorWithDetail(), tt.wantDetail)
-		}
-	}
+	})
 }

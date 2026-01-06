@@ -1888,7 +1888,6 @@ func TestStmtQueryContext(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			db := pqtest.MustDB(t)
 			defer db.Close()
 
@@ -1950,7 +1949,6 @@ func TestStmtExecContext(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			db := pqtest.MustDB(t)
 			defer db.Close()
 
@@ -2435,7 +2433,6 @@ func TestAuth(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.conn, func(t *testing.T) {
-				t.Parallel()
 				db, err := pqtest.DB(tt.conn)
 				if err != nil {
 					t.Fatal(err)
