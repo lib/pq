@@ -64,19 +64,38 @@ func DSN(conninfo string) string {
 	return conninfo
 }
 
+// DB connects to the test database. The caller must call db.Close().
 func DB(conninfo ...string) (*sql.DB, error) {
 	return sql.Open("postgres", DSN(strings.Join(conninfo, " ")))
 }
 
+// MustDB connects to the test database, calling t.Fatal() if this fails. The
+// connection is closed in t.Cleanup().
 func MustDB(t testing.TB, conninfo ...string) *sql.DB {
 	t.Helper()
-	conn, err := DB(conninfo...)
+	db, err := DB(conninfo...)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("pqtest.MustDB: %s", err)
 	}
-	return conn
+	t.Cleanup(func() { db.Close() })
+	return db
 }
 
+// Begin a new transaction, calling t.Fatal() if this fails.
+func Begin(t testing.TB, db *sql.DB) *sql.Tx {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("pqtest.Begin: %s", err)
+	}
+	// We can't call t.Cleanup here as that will race with the t.Cleanup from
+	// MustDB (it's called in "last added, first called", so the tx.Rollback
+	// gets called after db.Close)
+	// t.Cleanup(func() { tx.Rollback() })
+	return tx
+}
+
+// Exec calls db.Exec(), calling t.Fatal if this fails.
 func Exec(t testing.TB, db interface {
 	Exec(string, ...any) (sql.Result, error)
 }, q string, args ...any) {
@@ -87,6 +106,9 @@ func Exec(t testing.TB, db interface {
 	}
 }
 
+// Query calls db.Query(), calling t.Fatal if this fails.
+//
+// The resulting rows are scanned to the type T.
 func Query[T any](t testing.TB, db interface {
 	Query(string, ...any) (*sql.Rows, error)
 }, q string, args ...any) []map[string]T {

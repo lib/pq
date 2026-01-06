@@ -38,7 +38,6 @@ func BenchmarkSelectSeries(b *testing.B) {
 func benchQuery(b *testing.B, query string, result any) {
 	b.StopTimer()
 	db := pqtest.MustDB(b)
-	defer db.Close()
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -185,7 +184,6 @@ func BenchmarkPreparedSelectSeries(b *testing.B) {
 func benchPreparedQuery(b *testing.B, query string, result any) {
 	b.StopTimer()
 	db := pqtest.MustDB(b)
-	defer db.Close()
 	stmt, err := db.Prepare(query)
 	if err != nil {
 		b.Fatal(err)
@@ -418,7 +416,6 @@ func BenchmarkResultParsing(b *testing.B) {
 	b.StopTimer()
 
 	db := pqtest.MustDB(b)
-	defer db.Close()
 	_, err := db.Exec("BEGIN")
 	if err != nil {
 		b.Fatal(err)

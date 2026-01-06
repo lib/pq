@@ -1609,7 +1609,6 @@ func BenchmarkGenericArrayValueStrings(b *testing.B) {
 
 func TestArrayScanBackend(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	for _, tt := range []struct {
 		s string
@@ -1636,7 +1635,6 @@ func TestArrayScanBackend(t *testing.T) {
 
 func TestArrayValueBackend(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	for _, tt := range []struct {
 		s string
@@ -1658,7 +1656,6 @@ func TestArrayValueBackend(t *testing.T) {
 
 func TestArrayArg(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	tests := []struct {
 		pgType  string

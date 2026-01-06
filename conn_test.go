@@ -35,7 +35,6 @@ func getServerVersion(t *testing.T, db *sql.DB) int {
 func TestReconnect(t *testing.T) {
 	t.Parallel()
 	db1 := pqtest.MustDB(t)
-	defer db1.Close()
 	tx, err := db1.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +45,6 @@ func TestReconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	db2 := pqtest.MustDB(t)
-	defer db2.Close()
 	_, err = db2.Exec("SELECT pg_terminate_backend($1)", pid1)
 	if err != nil {
 		t.Fatal(err)
@@ -68,12 +66,9 @@ func TestReconnect(t *testing.T) {
 
 func TestCommitInFailedTransaction(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
+	txn := pqtest.Begin(t, db)
+
 	rows, err := txn.Query("SELECT error")
 	if err == nil {
 		rows.Close()
@@ -88,11 +83,7 @@ func TestCommitInFailedTransaction(t *testing.T) {
 func TestOpenURL(t *testing.T) {
 	t.Parallel()
 	testURL := func(url string) {
-		db, err := pqtest.DB(url)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer db.Close()
+		db := pqtest.MustDB(t, url)
 		// database/sql might not call our Open at all unless we do something with
 		// the connection
 		txn, err := db.Begin()
@@ -109,11 +100,7 @@ const pgpassFile = "/tmp/pqgotest_pgpass"
 
 func TestPgpass(t *testing.T) {
 	testAssert := func(conninfo string, expected string, reason string) {
-		conn, err := pqtest.DB(conninfo)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer conn.Close()
+		conn := pqtest.MustDB(t, conninfo)
 
 		txn, err := conn.Begin()
 		if err != nil {
@@ -198,7 +185,6 @@ localhost:*:*:*:pass_C
 
 func TestExecNilSlice(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	_, err := db.Exec("create temp table x (b1 text, b2 text, b3 text)")
 	if err != nil {
@@ -246,7 +232,6 @@ func TestExecNilSlice(t *testing.T) {
 
 func TestExec(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	_, err := db.Exec("CREATE TEMP TABLE temp (a int)")
 	if err != nil {
@@ -288,7 +273,6 @@ func TestExec(t *testing.T) {
 
 func TestStatment(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	st, err := db.Prepare("SELECT 1")
 	if err != nil {
@@ -347,7 +331,6 @@ func TestStatment(t *testing.T) {
 
 func TestRowsCloseBeforeDone(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	r, err := db.Query("SELECT 1")
 	if err != nil {
@@ -370,7 +353,6 @@ func TestRowsCloseBeforeDone(t *testing.T) {
 
 func TestParameterCountMismatch(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	var notused int
 	err := db.QueryRow("SELECT false", 1).Scan(&notused)
@@ -397,7 +379,6 @@ func TestParameterCountMismatch(t *testing.T) {
 // Test that EmptyQueryResponses are handled correctly.
 func TestEmptyQuery(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	res, err := db.Exec("")
 	if err != nil {
@@ -463,7 +444,6 @@ func TestEmptyQuery(t *testing.T) {
 // Test that rows.Columns() is correct even if there are no result rows.
 func TestEmptyResultSetColumns(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	rows, err := db.Query("SELECT 1 AS a, text 'bar' AS bar WHERE FALSE")
 	if err != nil {
@@ -515,7 +495,6 @@ func TestEmptyResultSetColumns(t *testing.T) {
 
 func TestEncodeDecode(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	q := `
 		SELECT
@@ -596,7 +575,6 @@ func TestEncodeDecode(t *testing.T) {
 
 func TestNoData(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	st, err := db.Prepare("SELECT 1 WHERE true = false")
 	if err != nil {
@@ -643,13 +621,9 @@ func TestErrorDuringStartup(t *testing.T) {
 
 	// Don't use the normal connection setup, this is intended to blow up in the
 	// startup packet from a non-existent user.
-	db, err := pqtest.DB("user=thisuserreallydoesntexist")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := pqtest.MustDB(t, "user=thisuserreallydoesntexist")
 
-	_, err = db.Begin()
+	_, err := db.Begin()
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -801,7 +775,6 @@ func TestCloseBadConn(t *testing.T) {
 
 func TestErrorOnExec(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	txn, err := db.Begin()
 	if err != nil {
@@ -829,7 +802,6 @@ func TestErrorOnExec(t *testing.T) {
 
 func TestErrorOnQuery(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	txn, err := db.Begin()
 	if err != nil {
@@ -857,7 +829,6 @@ func TestErrorOnQuery(t *testing.T) {
 
 func TestErrorOnQueryRowSimpleQuery(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	txn, err := db.Begin()
 	if err != nil {
@@ -887,7 +858,6 @@ func TestErrorOnQueryRowSimpleQuery(t *testing.T) {
 // Test the QueryRow bug workarounds in stmt.exec() and simpleQuery()
 func TestQueryRowBugWorkaround(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	// stmt.exec()
 	_, err := db.Exec("CREATE TEMP TABLE notnulltemp (a varchar(10) not null)")
@@ -985,7 +955,6 @@ from (select gs.i
 func TestSimpleQuery(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	r, err := db.Query("select 1")
 	if err != nil {
@@ -1001,7 +970,6 @@ func TestSimpleQuery(t *testing.T) {
 func TestBindError(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	_, err := db.Exec("create temp table test (i integer)")
 	if err != nil {
@@ -1024,7 +992,6 @@ func TestBindError(t *testing.T) {
 func TestParseErrorInExtendedQuery(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	_, err := db.Query("PARSE_ERROR $1", 1)
 	pqErr, _ := err.(*Error)
@@ -1044,7 +1011,6 @@ func TestParseErrorInExtendedQuery(t *testing.T) {
 func TestReturning(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	_, err := db.Exec("CREATE TEMP TABLE distributors (did integer default 0, dname text)")
 	if err != nil {
@@ -1080,7 +1046,6 @@ func TestReturning(t *testing.T) {
 func TestIssue186(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	// Exec() a query which returns results
 	_, err := db.Exec("VALUES (1), (2), (3)")
@@ -1125,7 +1090,6 @@ func TestIssue186(t *testing.T) {
 func TestIssue196(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	row := db.QueryRow("SELECT float4 '0.10000122' = $1, float8 '35.03554004971999' = $2",
 		float32(0.10000122), float64(35.03554004971999))
@@ -1148,7 +1112,6 @@ func TestIssue196(t *testing.T) {
 func TestIssue282(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	var searchPath string
 	err := db.QueryRow(`
@@ -1166,7 +1129,6 @@ func TestIssue282(t *testing.T) {
 func TestReadFloatPrecision(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	row := db.QueryRow("SELECT float4 '0.10000122', float8 '35.03554004971999', float4 '1.2'")
 	var float4val float32
@@ -1192,7 +1154,6 @@ func TestXactMultiStmt(t *testing.T) {
 	// pico303@gmail.com and rangelspam@gmail.com
 	t.Skip("Skipping failing test")
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -1283,7 +1244,6 @@ func TestParseComplete(t *testing.T) {
 func TestNullAfterNonNull(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	r, err := db.Query("SELECT 9::integer UNION SELECT NULL::integer")
 	if err != nil {
@@ -1336,10 +1296,9 @@ func Test64BitErrorChecking(t *testing.T) {
 
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	r, err := db.Query(`SELECT *
-FROM (VALUES (0::integer, NULL::text), (1, 'test string')) AS t;`)
+		FROM (VALUES (0::integer, NULL::text), (1, 'test string')) AS t;`)
 
 	if err != nil {
 		t.Fatal(err)
@@ -1353,7 +1312,6 @@ FROM (VALUES (0::integer, NULL::text), (1, 'test string')) AS t;`)
 
 func TestCommit(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	_, err := db.Exec("CREATE TEMP TABLE temp (a int)")
 	if err != nil {
@@ -1386,7 +1344,6 @@ func TestCommit(t *testing.T) {
 func TestErrorClass(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	_, err := db.Query("SELECT int 'notint'")
 	if err == nil {
@@ -1631,9 +1588,6 @@ func TestRowsResultTag(t *testing.T) {
 		},
 	}
 
-	// If this is the only test run, this will correct the connection string.
-	pqtest.MustDB(t).Close()
-
 	conn, err := Open("")
 	if err != nil {
 		t.Fatal(err)
@@ -1663,7 +1617,6 @@ func TestRowsResultTag(t *testing.T) {
 func TestQuickClose(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -1692,7 +1645,6 @@ func TestQuickClose(t *testing.T) {
 func TestMultipleResult(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	rows, err := db.Query(`
 		begin;
@@ -1739,7 +1691,6 @@ func TestMultipleResult(t *testing.T) {
 func TestMultipleEmptyResult(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	rows, err := db.Query("select 1 where false; select 2")
 	if err != nil {
@@ -1770,7 +1721,6 @@ func TestMultipleEmptyResult(t *testing.T) {
 func TestCopyInStmtAffectedRows(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	_, err := db.Exec("CREATE TEMP TABLE temp (a int)")
 	if err != nil {
@@ -1833,7 +1783,6 @@ func TestConnPrepareContext(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db := pqtest.MustDB(t)
-			defer db.Close()
 
 			ctx, cancel := tt.ctx()
 			if cancel != nil {
@@ -1889,7 +1838,6 @@ func TestStmtQueryContext(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db := pqtest.MustDB(t)
-			defer db.Close()
 
 			ctx, cancel := tt.ctx()
 			if cancel != nil {
@@ -1950,7 +1898,6 @@ func TestStmtExecContext(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db := pqtest.MustDB(t)
-			defer db.Close()
 
 			ctx, cancel := tt.ctx()
 			if cancel != nil {
@@ -1975,7 +1922,6 @@ func TestStmtExecContext(t *testing.T) {
 func TestMultipleSimpleQuery(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	rows, err := db.Query("select 1; set time zone default; select 2; select 3")
 	if err != nil {
@@ -2040,7 +1986,6 @@ func TestContextCancelExec(t *testing.T) {
 	t.Parallel()
 	pqtest.SkipPgpool(t) // TODO: flaky in CI
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -2080,7 +2025,6 @@ func TestContextCancelQuery(t *testing.T) {
 	t.Parallel()
 	pqtest.SkipPgpool(t) // TODO: flaky in CI
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -2127,7 +2071,6 @@ func TestIssue617(t *testing.T) {
 	t.Parallel()
 
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	const N = 10
 
@@ -2170,7 +2113,6 @@ func TestContextCancelBegin(t *testing.T) {
 	t.Parallel()
 	pqtest.SkipPgpool(t) // TODO: flaky in CI
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	tx, err := db.BeginTx(ctx, nil)
@@ -2236,7 +2178,6 @@ func TestTxOptions(t *testing.T) {
 	pqtest.SkipPgpool(t)
 
 	db := pqtest.MustDB(t)
-	defer db.Close()
 	ctx := context.Background()
 
 	tests := []struct {
@@ -2303,7 +2244,6 @@ func TestPing(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	if _, ok := reflect.TypeOf(db).MethodByName("Conn"); !ok {
 		t.Skipf("Conn method undefined on type %T, skipping test (requires at least go1.9)", db)
@@ -2368,7 +2308,6 @@ func TestPing(t *testing.T) {
 func TestCommitInFailedTransactionWithCancelContext(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2433,12 +2372,9 @@ func TestAuth(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.conn, func(t *testing.T) {
-				db, err := pqtest.DB(tt.conn)
-				if err != nil {
-					t.Fatal(err)
-				}
+				db := pqtest.MustDB(t, tt.conn)
 
-				err = db.Ping()
+				err := db.Ping()
 				if !pqtest.ErrorContains(err, tt.wantErr) {
 					t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
 				}

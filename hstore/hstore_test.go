@@ -14,7 +14,6 @@ func TestHstore(t *testing.T) {
 	}
 
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	// quietly create hstore if it doesn't exist
 	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS hstore")

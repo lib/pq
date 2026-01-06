@@ -183,7 +183,6 @@ func TestRowsColumnTypes(t *testing.T) {
 	}
 
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	rows, err := db.Query(`select
 		1 as a,
