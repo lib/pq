@@ -3,7 +3,7 @@ alter system set ssl_ca_file   = '/ssl/root.crt';
 alter system set ssl_cert_file = '/ssl/server.crt';
 alter system set ssl_key_file  = '/ssl/server.key';
 
-create role pqgossltest  with login nocreatedb nocreaterole nosuperuser;
+create role pqgossl      with login nocreatedb nocreaterole nosuperuser;
 create role pqgosslcert  with login nocreatedb nocreaterole nosuperuser;
 create role pqgopassword with login nocreatedb nocreaterole nosuperuser password 'wordpass';
 create role pqgoscram    with login nocreatedb nocreaterole nosuperuser password 'wordpass';

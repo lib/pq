@@ -18,20 +18,6 @@ import (
 	"github.com/lib/pq/internal/pqtest"
 )
 
-// Called for the side-effect of setting the environment.
-func init() { pqtest.DSN("") }
-
-const cancelErrorCode ErrorCode = "57014"
-
-func getServerVersion(t *testing.T, db *sql.DB) int {
-	var version int
-	err := db.QueryRow("SHOW server_version_num").Scan(&version)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return version
-}
-
 func TestReconnect(t *testing.T) {
 	t.Parallel()
 	db1 := pqtest.MustDB(t)
@@ -2068,8 +2054,6 @@ func TestContextCancelQuery(t *testing.T) {
 // TestIssue617 tests that a failed query in QueryContext doesn't lead to a
 // goroutine leak.
 func TestIssue617(t *testing.T) {
-	t.Parallel()
-
 	db := pqtest.MustDB(t)
 
 	const N = 10

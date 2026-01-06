@@ -109,16 +109,6 @@ func TestCopyInMultipleValues(t *testing.T) {
 func TestCopyInRaiseStmtTrigger(t *testing.T) {
 	db := pqtest.MustDB(t)
 
-	if getServerVersion(t, db) < 90000 {
-		var exists int
-		err := db.QueryRow("SELECT 1 FROM pg_language WHERE lanname = 'plpgsql'").Scan(&exists)
-		if err == sql.ErrNoRows {
-			t.Skip("language PL/PgSQL does not exist; skipping TestCopyInRaiseStmtTrigger")
-		} else if err != nil {
-			t.Fatal(err)
-		}
-	}
-
 	txn, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -392,15 +382,6 @@ func TestCopyRespLoopConnectionError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if getServerVersion(t, db) < 90500 {
-		// We have to try and send something over, since postgres before
-		// version 9.5 won't process SIGTERMs while it's waiting for
-		// CopyData/CopyEnd messages; see tcop/postgres.c.
-		_, err = stmt.Exec(1)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
 	retry(t, time.Second*5, func() error {
 		_, err = stmt.Exec()
 		if err == nil {

@@ -50,7 +50,9 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 	case "disable":
 		return nil, nil
 	default:
-		return nil, fmt.Errorf(`pq: unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`, mode)
+		return nil, fmt.Errorf(
+			`pq: unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`,
+			mode)
 	}
 
 	// Set Server Name Indication (SNI), if enabled by connection parameters.
@@ -82,10 +84,19 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 	return func(conn net.Conn) (net.Conn, error) {
 		client := tls.Client(conn, &tlsConf)
 		if verifyCaOnly {
-			err := sslVerifyCertificateAuthority(client, &tlsConf)
+			err := client.Handshake()
 			if err != nil {
-				return nil, err
+				return client, err
 			}
+			var (
+				certs = client.ConnectionState().PeerCertificates
+				opts  = x509.VerifyOptions{Intermediates: x509.NewCertPool(), Roots: tlsConf.RootCAs}
+			)
+			for _, cert := range certs[1:] {
+				opts.Intermediates.AddCert(cert)
+			}
+			_, err = certs[0].Verify(opts)
+			return client, err
 		}
 		return client, nil
 	}, nil
@@ -187,30 +198,6 @@ func sslCertificateAuthority(tlsConf *tls.Config, o values) error {
 	}
 
 	return nil
-}
-
-// sslVerifyCertificateAuthority carries out a TLS handshake to the server and
-// verifies the presented certificate against the CA, i.e. the one specified in
-// sslrootcert or the system CA if sslrootcert was not specified.
-func sslVerifyCertificateAuthority(client *tls.Conn, tlsConf *tls.Config) error {
-	err := client.Handshake()
-	if err != nil {
-		return err
-	}
-	certs := client.ConnectionState().PeerCertificates
-	opts := x509.VerifyOptions{
-		DNSName:       client.ConnectionState().ServerName,
-		Intermediates: x509.NewCertPool(),
-		Roots:         tlsConf.RootCAs,
-	}
-	for i, cert := range certs {
-		if i == 0 {
-			continue
-		}
-		opts.Intermediates.AddCert(cert)
-	}
-	_, err = certs[0].Verify(opts)
-	return err
 }
 
 // sslnegotiation returns true if we should negotiate SSL.

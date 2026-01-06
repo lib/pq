@@ -271,10 +271,6 @@ func TestListenerConnCloseWhileQueryIsExecuting(t *testing.T) {
 func TestNotifyExtra(t *testing.T) {
 	db := pqtest.MustDB(t)
 
-	if getServerVersion(t, db) < 90000 {
-		t.Skip("skipping NOTIFY payload test since the server does not appear to support it")
-	}
-
 	l, channel := newTestListenerConn(t)
 	defer l.Close()
 

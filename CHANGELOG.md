@@ -12,7 +12,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 - Support [`sslnegotiation`] to use SSL without negotiation ([#1180]).
 
 - The `pq.Error.Error()` text  includes the position of the error (if reported
-  by PostgreSQL) and SQLSTATE code ([#1224]):
+  by PostgreSQL) and SQLSTATE code ([#1219], [#1224]):
 
       pq: column "columndoesntexist" does not exist at column 8 (42703)
       pq: syntax error at or near ")" at position 2:71 (42601)
@@ -36,9 +36,8 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 - Match HOME directory lookup logic with libpq: prefer $HOME over /etc/passwd,
   ignore ENOTDIR errors, and use APPDATA on Windows ([#1214]).
 
-- The `pq.Error.Error()` message now includes the SQLSTATE error code ([#1219]):
-
-      pq: syntax error at end of input (42601)
+- Fix `sslmode=verify-ca` verifying the hostname anyway when connecting to a DNS
+  name (rather than IP) ([#1226])
 
 - Fix build with wasm ([#1184]), appengine ([#745]), and Plan 9 ([#1133]).
 
@@ -88,6 +87,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 [#1219]: https://github.com/lib/pq/pull/1219
 [#1223]: https://github.com/lib/pq/pull/1223
 [#1224]: https://github.com/lib/pq/pull/1224
+[#1226]: https://github.com/lib/pq/pull/1226
 
 
 v1.10.9 (2023-04-26)
