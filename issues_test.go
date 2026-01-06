@@ -12,17 +12,13 @@ import (
 
 func TestIssue494(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	query := `CREATE TEMP TABLE t (i INT PRIMARY KEY)`
 	if _, err := db.Exec(query); err != nil {
 		t.Fatal(err)
 	}
 
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
+	txn := pqtest.Begin(t, db)
 
 	if _, err := txn.Prepare(CopyIn("t", "i")); err != nil {
 		t.Fatal(err)
@@ -37,7 +33,6 @@ func TestIssue1046(t *testing.T) {
 	t.Parallel()
 
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	ctxTimeout := time.Second * 2
 	ctx, cancel := context.WithTimeout(context.Background(), ctxTimeout)
@@ -68,7 +63,6 @@ func TestIssue1062(t *testing.T) {
 		t.Parallel()
 	}
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	// Ensure that cancelling a QueryRowContext does not result in an ErrBadConn.
 
@@ -111,7 +105,6 @@ func connIsValid(t *testing.T, db *sql.DB) {
 
 func TestQueryCancelRace(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	// cancel a query while executing on Postgres: must return the cancelled error code
 	ctx, cancel := context.WithCancel(context.Background())
@@ -134,7 +127,6 @@ func TestQueryCancelRace(t *testing.T) {
 func TestQueryCancelledReused(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	// run a query that returns a lot of data

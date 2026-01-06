@@ -84,7 +84,6 @@ func TestConnListen(t *testing.T) {
 	defer l.Close()
 
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	ok, err := l.Listen("notify_test")
 	if !ok || err != nil {
@@ -108,7 +107,6 @@ func TestConnUnlisten(t *testing.T) {
 	defer l.Close()
 
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	ok, err := l.Listen("notify_test")
 	if !ok || err != nil {
@@ -147,7 +145,6 @@ func TestConnUnlistenAll(t *testing.T) {
 	defer l.Close()
 
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	ok, err := l.Listen("notify_test")
 	if !ok || err != nil {
@@ -273,7 +270,6 @@ func TestListenerConnCloseWhileQueryIsExecuting(t *testing.T) {
 
 func TestNotifyExtra(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	if getServerVersion(t, db) < 90000 {
 		t.Skip("skipping NOTIFY payload test since the server does not appear to support it")
@@ -322,7 +318,6 @@ func TestListenerListen(t *testing.T) {
 	defer l.Close()
 
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	err := l.Listen("notify_listen_test")
 	if err != nil {
@@ -345,7 +340,6 @@ func TestListenerUnlisten(t *testing.T) {
 	defer l.Close()
 
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	err := l.Listen("notify_listen_test")
 	if err != nil {
@@ -383,7 +377,6 @@ func TestListenerUnlistenAll(t *testing.T) {
 	defer l.Close()
 
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	err := l.Listen("notify_listen_test")
 	if err != nil {
@@ -421,7 +414,6 @@ func TestListenerFailedQuery(t *testing.T) {
 	defer l.Close()
 
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	err := l.Listen("notify_listen_test")
 	if err != nil {
@@ -469,7 +461,6 @@ func TestListenerReconnect(t *testing.T) {
 	defer l.Close()
 
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	err := l.Listen("notify_listen_test")
 	if err != nil {

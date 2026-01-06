@@ -50,7 +50,6 @@ func TestCopyInSchemaStmt(t *testing.T) {
 
 func TestCopyInMultipleValues(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	txn, err := db.Begin()
 	if err != nil {
@@ -109,7 +108,6 @@ func TestCopyInMultipleValues(t *testing.T) {
 
 func TestCopyInRaiseStmtTrigger(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	if getServerVersion(t, db) < 90000 {
 		var exists int
@@ -189,7 +187,6 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 
 func TestCopyInTypes(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	txn, err := db.Begin()
 	if err != nil {
@@ -248,7 +245,6 @@ func TestCopyInTypes(t *testing.T) {
 
 func TestCopyInWrongType(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	txn, err := db.Begin()
 	if err != nil {
@@ -283,7 +279,6 @@ func TestCopyInWrongType(t *testing.T) {
 
 func TestCopyOutsideOfTxnError(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	_, err := db.Prepare(CopyIn("temp", "num"))
 	if err == nil {
@@ -296,7 +291,6 @@ func TestCopyOutsideOfTxnError(t *testing.T) {
 
 func TestCopyInBinaryError(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	txn, err := db.Begin()
 	if err != nil {
@@ -321,7 +315,6 @@ func TestCopyInBinaryError(t *testing.T) {
 
 func TestCopyFromError(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	txn, err := db.Begin()
 	if err != nil {
@@ -346,7 +339,6 @@ func TestCopyFromError(t *testing.T) {
 
 func TestCopySyntaxError(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	txn, err := db.Begin()
 	if err != nil {
@@ -371,7 +363,6 @@ func TestCopySyntaxError(t *testing.T) {
 // Tests for connection errors in copyin.resploop()
 func TestCopyRespLoopConnectionError(t *testing.T) {
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	txn, err := db.Begin()
 	if err != nil {
@@ -457,7 +448,6 @@ func retry(t *testing.T, duration time.Duration, f func() error) {
 
 func BenchmarkCopyIn(b *testing.B) {
 	db := pqtest.MustDB(b)
-	defer db.Close()
 
 	txn, err := db.Begin()
 	if err != nil {

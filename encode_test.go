@@ -129,15 +129,11 @@ func TestParseTsErrors(t *testing.T) {
 // returns the same time.Time value.
 func TestEncodeAndParseTs(t *testing.T) {
 	t.Parallel()
-	db, err := pqtest.DB("timezone='Etc/UTC'")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := pqtest.MustDB(t, "timezone='Etc/UTC'")
 
 	for i, tt := range timeTests {
 		var dbstr string
-		err = db.QueryRow("SELECT ($1::timestamptz)::text", tt.timeval).Scan(&dbstr)
+		err := db.QueryRow("SELECT ($1::timestamptz)::text", tt.timeval).Scan(&dbstr)
 		if err != nil {
 			t.Errorf("%d: could not send value %q to the database: %s", i, tt.timeval, err)
 			continue
@@ -189,7 +185,6 @@ func TestFormatTs(t *testing.T) {
 func TestFormatTsBackend(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	var str string
 	err := db.QueryRow("SELECT '2001-02-03T04:05:06.007-08:09:10'::time::text").Scan(&str)
@@ -210,7 +205,6 @@ func TestFormatTsBackend(t *testing.T) {
 func TestTimeWithoutTimezone(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -251,7 +245,6 @@ func TestTimeWithTimezone(t *testing.T) {
 		t.Parallel()
 	}
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -295,7 +288,6 @@ func TestTimeWithTimezone(t *testing.T) {
 func TestTimestampWithTimeZone(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -356,7 +348,6 @@ func TestTimestampWithTimeZone(t *testing.T) {
 func TestTimestampWithOutTimezone(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	test := func(ts, pgts string) {
 		r, err := db.Query("SELECT $1::timestamp", pgts)
@@ -399,7 +390,6 @@ func TestInfinityTimestamp(t *testing.T) {
 	// Can't be parallel as it calls disableInfinityTs() and modifies a global.
 	// t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	expectedErrorStrRegexp := regexp.MustCompile(
 		`^sql: Scan error on column index 0(, name "timestamp(tz)?"|): unsupported`)
@@ -527,7 +517,6 @@ func TestInfinityTimestamp(t *testing.T) {
 func TestStringWithNul(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	hello0world := string("hello\x00world")
 	_, err := db.Query("SELECT $1::text", &hello0world)
@@ -540,7 +529,6 @@ func TestStringWithNul(t *testing.T) {
 func TestByteSliceToText(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	b := []byte("hello world")
 	row := db.QueryRow("SELECT $1::text", b)
@@ -559,7 +547,6 @@ func TestByteSliceToText(t *testing.T) {
 func TestStringToBytea(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	b := "hello world"
 	row := db.QueryRow("SELECT $1::bytea", b)
@@ -578,7 +565,6 @@ func TestStringToBytea(t *testing.T) {
 func TestTextByteSliceToUUID(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	b := []byte("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
 	row := db.QueryRow("SELECT $1::uuid", b)
@@ -606,7 +592,6 @@ func TestTextByteSliceToUUID(t *testing.T) {
 func TestBinaryByteSlicetoUUID(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	b := []byte{'\xa0', '\xee', '\xbc', '\x99',
 		'\x9c', '\x0b',
@@ -638,7 +623,6 @@ func TestBinaryByteSlicetoUUID(t *testing.T) {
 func TestStringToUUID(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	s := "a0eebc99-9c0b-4ef8-bb00-6bb9bd380a11"
 	row := db.QueryRow("SELECT $1::uuid", s)
@@ -657,7 +641,6 @@ func TestStringToUUID(t *testing.T) {
 func TestTextByteSliceToInt(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	expected := 12345678
 	b := []byte(fmt.Sprintf("%d", expected))
@@ -685,7 +668,6 @@ func TestTextByteSliceToInt(t *testing.T) {
 func TestBinaryByteSliceToInt(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	expected := 12345678
 	b := []byte{'\x00', '\xbc', '\x61', '\x4e'}
@@ -739,7 +721,6 @@ func TestByteaOutputFormatEncoding(t *testing.T) {
 func TestByteaOutputFormats(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	testByteaOutputFormat := func(f string, usePrepared bool) {
 		expectedData := []byte("\x5c\x78\x00\xff\x61\x62\x63\x01\x08")
