@@ -32,7 +32,7 @@ jobs:
           docker compose logs
           exit 1
         }
-        echo '127.0.0.1 postgres' | sudo tee -a /etc/hosts
+        echo '127.0.0.1 postgres postgres-invalid' | sudo tee -a /etc/hosts
     - name: 'Run tests'
       run: |
         echo 'PQTEST_BINARY_PARAMETERS=no  go test -race ./...'
@@ -57,7 +57,7 @@ jobs:
           docker compose logs
           exit 1
         }
-        echo '127.0.0.1 postgres' | sudo tee -a /etc/hosts
+        echo '127.0.0.1 postgres postgres-invalid' | sudo tee -a /etc/hosts
     - name: 'Run tests'
       run: |
         echo 'PGPORT=6432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...'
@@ -82,7 +82,7 @@ jobs:
           docker compose logs
           exit 1
         }
-        echo '127.0.0.1 postgres' | sudo tee -a /etc/hosts
+        echo '127.0.0.1 postgres postgres-invalid' | sudo tee -a /etc/hosts
     - name: 'Run tests'
       run: |
         echo 'PGPORT=6432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...'
@@ -111,7 +111,7 @@ jobs:
   #        docker compose logs
   #        exit 1
   #      }
-  #      echo '127.0.0.1 postgres' | sudo tee -a /etc/hosts
+  #      echo '127.0.0.1 postgres postgres-invalid' | sudo tee -a /etc/hosts
   #  - name: 'Run tests'
   #    run: |
   #      echo 'PQTEST_BINARY_PARAMETERS=no  go test -race ./...'
@@ -144,7 +144,7 @@ jobs:
   #        docker compose logs
   #        exit 1
   #      }
-  #      echo '127.0.0.1 postgres' | sudo tee -a /etc/hosts
+  #      echo '127.0.0.1 postgres postgres-invalid' | sudo tee -a /etc/hosts
 
   #  - uses: 'actions/setup-go@v6'
   #    with:

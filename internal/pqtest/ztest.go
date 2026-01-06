@@ -2,7 +2,12 @@
 
 package pqtest
 
-import "strings"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 // ErrorContains checks if the error message in have contains the text in
 // want.
@@ -17,6 +22,18 @@ func ErrorContains(have error, want string) bool {
 		return false
 	}
 	return strings.Contains(have.Error(), want)
+}
+
+// Read data from a file.
+func Read(t *testing.T, paths ...string) []byte {
+	t.Helper()
+
+	path := filepath.Join(paths...)
+	file, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ztest.Read: cannot read %v: %v", path, err)
+	}
+	return file
 }
 
 // NormalizeIndent removes tab indentation from every line.

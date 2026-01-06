@@ -38,7 +38,7 @@ different version.
 
 In addition, your `/etc/hosts` currently needs an entry:
 
-    127.0.0.1 postgres
+    127.0.0.1 postgres postgres-invalid
 
 Or you can use any other PostgreSQL instance; see
 `testdata/init/docker-entrypoint-initdb.d` for the required setup. You can use
