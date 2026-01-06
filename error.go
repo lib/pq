@@ -485,10 +485,24 @@ func (e *Error) SQLState() string {
 }
 
 func (e *Error) Error() string {
-	if e.Code != "" {
-		return "pq: " + e.Message + " (" + string(e.Code) + ")"
+	msg := e.Message
+	if e.query != "" && e.Position != "" {
+		pos, err := strconv.Atoi(e.Position)
+		if err == nil {
+			lines := strings.Split(e.query, "\n")
+			line, col := posToLine(pos, lines)
+			if len(lines) == 1 {
+				msg += " at column " + strconv.Itoa(col)
+			} else {
+				msg += " at position " + strconv.Itoa(line) + ":" + strconv.Itoa(col)
+			}
+		}
 	}
-	return "pq: " + e.Message
+
+	if e.Code != "" {
+		return "pq: " + msg + " (" + string(e.Code) + ")"
+	}
+	return "pq: " + msg
 }
 
 // ErrorWithDetail returns the error message with detailed information and

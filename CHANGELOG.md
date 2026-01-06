@@ -11,6 +11,12 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 - Support [`sslnegotiation`] to use SSL without negotiation ([#1180]).
 
+- The `pq.Error.Error()` text  includes the position of the error (if reported
+  by PostgreSQL) and SQLSTATE code ([#1224]):
+
+      pq: column "columndoesntexist" does not exist at column 8 (42703)
+      pq: syntax error at or near ")" at position 2:71 (42601)
+
 - The `pq.Error.ErrorWithDetail()` method prints a more detailed multiline
   message, with the Detail, Hint, and error position (if any) ([#1219]):
 
@@ -81,6 +87,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 [#1214]: https://github.com/lib/pq/pull/1214
 [#1219]: https://github.com/lib/pq/pull/1219
 [#1223]: https://github.com/lib/pq/pull/1223
+[#1224]: https://github.com/lib/pq/pull/1224
 
 
 v1.10.9 (2023-04-26)
