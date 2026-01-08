@@ -3,14 +3,17 @@ package pq
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
-	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"syscall"
+
+	"github.com/lib/pq/internal/pqutil"
 )
 
 // Registry for custom tls.Configs
@@ -20,7 +23,11 @@ var (
 )
 
 func RegisterTLSConfig(key string, config *tls.Config) error {
-	if _, isBool := readBool(key); isBool || strings.ToLower(key) == "require" || strings.ToLower(key) == "verify-ca" || strings.ToLower(key) == "verify-full" || strings.ToLower(key) == "disable" {
+	if _, err := pqutil.ParseBool(key); err == nil {
+		return fmt.Errorf("key %q is reserved", key)
+	}
+	switch strings.ToLower(key) {
+	case "require", "verify-ca", "verify-full", "disable":
 		return fmt.Errorf("key '%s' is reserved", key)
 	}
 
@@ -49,20 +56,6 @@ func getTLSConfigClone(key string) (config *tls.Config) {
 		config = v.Clone()
 	}
 	tlsConfigLock.RUnlock()
-	return
-}
-
-// Returns the bool value of the input.
-// The 2nd return value indicates if the input was a valid bool value
-func readBool(input string) (value bool, valid bool) {
-	switch input {
-	case "1", "true", "TRUE", "True":
-		return true, true
-	case "0", "false", "FALSE", "False":
-		return false, true
-	}
-
-	// Not a valid bool value
 	return
 }
 
@@ -103,11 +96,11 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 	case "disable":
 		return nil, nil
 	default:
-		{
-			tlsConf = getTLSConfigClone(mode)
-			if tlsConf == nil {
-				return nil, fmterrorf(`unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`, mode)
-			}
+		tlsConf = getTLSConfigClone(mode)
+		if tlsConf == nil {
+			return nil, fmt.Errorf(
+				`pq: unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`,
+				mode)
 		}
 	}
 
@@ -125,6 +118,10 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 	if err != nil {
 		return nil, err
 	}
+	err = sslCertificateAuthority(tlsConf, o)
+	if err != nil {
+		return nil, err
+	}
 
 	// Accept renegotiation requests initiated by the backend.
 	//
@@ -136,10 +133,19 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 	return func(conn net.Conn) (net.Conn, error) {
 		client := tls.Client(conn, tlsConf)
 		if verifyCaOnly {
-			err := sslVerifyCertificateAuthority(client, tlsConf)
+			err := client.Handshake()
 			if err != nil {
-				return nil, err
+				return client, err
 			}
+			var (
+				certs = client.ConnectionState().PeerCertificates
+				opts  = x509.VerifyOptions{Intermediates: x509.NewCertPool(), Roots: tlsConf.RootCAs}
+			)
+			for _, cert := range certs[1:] {
+				opts.Intermediates.AddCert(cert)
+			}
+			_, err = certs[0].Verify(opts)
+			return client, err
 		}
 		return client, nil
 	}, nil
@@ -160,26 +166,30 @@ func sslClientCertificates(tlsConf *tls.Config, o values) error {
 		return nil
 	}
 
-	// user.Current() might fail when cross-compiling. We have to ignore the
-	// error and continue without home directory defaults, since we wouldn't
-	// know from where to load them.
-	user, _ := user.Current()
+	home := pqutil.Home()
 
 	// In libpq, the client certificate is only loaded if the setting is not blank.
 	//
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1036-L1037
 	sslcert := o["sslcert"]
-	if len(sslcert) == 0 && user != nil {
-		sslcert = filepath.Join(user.HomeDir, ".postgresql", "postgresql.crt")
+	if len(sslcert) == 0 && home != "" {
+		if runtime.GOOS == "windows" {
+			sslcert = filepath.Join(sslcert, "postgresql.crt")
+		} else {
+			sslcert = filepath.Join(home, ".postgresql/postgresql.crt")
+		}
 	}
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1045
 	if len(sslcert) == 0 {
 		return nil
 	}
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1050:L1054
-	if _, err := os.Stat(sslcert); os.IsNotExist(err) {
-		return nil
-	} else if err != nil {
+	_, err := os.Stat(sslcert)
+	if err != nil {
+		perr := new(os.PathError)
+		if errors.As(err, &perr) && (perr.Err == syscall.ENOENT || perr.Err == syscall.ENOTDIR) {
+			return nil
+		}
 		return err
 	}
 
@@ -187,12 +197,17 @@ func sslClientCertificates(tlsConf *tls.Config, o values) error {
 	//
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1123-L1222
 	sslkey := o["sslkey"]
-	if len(sslkey) == 0 && user != nil {
-		sslkey = filepath.Join(user.HomeDir, ".postgresql", "postgresql.key")
+	if len(sslkey) == 0 && home != "" {
+		if runtime.GOOS == "windows" {
+			sslkey = filepath.Join(home, "postgresql.key")
+		} else {
+			sslkey = filepath.Join(home, ".postgresql/postgresql.key")
+		}
 	}
 
 	if len(sslkey) > 0 {
-		if err := sslKeyPermissions(sslkey); err != nil {
+		err := pqutil.SSLKeyPermissions(sslkey)
+		if err != nil {
 			return err
 		}
 	}
@@ -221,40 +236,25 @@ func sslCertificateAuthority(tlsConf *tls.Config, o values) error {
 			cert = []byte(sslrootcert)
 		} else {
 			var err error
-			cert, err = ioutil.ReadFile(sslrootcert)
+			cert, err = os.ReadFile(sslrootcert)
 			if err != nil {
 				return err
 			}
 		}
 
 		if !tlsConf.RootCAs.AppendCertsFromPEM(cert) {
-			return fmterrorf("couldn't parse pem in sslrootcert")
+			return errors.New("pq: couldn't parse pem in sslrootcert")
 		}
 	}
 
 	return nil
 }
 
-// sslVerifyCertificateAuthority carries out a TLS handshake to the server and
-// verifies the presented certificate against the CA, i.e. the one specified in
-// sslrootcert or the system CA if sslrootcert was not specified.
-func sslVerifyCertificateAuthority(client *tls.Conn, tlsConf *tls.Config) error {
-	err := client.Handshake()
-	if err != nil {
-		return err
+// sslnegotiation returns true if we should negotiate SSL.
+// returns false if there should be no negotiation and we should upgrade immediately.
+func sslnegotiation(o values) bool {
+	if v, ok := o["sslnegotiation"]; ok && v == "direct" {
+		return false
 	}
-	certs := client.ConnectionState().PeerCertificates
-	opts := x509.VerifyOptions{
-		DNSName:       client.ConnectionState().ServerName,
-		Intermediates: x509.NewCertPool(),
-		Roots:         tlsConf.RootCAs,
-	}
-	for i, cert := range certs {
-		if i == 0 {
-			continue
-		}
-		opts.Intermediates.AddCert(cert)
-	}
-	_, err = certs[0].Verify(opts)
-	return err
+	return true
 }

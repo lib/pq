@@ -6,11 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"runtime"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/lib/pq/internal/pqtest"
 )
 
 var errNilNotification = errors.New("nil notification")
@@ -61,24 +62,14 @@ func expectNoEvent(t *testing.T, eventch <-chan ListenerEventType) error {
 }
 
 func newTestListenerConn(t *testing.T) (*ListenerConn, <-chan *Notification) {
-	datname := os.Getenv("PGDATABASE")
-	sslmode := os.Getenv("PGSSLMODE")
+	t.Helper()
 
-	if datname == "" {
-		os.Setenv("PGDATABASE", "pqgotest")
-	}
-
-	if sslmode == "" {
-		os.Setenv("PGSSLMODE", "disable")
-	}
-
-	notificationChan := make(chan *Notification)
-	l, err := NewListenerConn("", notificationChan)
+	ch := make(chan *Notification)
+	l, err := NewListenerConn("", ch)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	return l, notificationChan
+	return l, ch
 }
 
 func TestNewListenerConn(t *testing.T) {
@@ -92,8 +83,7 @@ func TestConnListen(t *testing.T) {
 
 	defer l.Close()
 
-	db := openTestConn(t)
-	defer db.Close()
+	db := pqtest.MustDB(t)
 
 	ok, err := l.Listen("notify_test")
 	if !ok || err != nil {
@@ -116,8 +106,7 @@ func TestConnUnlisten(t *testing.T) {
 
 	defer l.Close()
 
-	db := openTestConn(t)
-	defer db.Close()
+	db := pqtest.MustDB(t)
 
 	ok, err := l.Listen("notify_test")
 	if !ok || err != nil {
@@ -155,8 +144,7 @@ func TestConnUnlistenAll(t *testing.T) {
 
 	defer l.Close()
 
-	db := openTestConn(t)
-	defer db.Close()
+	db := pqtest.MustDB(t)
 
 	ok, err := l.Listen("notify_test")
 	if !ok || err != nil {
@@ -281,12 +269,7 @@ func TestListenerConnCloseWhileQueryIsExecuting(t *testing.T) {
 }
 
 func TestNotifyExtra(t *testing.T) {
-	db := openTestConn(t)
-	defer db.Close()
-
-	if getServerVersion(t, db) < 90000 {
-		t.Skip("skipping NOTIFY payload test since the server does not appear to support it")
-	}
+	db := pqtest.MustDB(t)
 
 	l, channel := newTestListenerConn(t)
 	defer l.Close()
@@ -309,24 +292,17 @@ func TestNotifyExtra(t *testing.T) {
 
 // create a new test listener and also set the timeouts
 func newTestListenerTimeout(t *testing.T, min time.Duration, max time.Duration) (*Listener, <-chan ListenerEventType) {
-	datname := os.Getenv("PGDATABASE")
-	sslmode := os.Getenv("PGSSLMODE")
+	t.Helper()
 
-	if datname == "" {
-		os.Setenv("PGDATABASE", "pqgotest")
-	}
-
-	if sslmode == "" {
-		os.Setenv("PGSSLMODE", "disable")
-	}
-
-	eventch := make(chan ListenerEventType, 16)
-	l := NewListener("", min, max, func(t ListenerEventType, err error) { eventch <- t })
-	err := expectEvent(t, eventch, ListenerEventConnected)
+	var (
+		ch = make(chan ListenerEventType, 16)
+		l  = NewListener("", min, max, func(t ListenerEventType, err error) { ch <- t })
+	)
+	err := expectEvent(t, ch, ListenerEventConnected)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return l, eventch
+	return l, ch
 }
 
 func newTestListener(t *testing.T) (*Listener, <-chan ListenerEventType) {
@@ -337,8 +313,7 @@ func TestListenerListen(t *testing.T) {
 	l, _ := newTestListener(t)
 	defer l.Close()
 
-	db := openTestConn(t)
-	defer db.Close()
+	db := pqtest.MustDB(t)
 
 	err := l.Listen("notify_listen_test")
 	if err != nil {
@@ -360,8 +335,7 @@ func TestListenerUnlisten(t *testing.T) {
 	l, _ := newTestListener(t)
 	defer l.Close()
 
-	db := openTestConn(t)
-	defer db.Close()
+	db := pqtest.MustDB(t)
 
 	err := l.Listen("notify_listen_test")
 	if err != nil {
@@ -398,8 +372,7 @@ func TestListenerUnlistenAll(t *testing.T) {
 	l, _ := newTestListener(t)
 	defer l.Close()
 
-	db := openTestConn(t)
-	defer db.Close()
+	db := pqtest.MustDB(t)
 
 	err := l.Listen("notify_listen_test")
 	if err != nil {
@@ -436,8 +409,7 @@ func TestListenerFailedQuery(t *testing.T) {
 	l, eventch := newTestListener(t)
 	defer l.Close()
 
-	db := openTestConn(t)
-	defer db.Close()
+	db := pqtest.MustDB(t)
 
 	err := l.Listen("notify_listen_test")
 	if err != nil {
@@ -484,8 +456,7 @@ func TestListenerReconnect(t *testing.T) {
 	l, eventch := newTestListenerTimeout(t, 20*time.Millisecond, time.Hour)
 	defer l.Close()
 
-	db := openTestConn(t)
-	defer db.Close()
+	db := pqtest.MustDB(t)
 
 	err := l.Listen("notify_listen_test")
 	if err != nil {
@@ -507,8 +478,18 @@ func TestListenerReconnect(t *testing.T) {
 	if ok {
 		t.Fatalf("could not kill the connection: %v", err)
 	}
-	if err != io.EOF {
-		t.Fatalf("unexpected error %v", err)
+	if pqtest.Pgbouncer() {
+		if !pqtest.ErrorContains(err, "server conn crashed") {
+			t.Fatalf("unexpected error %T: %[1]s", err)
+		}
+	} else if pqtest.Pgpool() {
+		if !pqtest.ErrorContains(err, "unable to forward message to frontend") {
+			t.Fatalf("unexpected error %T: %[1]s", err)
+		}
+	} else {
+		if err != io.EOF {
+			t.Fatalf("unexpected error %T: %[1]s", err)
+		}
 	}
 	err = expectEvent(t, eventch, ListenerEventDisconnected)
 	if err != nil {

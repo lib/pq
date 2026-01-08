@@ -19,14 +19,15 @@ var typeSQLScanner = reflect.TypeOf((*sql.Scanner)(nil)).Elem()
 // slice of any dimension.
 //
 // For example:
-//  db.Query(`SELECT * FROM t WHERE id = ANY($1)`, pq.Array([]int{235, 401}))
 //
-//  var x []sql.NullInt64
-//  db.QueryRow(`SELECT ARRAY[235, 401]`).Scan(pq.Array(&x))
+//	db.Query(`SELECT * FROM t WHERE id = ANY($1)`, pq.Array([]int{235, 401}))
+//
+//	var x []sql.NullInt64
+//	db.QueryRow(`SELECT ARRAY[235, 401]`).Scan(pq.Array(&x))
 //
 // Scanning multi-dimensional arrays is not supported.  Arrays where the lower
 // bound is not one (such as `[0:0]={1}') are not supported.
-func Array(a interface{}) interface {
+func Array(a any) interface {
 	driver.Valuer
 	sql.Scanner
 } {
@@ -76,7 +77,7 @@ type ArrayDelimiter interface {
 type BoolArray []bool
 
 // Scan implements the sql.Scanner interface.
-func (a *BoolArray) Scan(src interface{}) error {
+func (a *BoolArray) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		return a.scanBytes(src)
@@ -150,7 +151,7 @@ func (a BoolArray) Value() (driver.Value, error) {
 type ByteaArray [][]byte
 
 // Scan implements the sql.Scanner interface.
-func (a *ByteaArray) Scan(src interface{}) error {
+func (a *ByteaArray) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		return a.scanBytes(src)
@@ -222,7 +223,7 @@ func (a ByteaArray) Value() (driver.Value, error) {
 type Float64Array []float64
 
 // Scan implements the sql.Scanner interface.
-func (a *Float64Array) Scan(src interface{}) error {
+func (a *Float64Array) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		return a.scanBytes(src)
@@ -284,7 +285,7 @@ func (a Float64Array) Value() (driver.Value, error) {
 type Float32Array []float32
 
 // Scan implements the sql.Scanner interface.
-func (a *Float32Array) Scan(src interface{}) error {
+func (a *Float32Array) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		return a.scanBytes(src)
@@ -345,7 +346,7 @@ func (a Float32Array) Value() (driver.Value, error) {
 
 // GenericArray implements the driver.Valuer and sql.Scanner interfaces for
 // an array or slice of any dimension.
-type GenericArray struct{ A interface{} }
+type GenericArray struct{ A any }
 
 func (GenericArray) evaluateDestination(rt reflect.Type) (reflect.Type, func([]byte, reflect.Value) error, string) {
 	var assign func([]byte, reflect.Value) error
@@ -354,7 +355,7 @@ func (GenericArray) evaluateDestination(rt reflect.Type) (reflect.Type, func([]b
 	// TODO calculate the assign function for other types
 	// TODO repeat this section on the element type of arrays or slices (multidimensional)
 	{
-		if reflect.PtrTo(rt).Implements(typeSQLScanner) {
+		if reflect.PointerTo(rt).Implements(typeSQLScanner) {
 			// dest is always addressable because it is an element of a slice.
 			assign = func(src []byte, dest reflect.Value) (err error) {
 				ss := dest.Addr().Interface().(sql.Scanner)
@@ -383,7 +384,7 @@ FoundType:
 }
 
 // Scan implements the sql.Scanner interface.
-func (a GenericArray) Scan(src interface{}) error {
+func (a GenericArray) Scan(src any) error {
 	dpv := reflect.ValueOf(a.A)
 	switch {
 	case dpv.Kind() != reflect.Ptr:
@@ -502,7 +503,7 @@ func (a GenericArray) Value() (driver.Value, error) {
 type Int64Array []int64
 
 // Scan implements the sql.Scanner interface.
-func (a *Int64Array) Scan(src interface{}) error {
+func (a *Int64Array) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		return a.scanBytes(src)
@@ -563,7 +564,7 @@ func (a Int64Array) Value() (driver.Value, error) {
 type Int32Array []int32
 
 // Scan implements the sql.Scanner interface.
-func (a *Int32Array) Scan(src interface{}) error {
+func (a *Int32Array) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		return a.scanBytes(src)
@@ -626,7 +627,7 @@ func (a Int32Array) Value() (driver.Value, error) {
 type StringArray []string
 
 // Scan implements the sql.Scanner interface.
-func (a *StringArray) Scan(src interface{}) error {
+func (a *StringArray) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		return a.scanBytes(src)
@@ -728,7 +729,7 @@ func appendArrayElement(b []byte, rv reflect.Value) ([]byte, string, error) {
 
 	var del = ","
 	var err error
-	var iv interface{} = rv.Interface()
+	var iv any = rv.Interface()
 
 	if ad, ok := iv.(ArrayDelimiter); ok {
 		del = ad.ArrayDelimiter()

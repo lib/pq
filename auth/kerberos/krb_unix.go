@@ -1,5 +1,6 @@
 //go:build !windows
-// +build !windows
+
+// UNIX Kerberos support, using jcmturner's pure-go implementation
 
 package kerberos
 
@@ -14,11 +15,6 @@ import (
 	"github.com/jcmturner/gokrb5/v8/credentials"
 	"github.com/jcmturner/gokrb5/v8/spnego"
 )
-
-/*
- * UNIX Kerberos support, using jcmturner's pure-go
- * implementation
- */
 
 // GSS implements the pq.GSS interface.
 type GSS struct {

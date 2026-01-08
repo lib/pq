@@ -6,22 +6,15 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"time"
 )
 
-const (
-	watchCancelDialContextTimeout = time.Second * 10
-)
+const watchCancelDialContextTimeout = 10 * time.Second
 
 // Implement the "QueryerContext" interface
 func (cn *conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	list := make([]driver.Value, len(args))
-	for i, nv := range args {
-		list[i] = nv.Value
-	}
 	finish := cn.watchCancel(ctx)
-	r, err := cn.query(query, list)
+	r, err := cn.query(query, args)
 	if err != nil {
 		if finish != nil {
 			finish()
@@ -176,19 +169,15 @@ func (cn *conn) cancel(ctx context.Context) error {
 
 	// Read until EOF to ensure that the server received the cancel.
 	{
-		_, err := io.Copy(ioutil.Discard, c)
+		_, err := io.Copy(io.Discard, c)
 		return err
 	}
 }
 
 // Implement the "StmtQueryContext" interface
 func (st *stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
-	list := make([]driver.Value, len(args))
-	for i, nv := range args {
-		list[i] = nv.Value
-	}
 	finish := st.watchCancel(ctx)
-	r, err := st.query(list)
+	r, err := st.query(args)
 	if err != nil {
 		if finish != nil {
 			finish()
@@ -200,17 +189,19 @@ func (st *stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (dri
 }
 
 // Implement the "StmtExecContext" interface
-func (st *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
-	list := make([]driver.Value, len(args))
-	for i, nv := range args {
-		list[i] = nv.Value
-	}
-
+func (st *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (res driver.Result, err error) {
 	if finish := st.watchCancel(ctx); finish != nil {
 		defer finish()
 	}
 
-	return st.Exec(list)
+	if err := st.cn.err.get(); err != nil {
+		return nil, err
+	}
+	defer st.cn.errRecover(&err)
+
+	st.exec(args)
+	res, _, err = st.cn.readExecuteResponse("simple query")
+	return res, err
 }
 
 // watchCancel is implemented on stmt in order to not mark the parent conn as bad

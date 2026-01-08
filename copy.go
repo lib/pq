@@ -1,11 +1,13 @@
 package pq
 
 import (
+	"bytes"
 	"context"
 	"database/sql/driver"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 )
 
@@ -20,29 +22,35 @@ var (
 // CopyIn creates a COPY FROM statement which can be prepared with
 // Tx.Prepare().  The target table should be visible in search_path.
 func CopyIn(table string, columns ...string) string {
-	stmt := "COPY " + QuoteIdentifier(table) + " ("
+	buffer := bytes.NewBufferString("COPY ")
+	BufferQuoteIdentifier(table, buffer)
+	buffer.WriteString(" (")
+	makeStmt(buffer, columns...)
+	return buffer.String()
+}
+
+// MakeStmt makes the stmt string for CopyIn and CopyInSchema.
+func makeStmt(buffer *bytes.Buffer, columns ...string) {
+	//s := bytes.NewBufferString()
 	for i, col := range columns {
 		if i != 0 {
-			stmt += ", "
+			buffer.WriteString(", ")
 		}
-		stmt += QuoteIdentifier(col)
+		BufferQuoteIdentifier(col, buffer)
 	}
-	stmt += ") FROM STDIN"
-	return stmt
+	buffer.WriteString(") FROM STDIN")
 }
 
 // CopyInSchema creates a COPY FROM statement which can be prepared with
 // Tx.Prepare().
 func CopyInSchema(schema, table string, columns ...string) string {
-	stmt := "COPY " + QuoteIdentifier(schema) + "." + QuoteIdentifier(table) + " ("
-	for i, col := range columns {
-		if i != 0 {
-			stmt += ", "
-		}
-		stmt += QuoteIdentifier(col)
-	}
-	stmt += ") FROM STDIN"
-	return stmt
+	buffer := bytes.NewBufferString("COPY ")
+	BufferQuoteIdentifier(schema, buffer)
+	buffer.WriteRune('.')
+	BufferQuoteIdentifier(table, buffer)
+	buffer.WriteString(" (")
+	makeStmt(buffer, columns...)
+	return buffer.String()
 }
 
 type copyin struct {
@@ -98,7 +106,7 @@ awaitCopyInResponse:
 			err = errCopyToNotSupported
 			break awaitCopyInResponse
 		case 'E':
-			err = parseError(r)
+			err = parseError(r, q)
 		case 'Z':
 			if err == nil {
 				ci.setBad(driver.ErrBadConn)
@@ -133,6 +141,9 @@ awaitCopyInResponse:
 }
 
 func (ci *copyin) flush(buf []byte) {
+	if len(buf)-1 > math.MaxUint32 {
+		panic("too many columns")
+	}
 	// set message length (without message identifier)
 	binary.BigEndian.PutUint32(buf[1:], uint32(len(buf)-1))
 
@@ -159,14 +170,14 @@ func (ci *copyin) resploop() {
 			ci.setResult(res)
 		case 'N':
 			if n := ci.cn.noticeHandler; n != nil {
-				n(parseError(&r))
+				n(parseError(&r, ""))
 			}
 		case 'Z':
 			ci.cn.processReadyForQuery(&r)
 			ci.done <- true
 			return
 		case 'E':
-			err := parseError(&r)
+			err := parseError(&r, "")
 			ci.setError(err)
 		default:
 			ci.setBad(driver.ErrBadConn)

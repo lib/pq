@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"database/sql"
 	"database/sql/driver"
+	"fmt"
 	"math/rand"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/lib/pq/internal/pqtest"
 )
 
 func TestParseArray(t *testing.T) {
@@ -124,7 +127,7 @@ func TestArrayScanner(t *testing.T) {
 		t.Errorf("Expected *ByteaArray, got %T", s)
 	}
 
-	for _, tt := range []interface{}{
+	for _, tt := range []any{
 		&[]sql.Scanner{},
 		&[][]bool{},
 		&[][]float64{},
@@ -176,7 +179,7 @@ func TestArrayValuer(t *testing.T) {
 		t.Errorf("Expected *ByteaArray, got %T", v)
 	}
 
-	for _, tt := range []interface{}{
+	for _, tt := range []any{
 		nil,
 		[]driver.Value{},
 		[][]bool{},
@@ -255,7 +258,7 @@ func TestBoolArrayScanBytes(t *testing.T) {
 
 func BenchmarkBoolArrayScanBytes(b *testing.B) {
 	var a BoolArray
-	var x interface{} = []byte(`{t,f,t,f,t,f,t,f,t,f}`)
+	var x any = []byte(`{t,f,t,f,t,f,t,f,t,f}`)
 
 	for i := 0; i < b.N; i++ {
 		a = BoolArray{}
@@ -409,7 +412,7 @@ func TestByteaArrayScanBytes(t *testing.T) {
 
 func BenchmarkByteaArrayScanBytes(b *testing.B) {
 	var a ByteaArray
-	var x interface{} = []byte(`{"\\xfe","\\xff","\\xdead","\\xbeef","\\xfe","\\xff","\\xdead","\\xbeef","\\xfe","\\xff"}`)
+	var x any = []byte(`{"\\xfe","\\xff","\\xdead","\\xbeef","\\xfe","\\xff","\\xdead","\\xbeef","\\xfe","\\xff"}`)
 
 	for i := 0; i < b.N; i++ {
 		a = ByteaArray{}
@@ -563,7 +566,7 @@ func TestFloat64ArrayScanBytes(t *testing.T) {
 
 func BenchmarkFloat64ArrayScanBytes(b *testing.B) {
 	var a Float64Array
-	var x interface{} = []byte(`{1.2,3.4,5.6,7.8,9.01,2.34,5.67,8.90,1.234,5.678}`)
+	var x any = []byte(`{1.2,3.4,5.6,7.8,9.01,2.34,5.67,8.90,1.234,5.678}`)
 
 	for i := 0; i < b.N; i++ {
 		a = Float64Array{}
@@ -716,7 +719,7 @@ func TestInt64ArrayScanBytes(t *testing.T) {
 
 func BenchmarkInt64ArrayScanBytes(b *testing.B) {
 	var a Int64Array
-	var x interface{} = []byte(`{1,2,3,4,5,6,7,8,9,0}`)
+	var x any = []byte(`{1,2,3,4,5,6,7,8,9,0}`)
 
 	for i := 0; i < b.N; i++ {
 		a = Int64Array{}
@@ -870,7 +873,7 @@ func TestFloat32ArrayScanBytes(t *testing.T) {
 
 func BenchmarkFloat32ArrayScanBytes(b *testing.B) {
 	var a Float32Array
-	var x interface{} = []byte(`{1.2,3.4,5.6,7.8,9.01,2.34,5.67,8.90,1.234,5.678}`)
+	var x any = []byte(`{1.2,3.4,5.6,7.8,9.01,2.34,5.67,8.90,1.234,5.678}`)
 
 	for i := 0; i < b.N; i++ {
 		a = Float32Array{}
@@ -1023,7 +1026,7 @@ func TestInt32ArrayScanBytes(t *testing.T) {
 
 func BenchmarkInt32ArrayScanBytes(b *testing.B) {
 	var a Int32Array
-	var x interface{} = []byte(`{1,2,3,4,5,6,7,8,9,0}`)
+	var x any = []byte(`{1,2,3,4,5,6,7,8,9,0}`)
 
 	for i := 0; i < b.N; i++ {
 		a = Int32Array{}
@@ -1177,8 +1180,8 @@ func TestStringArrayScanBytes(t *testing.T) {
 
 func BenchmarkStringArrayScanBytes(b *testing.B) {
 	var a StringArray
-	var x interface{} = []byte(`{a,b,c,d,e,f,g,h,i,j}`)
-	var y interface{} = []byte(`{"\a","\b","\c","\d","\e","\f","\g","\h","\i","\j"}`)
+	var x any = []byte(`{a,b,c,d,e,f,g,h,i,j}`)
+	var y any = []byte(`{"\a","\b","\c","\d","\e","\f","\g","\h","\i","\j"}`)
 
 	for i := 0; i < b.N; i++ {
 		a = StringArray{}
@@ -1275,7 +1278,7 @@ func TestGenericArrayScanUnsupported(t *testing.T) {
 	var nsa [1]sql.NullString
 
 	for _, tt := range []struct {
-		src, dest interface{}
+		src, dest any
 		err       string
 	}{
 		{nil, nil, "destination <nil> is not a pointer to array or slice"},
@@ -1362,8 +1365,8 @@ func TestGenericArrayScanScannerSliceBytes(t *testing.T) {
 
 func BenchmarkGenericArrayScanScannerSliceBytes(b *testing.B) {
 	var a GenericArray
-	var x interface{} = []byte(`{a,b,c,d,e,f,g,h,i,j}`)
-	var y interface{} = []byte(`{"\a","\b","\c","\d","\e","\f","\g","\h","\i","\j"}`)
+	var x any = []byte(`{a,b,c,d,e,f,g,h,i,j}`)
+	var y any = []byte(`{"\a","\b","\c","\d","\e","\f","\g","\h","\i","\j"}`)
 
 	for i := 0; i < b.N; i++ {
 		a = GenericArray{new([]sql.NullString)}
@@ -1409,7 +1412,7 @@ func TestGenericArrayScanErrors(t *testing.T) {
 	var pss *[]string
 
 	for _, tt := range []struct {
-		src, dest interface{}
+		src, dest any
 		err       string
 	}{
 		{nil, pss, "destination *[]string is nil"},
@@ -1462,7 +1465,7 @@ func TestGenericArrayValue(t *testing.T) {
 		t.Errorf("Expected nil, got %q", result)
 	}
 
-	for _, tt := range []interface{}{
+	for _, tt := range []any{
 		[]bool(nil),
 		[][]int(nil),
 		[]*int(nil),
@@ -1486,7 +1489,7 @@ func TestGenericArrayValue(t *testing.T) {
 
 	for _, tt := range []struct {
 		result string
-		input  interface{}
+		input  any
 	}{
 		{`{}`, []bool{}},
 		{`{true}`, []bool{true}},
@@ -1530,12 +1533,12 @@ func TestGenericArrayValue(t *testing.T) {
 }
 
 func TestGenericArrayValueErrors(t *testing.T) {
-	v := []interface{}{func() {}}
+	v := []any{func() {}}
 	if _, err := (GenericArray{v}).Value(); err == nil {
 		t.Errorf("Expected error for %q, got nil", v)
 	}
 
-	v = []interface{}{nil, func() {}}
+	v = []any{nil, func() {}}
 	if _, err := (GenericArray{v}).Value(); err == nil {
 		t.Errorf("Expected error for %q, got nil", v)
 	}
@@ -1605,13 +1608,12 @@ func BenchmarkGenericArrayValueStrings(b *testing.B) {
 }
 
 func TestArrayScanBackend(t *testing.T) {
-	db := openTestConn(t)
-	defer db.Close()
+	db := pqtest.MustDB(t)
 
 	for _, tt := range []struct {
 		s string
 		d sql.Scanner
-		e interface{}
+		e any
 	}{
 		{`ARRAY[true, false]`, new(BoolArray), &BoolArray{true, false}},
 		{`ARRAY[E'\\xdead', E'\\xbeef']`, new(ByteaArray), &ByteaArray{{'\xDE', '\xAD'}, {'\xBE', '\xEF'}}},
@@ -1619,19 +1621,20 @@ func TestArrayScanBackend(t *testing.T) {
 		{`ARRAY[1, 2, 3]`, new(Int64Array), &Int64Array{1, 2, 3}},
 		{`ARRAY['a', E'\\b', 'c"', 'd,e']`, new(StringArray), &StringArray{`a`, `\b`, `c"`, `d,e`}},
 	} {
-		err := db.QueryRow(`SELECT ` + tt.s).Scan(tt.d)
-		if err != nil {
-			t.Errorf("Expected no error when scanning %s into %T, got %v", tt.s, tt.d, err)
-		}
-		if !reflect.DeepEqual(tt.d, tt.e) {
-			t.Errorf("Expected %v when scanning %s into %T, got %v", tt.e, tt.s, tt.d, tt.d)
-		}
+		t.Run("", func(t *testing.T) {
+			err := db.QueryRow(`SELECT ` + tt.s).Scan(tt.d)
+			if err != nil {
+				t.Errorf("Expected no error when scanning %s into %T, got %v", tt.s, tt.d, err)
+			}
+			if !reflect.DeepEqual(tt.d, tt.e) {
+				t.Errorf("Expected %v when scanning %s into %T, got %v", tt.e, tt.s, tt.d, tt.d)
+			}
+		})
 	}
 }
 
 func TestArrayValueBackend(t *testing.T) {
-	db := openTestConn(t)
-	defer db.Close()
+	db := pqtest.MustDB(t)
 
 	for _, tt := range []struct {
 		s string
@@ -1649,4 +1652,57 @@ func TestArrayValueBackend(t *testing.T) {
 			t.Errorf("Expected %v to equal %s, got %v", tt.v, tt.s, err)
 		}
 	}
+}
+
+func TestArrayArg(t *testing.T) {
+	db := pqtest.MustDB(t)
+
+	tests := []struct {
+		pgType  string
+		in, out any
+	}{
+		{"int[]", []int{245, 231}, []int64{245, 231}},
+		{"int[]", &[]int{245, 231}, []int64{245, 231}},
+		{"int[]", []int64{245, 231}, nil},
+		{"int[]", &[]int64{245, 231}, []int64{245, 231}},
+		{"varchar[]", []string{"hello", "world"}, nil},
+		{"varchar[]", &[]string{"hello", "world"}, []string{"hello", "world"}},
+	}
+
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			if tt.out == nil {
+				tt.out = tt.in
+			}
+
+			r, err := db.Query(fmt.Sprintf("SELECT $1::%s", tt.pgType), tt.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+
+			if !r.Next() {
+				if r.Err() != nil {
+					t.Fatal(r.Err())
+				}
+				t.Fatal("expected row")
+			}
+
+			defer func() {
+				if r.Next() {
+					t.Fatal("unexpected row")
+				}
+			}()
+
+			have := reflect.New(reflect.TypeOf(tt.out))
+			if err := r.Scan(Array(have.Interface())); err != nil {
+				t.Fatal(err)
+			}
+
+			if !reflect.DeepEqual(tt.out, have.Elem().Interface()) {
+				t.Errorf("\nhave: %v\nwant %v", have, tt.out)
+			}
+		})
+	}
+
 }

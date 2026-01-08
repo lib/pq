@@ -5,12 +5,9 @@ import (
 	"strings"
 )
 
-/*
- *  Find the A record associated with a hostname
- *  In general, hostnames supplied to the driver should be
- *  canonicalized because the KDC usually only has one
- *  principal and not one per potential alias of a host.
- */
+// Find the A record associated with a hostname In general, hostnames supplied
+// to the driver should be canonicalized because the KDC usually only has one
+// principal and not one per potential alias of a host.
 func canonicalizeHostname(host string) (string, error) {
 	canon := host
 

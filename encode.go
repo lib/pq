@@ -2,7 +2,7 @@ package pq
 
 import (
 	"bytes"
-	"database/sql/driver"
+	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -19,7 +19,7 @@ import (
 
 var time2400Regex = regexp.MustCompile(`^(24:00(?::00(?:\.0+)?)?)(?:[Z+-].*)?$`)
 
-func binaryEncode(parameterStatus *parameterStatus, x interface{}) []byte {
+func binaryEncode(parameterStatus *parameterStatus, x any) []byte {
 	switch v := x.(type) {
 	case []byte:
 		return v
@@ -28,37 +28,36 @@ func binaryEncode(parameterStatus *parameterStatus, x interface{}) []byte {
 	}
 }
 
-func encode(parameterStatus *parameterStatus, x interface{}, pgtypOid oid.Oid) []byte {
+func encode(parameterStatus *parameterStatus, x any, pgtypOid oid.Oid) []byte {
 	switch v := x.(type) {
 	case int64:
 		return strconv.AppendInt(nil, v, 10)
 	case float64:
 		return strconv.AppendFloat(nil, v, 'f', -1, 64)
 	case []byte:
+		if v == nil {
+			return nil
+		}
 		if pgtypOid == oid.T_bytea {
 			return encodeBytea(parameterStatus.serverVersion, v)
 		}
-
 		return v
 	case string:
 		if pgtypOid == oid.T_bytea {
 			return encodeBytea(parameterStatus.serverVersion, []byte(v))
 		}
-
 		return []byte(v)
 	case bool:
 		return strconv.AppendBool(nil, v)
 	case time.Time:
 		return formatTs(v)
-
 	default:
 		errorf("encode: unknown type for %T", v)
 	}
-
 	panic("not reached")
 }
 
-func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid, f format) interface{} {
+func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid, f format) any {
 	switch f {
 	case formatBinary:
 		return binaryDecode(parameterStatus, s, typ)
@@ -69,7 +68,7 @@ func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid, f format) i
 	}
 }
 
-func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{} {
+func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) any {
 	switch typ {
 	case oid.T_bytea:
 		return s
@@ -93,9 +92,26 @@ func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) inter
 	panic("not reached")
 }
 
-func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interface{} {
+// decodeUUIDBinary interprets the binary format of a uuid, returning it in text format.
+func decodeUUIDBinary(src []byte) ([]byte, error) {
+	if len(src) != 16 {
+		return nil, fmt.Errorf("pq: unable to decode uuid; bad length: %d", len(src))
+	}
+
+	dst := make([]byte, 36)
+	dst[8], dst[13], dst[18], dst[23] = '-', '-', '-', '-'
+	hex.Encode(dst[0:], src[0:4])
+	hex.Encode(dst[9:], src[4:6])
+	hex.Encode(dst[14:], src[6:8])
+	hex.Encode(dst[19:], src[8:10])
+	hex.Encode(dst[24:], src[10:16])
+
+	return dst, nil
+}
+
+func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) any {
 	switch typ {
-	case oid.T_char, oid.T_varchar, oid.T_text:
+	case oid.T_char, oid.T_bpchar, oid.T_varchar, oid.T_text:
 		return string(s)
 	case oid.T_bytea:
 		b, err := parseBytea(s)
@@ -135,7 +151,7 @@ func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) interfa
 
 // appendEncodedText encodes item in text format as required by COPY
 // and appends to buf
-func appendEncodedText(parameterStatus *parameterStatus, buf []byte, x interface{}) []byte {
+func appendEncodedText(parameterStatus *parameterStatus, buf []byte, x any) []byte {
 	switch v := x.(type) {
 	case int64:
 		return strconv.AppendInt(buf, v, 10)
@@ -303,9 +319,11 @@ func (c *locationCache) getLocation(offset int) *time.Location {
 	return location
 }
 
-var infinityTsEnabled = false
-var infinityTsNegative time.Time
-var infinityTsPositive time.Time
+var (
+	infinityTsEnabled  = false
+	infinityTsNegative time.Time
+	infinityTsPositive time.Time
+)
 
 const (
 	infinityTsEnabledAlready        = "pq: infinity timestamp enabled already"
@@ -344,9 +362,7 @@ func EnableInfinityTs(negative time.Time, positive time.Time) {
 	infinityTsPositive = positive
 }
 
-/*
- * Testing might want to toggle infinityTsEnabled
- */
+// Testing might want to toggle infinityTsEnabled
 func disableInfinityTs() {
 	infinityTsEnabled = false
 }
@@ -355,7 +371,7 @@ func disableInfinityTs() {
 // setting ("ISO, MDY"), the only one we currently support. This
 // accounts for the discrepancies between the parsing available with
 // time.Parse and the Postgres date formatting quirks.
-func parseTs(currentLocation *time.Location, str string) interface{} {
+func parseTs(currentLocation *time.Location, str string) any {
 	switch str {
 	case "-infinity":
 		if infinityTsEnabled {
@@ -609,24 +625,9 @@ func encodeBytea(serverVersion int, v []byte) (result []byte) {
 	return result
 }
 
-// NullTime represents a time.Time that may be null. NullTime implements the
-// sql.Scanner interface so it can be used as a scan destination, similar to
-// sql.NullString.
-type NullTime struct {
-	Time  time.Time
-	Valid bool // Valid is true if Time is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (nt *NullTime) Scan(value interface{}) error {
-	nt.Time, nt.Valid = value.(time.Time)
-	return nil
-}
-
-// Value implements the driver Valuer interface.
-func (nt NullTime) Value() (driver.Value, error) {
-	if !nt.Valid {
-		return nil, nil
-	}
-	return nt.Time, nil
-}
+// NullTime represents a [time.Time] that may be null.
+// NullTime implements the [sql.Scanner] interface so
+// it can be used as a scan destination, similar to [sql.NullString].
+//
+// Deprecated: this is an alias for [sql.NullTime].
+type NullTime = sql.NullTime
