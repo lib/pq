@@ -2,7 +2,6 @@ package pq
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/sha256"
@@ -15,16 +14,15 @@ import (
 	"math"
 	"net"
 	"os"
-	"os/user"
-	"path/filepath"
 	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/lib/pq/internal/pgpass"
 	"github.com/lib/pq/internal/pqsql"
+	"github.com/lib/pq/internal/pqutil"
 	"github.com/lib/pq/internal/proto"
 	"github.com/lib/pq/oid"
 	"github.com/lib/pq/scram"
@@ -32,13 +30,12 @@ import (
 
 // Common error types
 var (
-	ErrNotSupported              = errors.New("pq: Unsupported command")
-	ErrInFailedTransaction       = errors.New("pq: Could not complete operation in a failed transaction")
+	ErrNotSupported              = errors.New("pq: unsupported command")
+	ErrInFailedTransaction       = errors.New("pq: could not complete operation in a failed transaction")
 	ErrSSLNotSupported           = errors.New("pq: SSL is not enabled on the server")
-	ErrSSLKeyUnknownOwnership    = errors.New("pq: Could not get owner information for private key, may not be properly protected")
-	ErrSSLKeyHasWorldPermissions = errors.New("pq: Private key has world access. Permissions should be u=rw,g=r (0640) if owned by root, or u=rw (0600), or less")
-
-	ErrCouldNotDetectUsername = errors.New("pq: Could not detect default username. Please provide one explicitly")
+	ErrCouldNotDetectUsername    = errors.New("pq: could not detect default username; please provide one explicitly")
+	ErrSSLKeyUnknownOwnership    = pqutil.ErrSSLKeyUnknownOwnership
+	ErrSSLKeyHasWorldPermissions = pqutil.ErrSSLKeyHasWorldPermissions
 
 	errUnexpectedReady = errors.New("unexpected ReadyForQuery")
 	errNoRowsAffected  = errors.New("no RowsAffected available after the empty statement")
@@ -62,16 +59,6 @@ var (
 	_ driver.StmtQueryContext   = (*stmt)(nil)
 )
 
-// Driver is the Postgres database driver.
-type Driver struct{}
-
-// Open opens a new connection to the database. name is a connection string.
-// Most users should only use it through database/sql package from the standard
-// library.
-func (d Driver) Open(name string) (driver.Conn, error) {
-	return Open(name)
-}
-
 func init() {
 	sql.Register("postgres", &Driver{})
 }
@@ -83,6 +70,16 @@ var debugProto = func() bool {
 	return os.Getenv("PQGO_DEBUG") == "1"
 }()
 
+// Driver is the Postgres database driver.
+type Driver struct{}
+
+// Open opens a new connection to the database. name is a connection string.
+// Most users should only use it through database/sql package from the standard
+// library.
+func (d Driver) Open(name string) (driver.Conn, error) {
+	return Open(name)
+}
+
 type parameterStatus struct {
 	// server version in the same format as server_version_num, or 0 if
 	// unavailable
@@ -92,6 +89,21 @@ type parameterStatus struct {
 	// available
 	currentLocation *time.Location
 }
+
+type format int
+
+const (
+	formatText   format = 0
+	formatBinary format = 1
+)
+
+var (
+	// One result-column format code with the value 1 (i.e. all binary).
+	colFmtDataAllBinary = []byte{0, 1, 0, 1}
+
+	// No result-column format codes (i.e. all text).
+	colFmtDataAllText = []byte{0, 0}
+)
 
 type transactionStatus byte
 
@@ -135,13 +147,13 @@ type defaultDialer struct {
 func (d defaultDialer) Dial(network, address string) (net.Conn, error) {
 	return d.d.Dial(network, address)
 }
-func (d defaultDialer) DialTimeout(
-	network, address string, timeout time.Duration,
-) (net.Conn, error) {
+
+func (d defaultDialer) DialTimeout(network, address string, timeout time.Duration) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return d.DialContext(ctx, network, address)
 }
+
 func (d defaultDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	return d.d.DialContext(ctx, network, address)
 }
@@ -228,143 +240,6 @@ func (e *syncErr) set(err error) {
 	}
 }
 
-// Handle driver-side settings in parsed connection string.
-func (cn *conn) handleDriverSettings(o values) (err error) {
-	boolSetting := func(key string, val *bool) error {
-		if value, ok := o[key]; ok {
-			if value == "yes" {
-				*val = true
-			} else if value == "no" {
-				*val = false
-			} else {
-				return fmt.Errorf("unrecognized value %q for %s", value, key)
-			}
-		}
-		return nil
-	}
-
-	err = boolSetting("disable_prepared_binary_result", &cn.disablePreparedBinaryResult)
-	if err != nil {
-		return err
-	}
-	return boolSetting("binary_parameters", &cn.binaryParameters)
-}
-
-// Matches pqGetHomeDirectory() from PostgreSQL
-//
-// https://github.com/postgres/postgres/blob/2b117bb/src/interfaces/libpq/fe-connect.c#L8214
-func getHome() string {
-	if runtime.GOOS == "windows" {
-		// pq uses SHGetFolderPath(), which is deprecated but x/sys/windows has
-		// KnownFolderPath(). We don't really want to pull that in though, so
-		// use APPDATA env. This is also what PostgreSQL uses in some other
-		// codepaths (get_home_path() for example).
-		ad := os.Getenv("APPDATA")
-		if ad == "" {
-			return ""
-		}
-		return filepath.Join(ad, "postgresql")
-	}
-
-	home, _ := os.UserHomeDir()
-	if home == "" {
-		u, err := user.Current()
-		if err != nil {
-			return ""
-		}
-		home = u.HomeDir
-	}
-	return home
-}
-
-// TODO: this should probably return errors instead of silently skipping it on
-// errors?
-func (cn *conn) handlePgpass(o values) {
-	// if a password was supplied, do not process .pgpass
-	if _, ok := o["password"]; ok {
-		return
-	}
-	// Get passfile from the options
-	filename := o["passfile"]
-	if filename == "" {
-		home := getHome()
-		if home == "" {
-			return
-		}
-		filename = filepath.Join(home, ".pgpass")
-	}
-
-	// On Win32, the directory is protected, so we don't have to check the file.
-	if runtime.GOOS != "windows" {
-		fi, err := os.Stat(filename)
-		if err != nil {
-			return
-		}
-		if fi.Mode().Perm()&(0x77) != 0 {
-			fmt.Fprintf(os.Stderr,
-				"WARNING: password file %q has group or world access; permissions should be u=rw (0600) or less\n",
-				filename)
-			return
-		}
-	}
-	file, err := os.Open(filename)
-	if err != nil {
-		return
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(io.Reader(file))
-	// From: https://github.com/tg/pgpass/blob/master/reader.go
-	for scanner.Scan() {
-		if scanText(scanner.Text(), o) {
-			break
-		}
-	}
-}
-
-// GetFields is a helper function for scanText.
-func getFields(s string) []string {
-	fs := make([]string, 0, 5)
-	f := make([]rune, 0, len(s))
-
-	var esc bool
-	for _, c := range s {
-		switch {
-		case esc:
-			f = append(f, c)
-			esc = false
-		case c == '\\':
-			esc = true
-		case c == ':':
-			fs = append(fs, string(f))
-			f = f[:0]
-		default:
-			f = append(f, c)
-		}
-	}
-	return append(fs, string(f))
-}
-
-// ScanText assists HandlePgpass in it's objective.
-func scanText(line string, o values) bool {
-	hostname := o["host"]
-	ntw, _ := network(o)
-	port := o["port"]
-	db := o["dbname"]
-	username := o["user"]
-	if len(line) == 0 || line[0] == '#' {
-		return false
-	}
-	split := getFields(line)
-	if len(split) != 5 {
-		return false
-	}
-	if (split[0] == "*" || split[0] == hostname || (split[0] == "localhost" && (hostname == "" || ntw == "unix"))) && (split[1] == "*" || split[1] == port) && (split[2] == "*" || split[2] == db) && (split[3] == "*" || split[3] == username) {
-		o["password"] = split[4]
-		return true
-	}
-	return false
-}
-
 func (cn *conn) writeBuf(b byte) *writeBuf {
 	cn.scratch[0] = b
 	return &writeBuf{
@@ -373,8 +248,8 @@ func (cn *conn) writeBuf(b byte) *writeBuf {
 	}
 }
 
-// Open opens a new connection to the database. dsn is a connection string.
-// Most users should only use it through database/sql package from the standard
+// Open opens a new connection to the database. dsn is a connection string. Most
+// users should only use it through database/sql package from the standard
 // library.
 func Open(dsn string) (_ driver.Conn, err error) {
 	return DialOpen(defaultDialer{}, dsn)
@@ -391,7 +266,7 @@ func DialOpen(d Dialer, dsn string) (_ driver.Conn, err error) {
 }
 
 func (c *Connector) open(ctx context.Context) (cn *conn, err error) {
-	// Handle any panics during connection initialization.  Note that we
+	// Handle any panics during connection initialization. Note that we
 	// specifically do *not* want to use errRecover(), as that would turn any
 	// connection errors into ErrBadConns, hiding the real error message from
 	// the user.
@@ -405,15 +280,21 @@ func (c *Connector) open(ctx context.Context) (cn *conn, err error) {
 		o[k] = v
 	}
 
-	cn = &conn{
-		opts:   o,
-		dialer: c.dialer,
+	cn = &conn{opts: o, dialer: c.dialer}
+	if v, ok := o["disable_prepared_binary_result"]; ok {
+		cn.disablePreparedBinaryResult, err = pqutil.ParseBool(v)
+		if err != nil {
+			return nil, err
+		}
 	}
-	err = cn.handleDriverSettings(o)
-	if err != nil {
-		return nil, err
+	if v, ok := o["binary_parameters"]; ok {
+		cn.binaryParameters, err = pqutil.ParseBool(v)
+		if err != nil {
+			return nil, err
+		}
 	}
-	cn.handlePgpass(o)
+
+	o["password"] = pgpass.PasswordFromPgpass(o)
 
 	cn.c, err = dial(ctx, c.dialer, o)
 	if err != nil {
@@ -694,20 +575,6 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 			errorf("unknown response for simple query: %q", t)
 		}
 	}
-}
-
-type noRows struct{}
-
-var emptyRows noRows
-
-var _ driver.Result = noRows{}
-
-func (noRows) LastInsertId() (int64, error) {
-	return 0, errNoLastInsertID
-}
-
-func (noRows) RowsAffected() (int64, error) {
-	return 0, errNoRowsAffected
 }
 
 // Decides which column formats to use for a prepared statement.  The input is
@@ -1354,141 +1221,10 @@ func (cn *conn) auth(r *readBuf, o values) error {
 	}
 }
 
-type format int
-
-const (
-	formatText   format = 0
-	formatBinary format = 1
-)
-
-var (
-	// One result-column format code with the value 1 (i.e. all binary).
-	colFmtDataAllBinary = []byte{0, 1, 0, 1}
-
-	// No result-column format codes (i.e. all text).
-	colFmtDataAllText = []byte{0, 0}
-)
-
-type stmt struct {
-	cn   *conn
-	name string
-	rowsHeader
-	colFmtData []byte
-	paramTyps  []oid.Oid
-	closed     bool
-}
-
-func (st *stmt) Close() (err error) {
-	if st.closed {
-		return nil
-	}
-	if err := st.cn.err.get(); err != nil {
-		return err
-	}
-	defer st.cn.errRecover(&err)
-
-	w := st.cn.writeBuf('C')
-	w.byte('S')
-	w.string(st.name)
-	st.cn.send(w)
-
-	st.cn.send(st.cn.writeBuf('S'))
-
-	t, _ := st.cn.recv1()
-	if t != '3' {
-		st.cn.err.set(driver.ErrBadConn)
-		errorf("unexpected close response: %q", t)
-	}
-	st.closed = true
-
-	t, r := st.cn.recv1()
-	if t != 'Z' {
-		st.cn.err.set(driver.ErrBadConn)
-		errorf("expected ready for query, but got: %q", t)
-	}
-	st.cn.processReadyForQuery(r)
-
-	return nil
-}
-
-func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) {
-	return st.query(toNamedValue(v))
-}
-
-func (st *stmt) query(v []driver.NamedValue) (r *rows, err error) {
-	if err := st.cn.err.get(); err != nil {
-		return nil, err
-	}
-	defer st.cn.errRecover(&err)
-
-	st.exec(v)
-	return &rows{
-		cn:         st.cn,
-		rowsHeader: st.rowsHeader,
-	}, nil
-}
-
-func (st *stmt) Exec(v []driver.Value) (driver.Result, error) {
-	return st.ExecContext(context.Background(), toNamedValue(v))
-}
-
-func (st *stmt) exec(v []driver.NamedValue) {
-	if debugProto {
-		fmt.Fprintf(os.Stderr, "         START stmt.exec\n")
-		defer fmt.Fprintf(os.Stderr, "         END stmt.exec\n")
-	}
-	if len(v) >= 65536 {
-		errorf("got %d parameters but PostgreSQL only supports 65535 parameters", len(v))
-	}
-	if len(v) != len(st.paramTyps) {
-		errorf("got %d parameters but the statement requires %d", len(v), len(st.paramTyps))
-	}
-
-	cn := st.cn
-	w := cn.writeBuf('B')
-	w.byte(0) // unnamed portal
-	w.string(st.name)
-
-	if cn.binaryParameters {
-		cn.sendBinaryParameters(w, v)
-	} else {
-		w.int16(0)
-		w.int16(len(v))
-		for i, x := range v {
-			if x.Value == nil {
-				w.int32(-1)
-			} else {
-				b := encode(&cn.parameterStatus, x.Value, st.paramTyps[i])
-				if b == nil {
-					w.int32(-1)
-				} else {
-					w.int32(len(b))
-					w.bytes(b)
-				}
-			}
-		}
-	}
-	w.bytes(st.colFmtData)
-
-	w.next('E')
-	w.byte(0)
-	w.int32(0)
-
-	w.next('S')
-	cn.send(w)
-
-	cn.readBindResponse()
-	cn.postExecuteWorkaround()
-}
-
-func (st *stmt) NumInput() int {
-	return len(st.paramTyps)
-}
-
 // parseComplete parses the "command tag" from a CommandComplete message, and
-// returns the number of rows affected (if applicable) and a string
-// identifying only the command that was executed, e.g. "ALTER TABLE".  If the
-// command tag could not be parsed, parseComplete panics.
+// returns the number of rows affected (if applicable) and a string identifying
+// only the command that was executed, e.g. "ALTER TABLE".  If the command tag
+// could not be parsed, parseComplete panics.
 func (cn *conn) parseComplete(commandTag string) (driver.Result, string) {
 	commandsWithAffectedRows := []string{
 		"SELECT ",
@@ -1509,10 +1245,10 @@ func (cn *conn) parseComplete(commandTag string) (driver.Result, string) {
 			break
 		}
 	}
-	// INSERT also includes the oid of the inserted row in its command tag.
-	// Oids in user tables are deprecated, and the oid is only returned when
-	// exactly one row is inserted, so it's unlikely to be of value to any
-	// real-world application and we can ignore it.
+	// INSERT also includes the oid of the inserted row in its command tag. Oids
+	// in user tables are deprecated, and the oid is only returned when exactly
+	// one row is inserted, so it's unlikely to be of value to any real-world
+	// application and we can ignore it.
 	if affectedRows == nil && strings.HasPrefix(commandTag, "INSERT ") {
 		parts := strings.Split(commandTag, " ")
 		if len(parts) != 3 {
@@ -1532,195 +1268,6 @@ func (cn *conn) parseComplete(commandTag string) (driver.Result, string) {
 		errorf("could not parse commandTag: %s", err)
 	}
 	return driver.RowsAffected(n), commandTag
-}
-
-type rowsHeader struct {
-	colNames []string
-	colTyps  []fieldDesc
-	colFmts  []format
-}
-
-type rows struct {
-	cn     *conn
-	finish func()
-	rowsHeader
-	done   bool
-	rb     readBuf
-	result driver.Result
-	tag    string
-
-	next *rowsHeader
-}
-
-func (rs *rows) Close() error {
-	if finish := rs.finish; finish != nil {
-		defer finish()
-	}
-	// no need to look at cn.bad as Next() will
-	for {
-		err := rs.Next(nil)
-		switch err {
-		case nil:
-		case io.EOF:
-			// rs.Next can return io.EOF on both 'Z' (ready for query) and 'T' (row
-			// description, used with HasNextResultSet). We need to fetch messages until
-			// we hit a 'Z', which is done by waiting for done to be set.
-			if rs.done {
-				return nil
-			}
-		default:
-			return err
-		}
-	}
-}
-
-func (rs *rows) Columns() []string {
-	return rs.colNames
-}
-
-func (rs *rows) Result() driver.Result {
-	if rs.result == nil {
-		return emptyRows
-	}
-	return rs.result
-}
-
-func (rs *rows) Tag() string {
-	return rs.tag
-}
-
-func (rs *rows) Next(dest []driver.Value) (err error) {
-	if rs.done {
-		return io.EOF
-	}
-
-	conn := rs.cn
-	if err := conn.err.getForNext(); err != nil {
-		return err
-	}
-	defer conn.errRecover(&err)
-
-	for {
-		t := conn.recv1Buf(&rs.rb)
-		switch t {
-		case 'E':
-			err = parseError(&rs.rb, "")
-		case 'C', 'I':
-			if t == 'C' {
-				rs.result, rs.tag = conn.parseComplete(rs.rb.string())
-			}
-			continue
-		case 'Z':
-			conn.processReadyForQuery(&rs.rb)
-			rs.done = true
-			if err != nil {
-				return err
-			}
-			return io.EOF
-		case 'D':
-			n := rs.rb.int16()
-			if err != nil {
-				conn.err.set(driver.ErrBadConn)
-				errorf("unexpected DataRow after error %s", err)
-			}
-			if n < len(dest) {
-				dest = dest[:n]
-			}
-			for i := range dest {
-				l := rs.rb.int32()
-				if l == -1 {
-					dest[i] = nil
-					continue
-				}
-				dest[i] = decode(&conn.parameterStatus, rs.rb.next(l), rs.colTyps[i].OID, rs.colFmts[i])
-			}
-			return
-		case 'T':
-			next := parsePortalRowDescribe(&rs.rb)
-			rs.next = &next
-			return io.EOF
-		default:
-			errorf("unexpected message after execute: %q", t)
-		}
-	}
-}
-
-func (rs *rows) HasNextResultSet() bool {
-	hasNext := rs.next != nil && !rs.done
-	return hasNext
-}
-
-func (rs *rows) NextResultSet() error {
-	if rs.next == nil {
-		return io.EOF
-	}
-	rs.rowsHeader = *rs.next
-	rs.next = nil
-	return nil
-}
-
-// QuoteIdentifier quotes an "identifier" (e.g. a table or a column name) to be
-// used as part of an SQL statement.  For example:
-//
-//	tblname := "my_table"
-//	data := "my_data"
-//	quoted := pq.QuoteIdentifier(tblname)
-//	err := db.Exec(fmt.Sprintf("INSERT INTO %s VALUES ($1)", quoted), data)
-//
-// Any double quotes in name will be escaped.  The quoted identifier will be
-// case sensitive when used in a query.  If the input string contains a zero
-// byte, the result will be truncated immediately before it.
-func QuoteIdentifier(name string) string {
-	end := strings.IndexRune(name, 0)
-	if end > -1 {
-		name = name[:end]
-	}
-	return `"` + strings.Replace(name, `"`, `""`, -1) + `"`
-}
-
-// BufferQuoteIdentifier satisfies the same purpose as QuoteIdentifier, but backed by a
-// byte buffer.
-func BufferQuoteIdentifier(name string, buffer *bytes.Buffer) {
-	end := strings.IndexRune(name, 0)
-	if end > -1 {
-		name = name[:end]
-	}
-	buffer.WriteRune('"')
-	buffer.WriteString(strings.Replace(name, `"`, `""`, -1))
-	buffer.WriteRune('"')
-}
-
-// QuoteLiteral quotes a 'literal' (e.g. a parameter, often used to pass literal
-// to DDL and other statements that do not accept parameters) to be used as part
-// of an SQL statement.  For example:
-//
-//	exp_date := pq.QuoteLiteral("2023-01-05 15:00:00Z")
-//	err := db.Exec(fmt.Sprintf("CREATE ROLE my_user VALID UNTIL %s", exp_date))
-//
-// Any single quotes in name will be escaped. Any backslashes (i.e. "\") will be
-// replaced by two backslashes (i.e. "\\") and the C-style escape identifier
-// that PostgreSQL provides ('E') will be prepended to the string.
-func QuoteLiteral(literal string) string {
-	// This follows the PostgreSQL internal algorithm for handling quoted literals
-	// from libpq, which can be found in the "PQEscapeStringInternal" function,
-	// which is found in the libpq/fe-exec.c source file:
-	// https://git.postgresql.org/gitweb/?p=postgresql.git;a=blob;f=src/interfaces/libpq/fe-exec.c
-	//
-	// substitute any single-quotes (') with two single-quotes ('')
-	literal = strings.Replace(literal, `'`, `''`, -1)
-	// determine if the string has any backslashes (\) in it.
-	// if it does, replace any backslashes (\) with two backslashes (\\)
-	// then, we need to wrap the entire string with a PostgreSQL
-	// C-style escape. Per how "PQEscapeStringInternal" handles this case, we
-	// also add a space before the "E"
-	if strings.Contains(literal, `\`) {
-		literal = strings.Replace(literal, `\`, `\\`, -1)
-		literal = ` E'` + literal + `'`
-	} else {
-		// otherwise, we can just wrap the literal with a pair of single quotes
-		literal = `'` + literal + `'`
-	}
-	return literal
 }
 
 func md5s(s string) string {

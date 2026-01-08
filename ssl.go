@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+
+	"github.com/lib/pq/internal/pqutil"
 )
 
 // ssl generates a function to upgrade a net.Conn based on the "sslmode" and
@@ -117,7 +119,7 @@ func sslClientCertificates(tlsConf *tls.Config, o values) error {
 		return nil
 	}
 
-	home := getHome()
+	home := pqutil.Home()
 
 	// In libpq, the client certificate is only loaded if the setting is not blank.
 	//
@@ -157,7 +159,8 @@ func sslClientCertificates(tlsConf *tls.Config, o values) error {
 	}
 
 	if len(sslkey) > 0 {
-		if err := sslKeyPermissions(sslkey); err != nil {
+		err := pqutil.SSLKeyPermissions(sslkey)
+		if err != nil {
 			return err
 		}
 	}

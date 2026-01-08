@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq/internal/pgpass"
 	"github.com/lib/pq/internal/pqtest"
 )
 
@@ -82,57 +83,8 @@ func TestOpenURL(t *testing.T) {
 	testURL("postgresql://")
 }
 
-const pgpassFile = "/tmp/pqgotest_pgpass"
-
 func TestPgpass(t *testing.T) {
-	testAssert := func(conninfo string, expected string, reason string) {
-		conn := pqtest.MustDB(t, conninfo)
-
-		txn, err := conn.Begin()
-		if err != nil {
-			if expected != "fail" {
-				t.Fatalf(reason, err)
-			}
-			return
-		}
-		rows, err := txn.Query("SELECT USER")
-		if err != nil {
-			txn.Rollback()
-			if expected != "fail" {
-				t.Fatalf(reason, err)
-			}
-		} else {
-			rows.Close()
-			if expected != "ok" {
-				t.Fatalf(reason, err)
-			}
-		}
-		txn.Rollback()
-	}
-	testAssert("", "ok", "missing .pgpass, unexpected error %#v")
-	os.Setenv("PGPASSFILE", pgpassFile)
-	defer os.Unsetenv("PGPASSFILE")
-	testAssert("host=/tmp", "fail", ", unexpected error %#v")
-	os.Unsetenv("PGPASSFILE")
-
-	os.Remove(pgpassFile)
-	pgpass, err := os.OpenFile(pgpassFile, os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		t.Fatalf("Unexpected error writing pgpass file %#v", err)
-	}
-	_, err = pgpass.WriteString(`# comment
-server:5432:some_db:some_user:pass_A
-*:5432:some_db:some_user:pass_B
-localhost:*:*:*:pass_C
-*:*:*:*:pass_fallback
-	`)
-	if err != nil {
-		t.Fatalf("Unexpected error writing pgpass file %#v", err)
-	}
-	defer os.Remove(pgpassFile)
-	pgpass.Close()
-
-	assertPassword := func(extra values, expected string) {
+	assertPassword := func(want string, extra values) {
 		o := values{
 			"host":            "localhost",
 			"sslmode":         "disable",
@@ -146,27 +98,42 @@ localhost:*:*:*:pass_C
 		for k, v := range extra {
 			o[k] = v
 		}
-		(&conn{}).handlePgpass(o)
-		if pw := o["password"]; pw != expected {
-			t.Fatalf("For %v expected %s got %s", extra, expected, pw)
+		have := pgpass.PasswordFromPgpass(o)
+		if have != want {
+			t.Fatalf("wrong password\nhave: %q\nwant: %q", have, want)
 		}
 	}
-	// missing passfile means empty psasword
-	assertPassword(values{"host": "server", "dbname": "some_db", "user": "some_user"}, "")
-	// wrong permissions for the pgpass file means it should be ignored
-	assertPassword(values{"host": "example.com", "passfile": pgpassFile, "user": "foo"}, "")
-	// fix the permissions and check if it has taken effect
-	os.Chmod(pgpassFile, 0600)
 
-	assertPassword(values{"host": "server", "passfile": pgpassFile, "dbname": "some_db", "user": "some_user"}, "pass_A")
-	assertPassword(values{"host": "example.com", "passfile": pgpassFile, "user": "foo"}, "pass_fallback")
-	assertPassword(values{"host": "example.com", "passfile": pgpassFile, "dbname": "some_db", "user": "some_user"}, "pass_B")
+	file := pqtest.TempFile(t, "pgpass", pqtest.NormalizeIndent(`
+		# comment
+		server:5432:some_db:some_user:pass_A
+		*:5432:some_db:some_user:pass_B
+		localhost:*:*:*:pass_C
+		*:*:*:*:pass_fallback
+	`))
+
+	// Missing passfile means empty password.
+	assertPassword("", values{"host": "server", "dbname": "some_db", "user": "some_user"})
+
+	// wrong permissions for the pgpass file means it should be ignored
+	assertPassword("", values{"host": "example.com", "passfile": file, "user": "foo"})
+
+	if err := os.Chmod(file, 0600); err != nil { // Fix the permissions
+		t.Fatal(err)
+	}
+
+	assertPassword("pass_A", values{"host": "server", "passfile": file, "dbname": "some_db", "user": "some_user"})
+	assertPassword("pass_fallback", values{"host": "example.com", "passfile": file, "user": "foo"})
+	assertPassword("pass_B", values{"host": "example.com", "passfile": file, "dbname": "some_db", "user": "some_user"})
+
 	// localhost also matches the default "" and UNIX sockets
-	assertPassword(values{"host": "", "passfile": pgpassFile, "user": "some_user"}, "pass_C")
-	assertPassword(values{"host": "/tmp", "passfile": pgpassFile, "user": "some_user"}, "pass_C")
-	// passfile connection parameter takes precedence
+	assertPassword("pass_C", values{"host": "", "passfile": file, "user": "some_user"})
+	assertPassword("pass_C", values{"host": "/tmp", "passfile": file, "user": "some_user"})
+
+	// Connection parameter takes precedence
 	os.Setenv("PGPASSFILE", "/tmp")
-	assertPassword(values{"host": "server", "passfile": pgpassFile, "dbname": "some_db", "user": "some_user"}, "pass_A")
+	defer os.Unsetenv("PGPASSFILE")
+	assertPassword("pass_A", values{"host": "server", "passfile": file, "dbname": "some_db", "user": "some_user"})
 }
 
 func TestExecNilSlice(t *testing.T) {
@@ -1470,58 +1437,6 @@ func TestRuntimeParameters(t *testing.T) {
 				t.Fatalf("\nhave: %v\nwant: %v", have, tt.want)
 			}
 		})
-	}
-}
-
-func TestQuoteIdentifier(t *testing.T) {
-	var cases = []struct {
-		input string
-		want  string
-	}{
-		{`foo`, `"foo"`},
-		{`foo bar baz`, `"foo bar baz"`},
-		{`foo"bar`, `"foo""bar"`},
-		{"foo\x00bar", `"foo"`},
-		{"\x00foo", `""`},
-	}
-
-	for _, test := range cases {
-		got := QuoteIdentifier(test.input)
-		if got != test.want {
-			t.Errorf("QuoteIdentifier(%q) = %v want %v", test.input, got, test.want)
-		}
-	}
-}
-
-func TestQuoteLiteral(t *testing.T) {
-	var cases = []struct {
-		input string
-		want  string
-	}{
-		{`foo`, `'foo'`},
-		{`foo bar baz`, `'foo bar baz'`},
-		{`foo'bar`, `'foo''bar'`},
-		{`foo\bar`, ` E'foo\\bar'`},
-		{`foo\ba'r`, ` E'foo\\ba''r'`},
-		{`foo"bar`, `'foo"bar'`},
-		{`foo\x00bar`, ` E'foo\\x00bar'`},
-		{`\x00foo`, ` E'\\x00foo'`},
-		{`'`, `''''`},
-		{`''`, `''''''`},
-		{`\`, ` E'\\'`},
-		{`'abc'; DROP TABLE users;`, `'''abc''; DROP TABLE users;'`},
-		{`\'`, ` E'\\'''`},
-		{`E'\''`, ` E'E''\\'''''`},
-		{`e'\''`, ` E'e''\\'''''`},
-		{`E'\'abc\'; DROP TABLE users;'`, ` E'E''\\''abc\\''; DROP TABLE users;'''`},
-		{`e'\'abc\'; DROP TABLE users;'`, ` E'e''\\''abc\\''; DROP TABLE users;'''`},
-	}
-
-	for _, test := range cases {
-		got := QuoteLiteral(test.input)
-		if got != test.want {
-			t.Errorf("QuoteLiteral(%q) = %v want %v", test.input, got, test.want)
-		}
 	}
 }
 

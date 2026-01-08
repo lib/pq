@@ -36,6 +36,25 @@ func Read(t *testing.T, paths ...string) []byte {
 	return file
 }
 
+// TempFile creates a new temporary file and returns the path.
+func TempFile(t *testing.T, name, data string) string {
+	t.Helper()
+	if name == "" {
+		name = "ztest"
+	}
+	name = filepath.Join(t.TempDir(), name)
+	tempFile(t, name, data)
+	return name
+}
+
+func tempFile(t *testing.T, path, data string) {
+	t.Helper()
+	err := os.WriteFile(path, []byte(data), 0o666)
+	if err != nil {
+		t.Fatalf("ztest.TempFile: %s", err)
+	}
+}
+
 // NormalizeIndent removes tab indentation from every line.
 //
 // This is useful for "inline" multiline strings:
