@@ -6,10 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	neturl "net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/lib/pq/internal/pqutil"
 )
 
 // Connector represents a fixed configuration for the pq driver with a given
@@ -104,9 +108,9 @@ func NewConnector(dsn string) (*Connector, error) {
 	// resort is to use the current operating system provided user
 	// name.
 	if _, ok := o["user"]; !ok {
-		u, err := userCurrent()
+		u, err := pqutil.User()
 		if err != nil {
-			return nil, err
+			return nil, ErrCouldNotDetectUsername
 		}
 		o["user"] = u
 	}
@@ -245,6 +249,52 @@ func parseOpts(name string, o values) error {
 	return nil
 }
 
+func convertURL(url string) (string, error) {
+	u, err := neturl.Parse(url)
+	if err != nil {
+		return "", err
+	}
+
+	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
+		return "", fmt.Errorf("invalid connection protocol: %s", u.Scheme)
+	}
+
+	var kvs []string
+	escaper := strings.NewReplacer(`'`, `\'`, `\`, `\\`)
+	accrue := func(k, v string) {
+		if v != "" {
+			kvs = append(kvs, k+"='"+escaper.Replace(v)+"'")
+		}
+	}
+
+	if u.User != nil {
+		v := u.User.Username()
+		accrue("user", v)
+
+		v, _ = u.User.Password()
+		accrue("password", v)
+	}
+
+	if host, port, err := net.SplitHostPort(u.Host); err != nil {
+		accrue("host", u.Host)
+	} else {
+		accrue("host", host)
+		accrue("port", port)
+	}
+
+	if u.Path != "" {
+		accrue("dbname", u.Path[1:])
+	}
+
+	q := u.Query()
+	for k := range q {
+		accrue(k, q.Get(k))
+	}
+
+	sort.Strings(kvs) // Makes testing easier (not a performance concern)
+	return strings.Join(kvs, " "), nil
+}
+
 // parseEnviron tries to mimic some of libpq's environment handling
 //
 // To ease testing, it does not directly reference os.Environ, but is
@@ -338,16 +388,14 @@ func parseEnviron(env []string) (out map[string]string) {
 // isUTF8 returns whether name is a fuzzy variation of the string "UTF-8".
 func isUTF8(name string) bool {
 	// Recognize all sorts of silly things as "UTF-8", like Postgres does
-	s := strings.Map(alnumLowerASCII, name)
+	s := strings.Map(func(c rune) rune {
+		if 'A' <= c && c <= 'Z' {
+			return c + ('a' - 'A')
+		}
+		if 'a' <= c && c <= 'z' || '0' <= c && c <= '9' {
+			return c
+		}
+		return -1 // discard
+	}, name)
 	return s == "utf8" || s == "unicode"
-}
-
-func alnumLowerASCII(ch rune) rune {
-	if 'A' <= ch && ch <= 'Z' {
-		return ch + ('a' - 'A')
-	}
-	if 'a' <= ch && ch <= 'z' || '0' <= ch && ch <= '9' {
-		return ch
-	}
-	return -1 // discard
 }

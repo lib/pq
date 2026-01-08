@@ -64,4 +64,4 @@ func (e *Error) Get(k byte) (v string) {
 //
 // Deprecated: directly passing an URL to sql.Open("postgres", "postgres://...")
 // now works, and calling this manually is no longer required.
-func ParseURL(url string) (string, error) { return parseURL(url) }
+func ParseURL(url string) (string, error) { return convertURL(url) }
