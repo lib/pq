@@ -21,15 +21,19 @@ func openSSLConn(t *testing.T, conninfo ...string) (*sql.DB, error) {
 	return db, db.Ping()
 }
 
+// Environment sanity check: should fail without SSL
 func startSSLTest(t *testing.T, user string) {
 	t.Parallel()
-	pqtest.SkipPgbouncer(t) // TODO: need to fix pgbouncer setup
-	pqtest.SkipPgpool(t)    // TODO: need to fix pgpool setup
 
-	// Environment sanity check: should fail without SSL
+	wantErr := `invalid_authorization_specification`
+	if pqtest.Pgbouncer() {
+		wantErr = "protocol_violation"
+	} else if pqtest.Pgpool() {
+		wantErr = "internal_error"
+	}
 	_, err := openSSLConn(t, "sslmode=disable user="+user)
 	pqErr := pqError(t, err)
-	if pqErr.Code.Name() != "invalid_authorization_specification" {
+	if pqErr.Code.Name() != wantErr {
 		t.Fatalf("wrong error code %q", pqErr.Code.Name())
 	}
 }
@@ -86,6 +90,9 @@ func TestSSLMode(t *testing.T) {
 
 // Authenticate over SSL using client certificates
 func TestSSLClientCertificates(t *testing.T) {
+	pqtest.SkipPgpool(t)    // TODO: can't get it to work.
+	pqtest.SkipPgbouncer(t) // TODO: can't get it to work.
+
 	startSSLTest(t, "pqgosslcert")
 
 	// Make sure the permissions of the keyfile are correct, or it won't load.

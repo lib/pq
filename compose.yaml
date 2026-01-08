@@ -11,9 +11,11 @@ services:
       'PGBOUNCER_DATABASE': 'pqgo'
 
   pgpool:
-    profiles: ['pgpool']
-    image:    'pgpool/pgpool:4.4.3'
-    ports:    ['127.0.0.1:7432:7432']
+    profiles:   ['pgpool']
+    image:      'pgpool/pgpool:4.4.3'
+    ports:      ['127.0.0.1:7432:7432']
+    volumes:    ['./testdata/init:/init']
+    entrypoint: '/init/entry-pgpool.sh'
     environment:
       'PGPOOL_PARAMS_PORT':              '7432'
       'PGPOOL_PARAMS_BACKEND_HOSTNAME0': 'pg18'
