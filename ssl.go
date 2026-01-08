@@ -18,55 +18,72 @@ import (
 
 // Registry for custom tls.Configs
 var (
-	tlsConfigLock     sync.RWMutex
-	tlsConfigRegistry map[string]*tls.Config
+	tlsConfs   = make(map[string]*tls.Config)
+	tlsConfsMu sync.RWMutex
 )
 
+// For example:
+//
+//	import (
+//		"crypto/tls"
+//		"crypto/x509"
+//		"io/ioutil"
+//		"log"
+//
+//		"github.com/lib/pq"
+//	)
+//
+//	func main() {
+//		rootCertPool := x509.NewCertPool()
+//		pem, _ := ioutil.ReadFile("ca.crt")
+//		rootCertPool.AppendCertsFromPEM(pem)
+//
+//		certs, _ := tls.LoadX509KeyPair("client1.crt", "client1.key")
+//
+//		pq.RegisterTLSConfig("mytls", &tls.Config{
+//			RootCAs:      rootCertPool,
+//			Certificates: []tls.Certificate{certs},
+//			ServerName:   "pq.example.com",
+//		})
+//
+//		db, _ := sql.Open("postgres", "sslmode=pqgo-mytls")
+//	}
+//
+// Use nil for the config to remove.
 func RegisterTLSConfig(key string, config *tls.Config) error {
-	if _, err := pqutil.ParseBool(key); err == nil {
-		return fmt.Errorf("key %q is reserved", key)
-	}
-	switch strings.ToLower(key) {
-	case "require", "verify-ca", "verify-full", "disable":
-		return fmt.Errorf("key '%s' is reserved", key)
-	}
-
-	tlsConfigLock.Lock()
-	if tlsConfigRegistry == nil {
-		tlsConfigRegistry = make(map[string]*tls.Config)
+	if config == nil {
+		tlsConfsMu.Lock()
+		delete(tlsConfs, key)
+		tlsConfsMu.Unlock()
+		return nil
 	}
 
-	tlsConfigRegistry[key] = config
-	tlsConfigLock.Unlock()
+	tlsConfsMu.Lock()
+	tlsConfs[key] = config
+	tlsConfsMu.Unlock()
 	return nil
 }
 
-// DeregisterTLSConfig removes the tls.Config associated with key.
-func DeregisterTLSConfig(key string) {
-	tlsConfigLock.Lock()
-	if tlsConfigRegistry != nil {
-		delete(tlsConfigRegistry, key)
+func getTLSConfigClone(key string) *tls.Config {
+	tlsConfsMu.RLock()
+	if v, ok := tlsConfs[key]; ok {
+		return v.Clone()
 	}
-	tlsConfigLock.Unlock()
-}
-
-func getTLSConfigClone(key string) (config *tls.Config) {
-	tlsConfigLock.RLock()
-	if v, ok := tlsConfigRegistry[key]; ok {
-		config = v.Clone()
-	}
-	tlsConfigLock.RUnlock()
-	return
+	tlsConfsMu.RUnlock()
+	return nil
 }
 
 // ssl generates a function to upgrade a net.Conn based on the "sslmode" and
 // related settings. The function is nil when no upgrade should take place.
 func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
-	verifyCaOnly := false
-	tlsConf := &tls.Config{}
-	switch mode := o["sslmode"]; mode {
+	var (
+		verifyCaOnly = false
+		tlsConf      = &tls.Config{}
+		mode         = o["sslmode"]
+	)
+	switch {
 	// "require" is the default.
-	case "", "require":
+	case mode == "" || mode == "require":
 		// We must skip TLS's own verification since it requires full
 		// verification since Go 1.3.
 		tlsConf.InsecureSkipVerify = true
@@ -86,22 +103,24 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 				delete(o, "sslrootcert")
 			}
 		}
-	case "verify-ca":
+	case mode == "verify-ca":
 		// We must skip TLS's own verification since it requires full
 		// verification since Go 1.3.
 		tlsConf.InsecureSkipVerify = true
 		verifyCaOnly = true
-	case "verify-full":
+	case mode == "verify-full":
 		tlsConf.ServerName = o["host"]
-	case "disable":
+	case mode == "disable":
 		return nil, nil
-	default:
-		tlsConf = getTLSConfigClone(mode)
+	case strings.HasPrefix(mode, "pqgo-"):
+		tlsConf = getTLSConfigClone(mode[5:])
 		if tlsConf == nil {
-			return nil, fmt.Errorf(
-				`pq: unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`,
-				mode)
+			return nil, fmt.Errorf(`pq: unknown custom sslmode %q`, mode)
 		}
+	default:
+		return nil, fmt.Errorf(
+			`pq: unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`,
+			mode)
 	}
 
 	// Set Server Name Indication (SNI), if enabled by connection parameters.
