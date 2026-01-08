@@ -734,25 +734,28 @@ func (l *Listener) closed() bool {
 }
 
 func (l *Listener) connect() error {
-	notificationChan := make(chan *Notification, 32)
-	cn, err := newDialListenerConn(l.dialer, l.name, notificationChan)
-	if err != nil {
-		return err
-	}
-
 	l.lock.Lock()
 	defer l.lock.Unlock()
+	if l.isClosed {
+		return errListenerClosed
+	}
 
-	err = l.resync(cn, notificationChan)
+	notificationChan := make(chan *Notification, 32)
+
+	var err error
+	l.cn, err = newDialListenerConn(l.dialer, l.name, notificationChan)
 	if err != nil {
-		_ = cn.Close()
 		return err
 	}
 
-	l.cn = cn
+	err = l.resync(l.cn, notificationChan)
+	if err != nil {
+		_ = l.cn.Close()
+		return err
+	}
+
 	l.connNotificationChan = notificationChan
 	l.reconnectCond.Broadcast()
-
 	return nil
 }
 
