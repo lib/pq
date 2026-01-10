@@ -549,6 +549,14 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 			res.done = true
 		case 'Z':
 			cn.processReadyForQuery(r)
+			// Upon success, ensure res is always non-nil.
+			//
+			// See https://github.com/lib/pq/issues/1059
+			if err == nil && res == nil {
+				res = &rows{
+					done: true,
+				}
+			}
 			// done
 			return
 		case 'E':
