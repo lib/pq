@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"math"
 	"sync"
+
+	"github.com/lib/pq/internal/proto"
 )
 
 var (
@@ -85,9 +87,9 @@ func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
 		done:    make(chan bool, 1),
 	}
 	// add CopyData identifier + 4 bytes for message length
-	ci.buffer = append(ci.buffer, 'd', 0, 0, 0, 0)
+	ci.buffer = append(ci.buffer, byte(proto.CopyDataRequest), 0, 0, 0, 0)
 
-	b := cn.writeBuf('Q')
+	b := cn.writeBuf(proto.Query)
 	b.string(q)
 	cn.send(b)
 
@@ -95,19 +97,19 @@ awaitCopyInResponse:
 	for {
 		t, r := cn.recv1()
 		switch t {
-		case 'G':
+		case proto.CopyInResponse:
 			if r.byte() != 0 {
 				err = errBinaryCopyNotSupported
 				break awaitCopyInResponse
 			}
 			go ci.resploop()
 			return ci, nil
-		case 'H':
+		case proto.CopyOutResponse:
 			err = errCopyToNotSupported
 			break awaitCopyInResponse
-		case 'E':
+		case proto.ErrorResponse:
 			err = parseError(r, q)
-		case 'Z':
+		case proto.ReadyForQuery:
 			if err == nil {
 				ci.setBad(driver.ErrBadConn)
 				errorf("unexpected ReadyForQuery in response to COPY")
@@ -121,15 +123,15 @@ awaitCopyInResponse:
 	}
 
 	// something went wrong, abort COPY before we return
-	b = cn.writeBuf('f')
+	b = cn.writeBuf(proto.CopyFail)
 	b.string(err.Error())
 	cn.send(b)
 
 	for {
 		t, r := cn.recv1()
 		switch t {
-		case 'c', 'C', 'E':
-		case 'Z':
+		case proto.CopyDoneResponse, proto.CommandComplete, proto.ErrorResponse:
+		case proto.ReadyForQuery:
 			// correctly aborted, we're done
 			cn.processReadyForQuery(r)
 			return nil, err
@@ -164,19 +166,19 @@ func (ci *copyin) resploop() {
 			return
 		}
 		switch t {
-		case 'C':
+		case proto.CommandComplete:
 			// complete
 			res, _ := ci.cn.parseComplete(r.string())
 			ci.setResult(res)
-		case 'N':
+		case proto.NoticeResponse:
 			if n := ci.cn.noticeHandler; n != nil {
 				n(parseError(&r, ""))
 			}
-		case 'Z':
+		case proto.ReadyForQuery:
 			ci.cn.processReadyForQuery(&r)
 			ci.done <- true
 			return
-		case 'E':
+		case proto.ErrorResponse:
 			err := parseError(&r, "")
 			ci.setError(err)
 		default:
@@ -337,7 +339,7 @@ func (ci *copyin) Close() (err error) {
 		ci.flush(ci.buffer)
 	}
 	// Avoid touching the scratch buffer as resploop could be using it.
-	err = ci.cn.sendSimpleMessage('c')
+	err = ci.cn.sendSimpleMessage(proto.CopyDoneRequest)
 	if err != nil {
 		return err
 	}

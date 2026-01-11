@@ -27,6 +27,8 @@ const (
 	PasswordMessage     = RequestCode('p')
 	SASLInitialResponse = RequestCode('p')
 	SASLResponse        = RequestCode('p')
+	CopyDoneRequest     = RequestCode('c')
+	CopyDataRequest     = RequestCode('d')
 )
 
 func (r RequestCode) String() string {
@@ -47,6 +49,8 @@ func (r RequestCode) String() string {
 		PasswordMessage: "PasswordMessage",
 		//SASLInitialResponse: "SASLInitialResponse",
 		//SASLResponse:        "SASLResponse",
+		CopyDoneRequest: "CopyDone",
+		CopyDataRequest: "CopyData",
 	}[r]
 	if !ok {
 		s = "<unknown>"
@@ -85,6 +89,8 @@ const (
 	PortalSuspended          = ResponseCode('s')
 	ParameterDescription     = ResponseCode('t')
 	NegotiateProtocolVersion = ResponseCode('v')
+	CopyDoneResponse         = ResponseCode('c')
+	CopyDataResponse         = ResponseCode('d')
 )
 
 func (r ResponseCode) String() string {
@@ -111,6 +117,8 @@ func (r ResponseCode) String() string {
 		PortalSuspended:          "PortalSuspended",
 		ParameterDescription:     "ParamDescription",
 		NegotiateProtocolVersion: "NegotiateProtocolVersion",
+		CopyDoneResponse:         "CopyDone",
+		CopyDataResponse:         "CopyData",
 	}[r]
 	if !ok {
 		s = "<unknown>"
@@ -121,13 +129,6 @@ func (r ResponseCode) String() string {
 	}
 	return "(" + c + ") " + s
 }
-
-// These are the codes sent by both the frontend and backend.
-// #define PqMsg_CopyDone				'c'
-// #define PqMsg_CopyData				'd'
-
-// These are the codes sent by parallel workers to leader processes.
-// #define PqMsg_Progress              'P'
 
 // AuthCode are authentication request codes sent by the backend.
 type AuthCode int32

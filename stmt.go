@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/lib/pq/internal/proto"
 	"github.com/lib/pq/oid"
 )
 
@@ -27,22 +28,22 @@ func (st *stmt) Close() (err error) {
 	}
 	defer st.cn.errRecover(&err)
 
-	w := st.cn.writeBuf('C')
-	w.byte('S')
+	w := st.cn.writeBuf(proto.Close)
+	w.byte(proto.Sync)
 	w.string(st.name)
 	st.cn.send(w)
 
-	st.cn.send(st.cn.writeBuf('S'))
+	st.cn.send(st.cn.writeBuf(proto.Sync))
 
 	t, _ := st.cn.recv1()
-	if t != '3' {
+	if t != proto.CloseComplete {
 		st.cn.err.set(driver.ErrBadConn)
 		errorf("unexpected close response: %q", t)
 	}
 	st.closed = true
 
 	t, r := st.cn.recv1()
-	if t != 'Z' {
+	if t != proto.ReadyForQuery {
 		st.cn.err.set(driver.ErrBadConn)
 		errorf("expected ready for query, but got: %q", t)
 	}
@@ -85,7 +86,7 @@ func (st *stmt) exec(v []driver.NamedValue) {
 	}
 
 	cn := st.cn
-	w := cn.writeBuf('B')
+	w := cn.writeBuf(proto.Bind)
 	w.byte(0) // unnamed portal
 	w.string(st.name)
 
@@ -110,11 +111,11 @@ func (st *stmt) exec(v []driver.NamedValue) {
 	}
 	w.bytes(st.colFmtData)
 
-	w.next('E')
+	w.next(proto.Execute)
 	w.byte(0)
 	w.int32(0)
 
-	w.next('S')
+	w.next(proto.Sync)
 	cn.send(w)
 
 	cn.readBindResponse()

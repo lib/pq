@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/lib/pq/internal/proto"
 )
 
 // Notification represents a single notification from the database.
@@ -90,7 +92,7 @@ const (
 )
 
 type message struct {
-	typ byte
+	typ proto.ResponseCode
 	err error
 }
 
@@ -190,15 +192,15 @@ func (l *ListenerConn) listenerConnLoop() (err error) {
 		}
 
 		switch t {
-		case 'A':
+		case proto.NotificationResponse:
 			// recvNotification copies all the data so we don't need to worry
 			// about the scratch buffer being overwritten.
 			l.notificationChan <- recvNotification(r)
 
-		case 'T', 'D':
+		case proto.RowDescription, proto.DataRow:
 			// only used by tests; ignore
 
-		case 'E':
+		case proto.ErrorResponse:
 			// We might receive an ErrorResponse even when not in a query; it
 			// is expected that the server will close the connection after
 			// that, but we should make sure that the error we display is the
@@ -208,23 +210,23 @@ func (l *ListenerConn) listenerConnLoop() (err error) {
 			}
 			l.replyChan <- message{t, parseError(r, "")}
 
-		case 'C', 'I':
+		case proto.CommandComplete, proto.EmptyQueryResponse:
 			if !l.setState(connStateExpectReadyForQuery) {
 				// protocol out of sync
 				return fmt.Errorf("unexpected CommandComplete")
 			}
 			// ExecSimpleQuery doesn't need to know about this message
 
-		case 'Z':
+		case proto.ReadyForQuery:
 			if !l.setState(connStateIdle) {
 				// protocol out of sync
 				return fmt.Errorf("unexpected ReadyForQuery")
 			}
 			l.replyChan <- message{t, nil}
 
-		case 'S':
+		case proto.ParameterStatus:
 			// ignore
-		case 'N':
+		case proto.NoticeResponse:
 			if n := l.cn.noticeHandler; n != nil {
 				n(parseError(r, ""))
 			}
@@ -363,7 +365,7 @@ func (l *ListenerConn) ExecSimpleQuery(q string) (executed bool, err error) {
 			return false, err
 		}
 		switch m.typ {
-		case 'Z':
+		case proto.ReadyForQuery:
 			// sanity check
 			if m.err != nil {
 				panic("m.err != nil")
@@ -371,7 +373,7 @@ func (l *ListenerConn) ExecSimpleQuery(q string) (executed bool, err error) {
 			// done; err might or might not be set
 			return true, err
 
-		case 'E':
+		case proto.ErrorResponse:
 			// sanity check
 			if m.err == nil {
 				panic("m.err == nil")

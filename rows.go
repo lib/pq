@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/lib/pq/internal/proto"
 	"github.com/lib/pq/oid"
 )
 
@@ -48,9 +49,10 @@ func (rs *rows) Close() error {
 		switch err {
 		case nil:
 		case io.EOF:
-			// rs.Next can return io.EOF on both 'Z' (ready for query) and 'T' (row
-			// description, used with HasNextResultSet). We need to fetch messages until
-			// we hit a 'Z', which is done by waiting for done to be set.
+			// rs.Next can return io.EOF on both ReadyForQuery and
+			// RowDescription (used with HasNextResultSet). We need to fetch
+			// messages until we hit a ReadyForQuery, which is done by waiting
+			// for done to be set.
 			if rs.done {
 				return nil
 			}
@@ -89,21 +91,21 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 	for {
 		t := conn.recv1Buf(&rs.rb)
 		switch t {
-		case 'E':
+		case proto.ErrorResponse:
 			err = parseError(&rs.rb, "")
-		case 'C', 'I':
-			if t == 'C' {
+		case proto.CommandComplete, proto.EmptyQueryResponse:
+			if t == proto.CommandComplete {
 				rs.result, rs.tag = conn.parseComplete(rs.rb.string())
 			}
 			continue
-		case 'Z':
+		case proto.ReadyForQuery:
 			conn.processReadyForQuery(&rs.rb)
 			rs.done = true
 			if err != nil {
 				return err
 			}
 			return io.EOF
-		case 'D':
+		case proto.DataRow:
 			n := rs.rb.int16()
 			if err != nil {
 				conn.err.set(driver.ErrBadConn)
@@ -121,7 +123,7 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 				dest[i] = decode(&conn.parameterStatus, rs.rb.next(l), rs.colTyps[i].OID, rs.colFmts[i])
 			}
 			return
-		case 'T':
+		case proto.RowDescription:
 			next := parsePortalRowDescribe(&rs.rb)
 			rs.next = &next
 			return io.EOF
