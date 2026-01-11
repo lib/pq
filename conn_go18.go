@@ -50,7 +50,6 @@ func (cn *conn) PrepareContext(ctx context.Context, query string) (driver.Stmt, 
 // Implement the "ConnBeginTx" interface
 func (cn *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	var mode string
-
 	switch sql.IsolationLevel(opts.Isolation) {
 	case sql.LevelDefault:
 		// Don't touch mode: use the server's default
@@ -65,7 +64,6 @@ func (cn *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, 
 	default:
 		return nil, fmt.Errorf("pq: isolation level not supported: %d", opts.Isolation)
 	}
-
 	if opts.ReadOnly {
 		mode += " READ ONLY"
 	} else {

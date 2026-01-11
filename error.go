@@ -562,61 +562,6 @@ func errorf(s string, args ...any) {
 	panic(fmt.Errorf("pq: %s", fmt.Sprintf(s, args...)))
 }
 
-func errRecoverNoErrBadConn(err *error) {
-	e := recover()
-	if e == nil {
-		// Do nothing
-		return
-	}
-	var ok bool
-	*err, ok = e.(error)
-	if !ok {
-		*err = fmt.Errorf("pq: unexpected error: %#v", e)
-	}
-}
-
-func (cn *conn) errRecover(err *error, query ...string) {
-	r := recover()
-	switch v := r.(type) {
-	case nil:
-		// Do nothing
-	case runtime.Error:
-		cn.err.set(driver.ErrBadConn)
-		panic(v)
-	case *Error:
-		if len(query) > 0 && query[0] != "" {
-			v.query = query[0]
-		}
-		if v.Fatal() {
-			*err = driver.ErrBadConn
-		} else {
-			*err = v
-		}
-	case *net.OpError:
-		cn.err.set(driver.ErrBadConn)
-		*err = v
-	case *safeRetryError:
-		cn.err.set(driver.ErrBadConn)
-		*err = driver.ErrBadConn
-	case error:
-		if v == io.EOF || v.Error() == "remote error: handshake failure" {
-			*err = driver.ErrBadConn
-		} else {
-			*err = v
-		}
-
-	default:
-		cn.err.set(driver.ErrBadConn)
-		panic(fmt.Sprintf("unknown error: %#v", r))
-	}
-
-	// Any time we return ErrBadConn, we need to remember it since *Tx doesn't
-	// mark the connection bad in database/sql.
-	if *err == driver.ErrBadConn {
-		cn.err.set(driver.ErrBadConn)
-	}
-}
-
 func posToLine(pos int, lines []string) (line, col int) {
 	read := 0
 	for i := range lines {
@@ -659,4 +604,62 @@ func expandTab(s string) string {
 		}
 	}
 	return b.String()
+}
+
+func errRecoverNoErrBadConn(err *error) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	var ok bool
+	*err, ok = r.(error)
+	if !ok {
+		*err = fmt.Errorf("pq: unexpected error: %#v", r)
+	}
+}
+
+func (cn *conn) handleError(reported error, query ...string) error {
+	switch err := reported.(type) {
+	case nil:
+		return nil
+	case runtime.Error, *net.OpError:
+		cn.err.set(driver.ErrBadConn)
+	case *safeRetryError:
+		cn.err.set(driver.ErrBadConn)
+		reported = driver.ErrBadConn
+	case *Error:
+		if len(query) > 0 && query[0] != "" {
+			err.query = query[0]
+			reported = err
+		}
+		if err.Fatal() {
+			reported = driver.ErrBadConn
+		}
+	case error:
+		if err == io.EOF || err.Error() == "remote error: handshake failure" {
+			reported = driver.ErrBadConn
+		}
+	default:
+		cn.err.set(driver.ErrBadConn)
+		reported = fmt.Errorf("pq: unknown error %T: %[1]s", err)
+	}
+
+	// Any time we return ErrBadConn, we need to remember it since *Tx doesn't
+	// mark the connection bad in database/sql.
+	if reported == driver.ErrBadConn {
+		cn.err.set(driver.ErrBadConn)
+	}
+	return reported
+}
+
+func (cn *conn) errRecover(err *error, query ...string) {
+	r := recover()
+	if r != nil {
+		e, ok := r.(error)
+		if !ok {
+			cn.err.set(driver.ErrBadConn)
+			panic(fmt.Sprintf("pq: unknown error %T: %[1]s", e))
+		}
+		*err = cn.handleError(e, query...)
+	}
 }
