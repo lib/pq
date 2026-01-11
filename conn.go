@@ -802,13 +802,9 @@ func (cn *conn) Exec(query string, args []driver.Value) (res driver.Result, err 
 	return r, err
 }
 
-type safeRetryError struct {
-	Err error
-}
+type safeRetryError struct{ Err error }
 
-func (se *safeRetryError) Error() string {
-	return se.Err.Error()
-}
+func (se *safeRetryError) Error() string { return se.Err.Error() }
 
 func (cn *conn) send(m *writeBuf) {
 	if debugProto {

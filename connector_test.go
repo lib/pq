@@ -31,8 +31,7 @@ func TestNewConnector_WorksWithOpenDB(t *testing.T) {
 }
 
 func TestNewConnector_Connect(t *testing.T) {
-	name := ""
-	c, err := NewConnector(name)
+	c, err := NewConnector("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,12 +50,11 @@ func TestNewConnector_Connect(t *testing.T) {
 }
 
 func TestNewConnector_Driver(t *testing.T) {
-	name := ""
-	c, err := NewConnector(name)
+	c, err := NewConnector("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := c.Driver().Open(name)
+	db, err := c.Driver().Open("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,10 +69,9 @@ func TestNewConnector_Driver(t *testing.T) {
 }
 
 func TestNewConnector_Environ(t *testing.T) {
-	name := ""
 	os.Setenv("PGPASSFILE", "/tmp/.pgpass")
 	defer os.Unsetenv("PGPASSFILE")
-	c, err := NewConnector(name)
+	c, err := NewConnector("")
 	if err != nil {
 		t.Fatal(err)
 	}

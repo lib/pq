@@ -1,8 +1,15 @@
 package pq
 
 import (
+	"context"
+	"database/sql"
 	"errors"
+	"fmt"
+	"net"
+	"os"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/lib/pq/internal/pqtest"
 )
@@ -180,4 +187,114 @@ func BenchmarkError(b *testing.B) {
 			_ = pqErr.ErrorWithDetail()
 		}
 	})
+}
+
+type (
+	failConn   struct{ net.Conn }
+	failDialer struct{ d net.Dialer }
+)
+
+func (cn *failConn) Write(b []byte) (n int, err error) {
+	if n, ok := os.LookupEnv("PQTEST_FAILNUM"); ok {
+		nn, err := strconv.Atoi(n)
+		if err != nil {
+			panic(err)
+		}
+		nn--
+		if nn == 0 {
+			os.Unsetenv("PQTEST_FAILNUM")
+		} else {
+			os.Setenv("PQTEST_FAILNUM", strconv.Itoa(nn))
+		}
+		//debug.PrintStack()
+		if _, ok := os.LookupEnv("PQTEST_FAILNET"); ok {
+			return 1, &net.OpError{Op: "write", Net: "tcp", Err: fmt.Errorf("failConn: PQTEST_FAILNUM=%d", nn+1)}
+		}
+		return 0, fmt.Errorf("failConn: PQTEST_FAILNUM=%d", nn+1)
+	}
+	return cn.Conn.Write(b)
+}
+
+func (d failDialer) Dial(n, a string) (net.Conn, error) {
+	return d.DialContext(context.Background(), n, a)
+}
+
+func (d failDialer) DialTimeout(n, a string, timeout time.Duration) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return d.DialContext(ctx, n, a)
+}
+
+func (d failDialer) DialContext(ctx context.Context, n, a string) (net.Conn, error) {
+	cn, err := d.d.DialContext(ctx, n, a)
+	if err != nil {
+		return nil, err
+	}
+	return &failConn{cn}, nil
+}
+
+// Make sure it retries on network errors when it failed to write any data.
+func TestRetryError(t *testing.T) {
+	c, err := NewConnector("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Dialer(failDialer{})
+	db := sql.OpenDB(c)
+	if err := db.Ping(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		os.Unsetenv("PQTEST_FAILNUM")
+		os.Unsetenv("PQTEST_FAILNET")
+	})
+
+	// Make write fail once so that safeRetryError{} is used.
+	for i := 0; i < 10; i++ {
+		os.Setenv("PQTEST_FAILNUM", "1")
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Rollback(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Should fail if it returns ErrBadConn too often.
+	os.Setenv("PQTEST_FAILNUM", "5")
+	if _, err := db.Begin(); err == nil {
+		t.Fatal("no error?")
+	}
+}
+
+func TestNetworkError(t *testing.T) {
+	c, err := NewConnector("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Dialer(failDialer{})
+	db := sql.OpenDB(c)
+	db.SetMaxIdleConns(1)
+	db.SetMaxOpenConns(1)
+	if err := db.Ping(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		os.Unsetenv("PQTEST_FAILNUM")
+		os.Unsetenv("PQTEST_FAILNET")
+	})
+
+	os.Setenv("PQTEST_FAILNUM", "1")
+	os.Setenv("PQTEST_FAILNET", "1")
+	_, err = db.Begin()
+	if err == nil || !errors.As(err, new(*net.OpError)) {
+		t.Fatalf("wrong error %T: %[1]s", err)
+	}
+
+	// TODO: should make sure this opens a new connection.
+	err = db.Ping()
+	if err != nil {
+		t.Fatal(err)
+	}
 }

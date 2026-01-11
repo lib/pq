@@ -640,31 +640,24 @@ func TestErrorDuringStartupClosesConn(t *testing.T) {
 }
 
 func TestBadConn(t *testing.T) {
-	var err error
-
-	cn := conn{}
-	func() {
-		defer cn.errRecover(&err)
-		panic(io.EOF)
-	}()
-	if err != driver.ErrBadConn {
-		t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
-	}
-	if err := cn.err.get(); err != driver.ErrBadConn {
-		t.Fatalf("expected driver.ErrBadConn, got %#v", err)
-	}
-
-	cn = conn{}
-	func() {
-		defer cn.errRecover(&err)
-		e := &Error{Severity: Efatal}
-		panic(e)
-	}()
-	if err != driver.ErrBadConn {
-		t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
-	}
-	if err := cn.err.get(); err != driver.ErrBadConn {
-		t.Fatalf("expected driver.ErrBadConn, got %#v", err)
+	t.Parallel()
+	for _, tt := range []error{io.EOF, &Error{Severity: Efatal}} {
+		t.Run(fmt.Sprintf("%s", io.EOF), func(t *testing.T) {
+			var (
+				err error
+				cn  conn
+			)
+			func() {
+				defer cn.errRecover(&err)
+				panic(tt)
+			}()
+			if err != driver.ErrBadConn {
+				t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
+			}
+			if err := cn.err.get(); err != driver.ErrBadConn {
+				t.Fatalf("expected driver.ErrBadConn, got %#v", err)
+			}
+		})
 	}
 }
 
