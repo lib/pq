@@ -176,7 +176,7 @@ type conn struct {
 
 	parameterStatus parameterStatus
 
-	saveMessageType   byte
+	saveMessageType   proto.ResponseCode
 	saveMessageBuffer []byte
 
 	// If an error is set, this connection is bad and all public-facing
@@ -240,8 +240,8 @@ func (e *syncErr) set(err error) {
 	}
 }
 
-func (cn *conn) writeBuf(b byte) *writeBuf {
-	cn.scratch[0] = b
+func (cn *conn) writeBuf(b proto.RequestCode) *writeBuf {
+	cn.scratch[0] = byte(b)
 	return &writeBuf{
 		buf: cn.scratch[:5],
 		pos: 1,
@@ -480,27 +480,27 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, err 
 		defer fmt.Fprintf(os.Stderr, "         END conn.simpleExec\n")
 	}
 
-	b := cn.writeBuf('Q')
+	b := cn.writeBuf(proto.Query)
 	b.string(q)
 	cn.send(b)
 
 	for {
 		t, r := cn.recv1()
 		switch t {
-		case 'C':
+		case proto.CommandComplete:
 			res, commandTag = cn.parseComplete(r.string())
-		case 'Z':
+		case proto.ReadyForQuery:
 			cn.processReadyForQuery(r)
 			if res == nil && err == nil {
 				err = errUnexpectedReady
 			}
 			// done
 			return
-		case 'E':
+		case proto.ErrorResponse:
 			err = parseError(r, q)
-		case 'I':
+		case proto.EmptyQueryResponse:
 			res = emptyRows
-		case 'T', 'D':
+		case proto.RowDescription, proto.DataRow:
 			// ignore any results
 		default:
 			cn.err.set(driver.ErrBadConn)
@@ -516,14 +516,14 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 	}
 	defer cn.errRecover(&err, q)
 
-	b := cn.writeBuf('Q')
+	b := cn.writeBuf(proto.Query)
 	b.string(q)
 	cn.send(b)
 
 	for {
 		t, r := cn.recv1()
 		switch t {
-		case 'C', 'I':
+		case proto.CommandComplete, proto.EmptyQueryResponse:
 			// We allow queries which don't return any results through Query as
 			// well as Exec.  We still have to give database/sql a rows object
 			// the user can close, though, to avoid connections from being
@@ -540,21 +540,21 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 			// Set the result and tag to the last command complete if there wasn't a
 			// query already run. Although queries usually return from here and cede
 			// control to Next, a query with zero results does not.
-			if t == 'C' {
+			if t == proto.CommandComplete {
 				res.result, res.tag = cn.parseComplete(r.string())
 				if res.colNames != nil {
 					return
 				}
 			}
 			res.done = true
-		case 'Z':
+		case proto.ReadyForQuery:
 			cn.processReadyForQuery(r)
 			// done
 			return
-		case 'E':
+		case proto.ErrorResponse:
 			res = nil
 			err = parseError(r, q)
-		case 'D':
+		case proto.DataRow:
 			if res == nil {
 				cn.err.set(driver.ErrBadConn)
 				errorf("unexpected DataRow in simple query execution")
@@ -562,7 +562,7 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 			// the query didn't fail; kick off to Next
 			cn.saveMessage(t, r)
 			return
-		case 'T':
+		case proto.RowDescription:
 			// res might be non-nil here if we received a previous
 			// CommandComplete, but that's fine; just overwrite it
 			res = &rows{cn: cn}
@@ -638,16 +638,16 @@ func (cn *conn) prepareTo(q, stmtName string) *stmt {
 
 	st := &stmt{cn: cn, name: stmtName}
 
-	b := cn.writeBuf('P')
+	b := cn.writeBuf(proto.Parse)
 	b.string(st.name)
 	b.string(q)
 	b.int16(0)
 
-	b.next('D')
-	b.byte('S')
+	b.next(proto.Describe)
+	b.byte(proto.Sync)
 	b.string(st.name)
 
-	b.next('S')
+	b.next(proto.Sync)
 	cn.send(b)
 
 	cn.readParseResponse()
@@ -688,7 +688,7 @@ func (cn *conn) Close() (err error) {
 
 	// Don't go through send(); ListenerConn relies on us not scribbling on the
 	// scratch buffer of this connection.
-	return cn.sendSimpleMessage('X')
+	return cn.sendSimpleMessage(proto.Terminate)
 }
 
 func toNamedValue(v []driver.Value) []driver.NamedValue {
@@ -845,12 +845,12 @@ func (cn *conn) sendStartupPacket(m *writeBuf) error {
 // Send a message of type typ to the server on the other end of cn.  The
 // message should have no payload.  This method does not use the scratch
 // buffer.
-func (cn *conn) sendSimpleMessage(typ byte) (err error) {
+func (cn *conn) sendSimpleMessage(typ proto.RequestCode) (err error) {
 	if debugProto {
 		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n",
 			proto.RequestCode(typ), 0, []byte{})
 	}
-	_, err = cn.c.Write([]byte{typ, '\x00', '\x00', '\x00', '\x04'})
+	_, err = cn.c.Write([]byte{byte(typ), '\x00', '\x00', '\x00', '\x04'})
 	return err
 }
 
@@ -859,7 +859,7 @@ func (cn *conn) sendSimpleMessage(typ byte) (err error) {
 // method is useful in cases where you have to see what the next message is
 // going to be (e.g. to see whether it's an error or not) but you can't handle
 // the message yourself.
-func (cn *conn) saveMessage(typ byte, buf *readBuf) {
+func (cn *conn) saveMessage(typ proto.ResponseCode, buf *readBuf) {
 	if cn.saveMessageType != 0 {
 		cn.err.set(driver.ErrBadConn)
 		errorf("unexpected saveMessageType %d", cn.saveMessageType)
@@ -870,7 +870,7 @@ func (cn *conn) saveMessage(typ byte, buf *readBuf) {
 
 // recvMessage receives any message from the backend, or returns an error if
 // a problem occurred while reading the message.
-func (cn *conn) recvMessage(r *readBuf) (byte, error) {
+func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 	// workaround for a QueryRow bug, see exec
 	if cn.saveMessageType != 0 {
 		t := cn.saveMessageType
@@ -904,14 +904,14 @@ func (cn *conn) recvMessage(r *readBuf) (byte, error) {
 		fmt.Fprintf(os.Stderr, "SERVER ← %-20s %5d  %q\n",
 			proto.ResponseCode(t), n, y)
 	}
-	return t, nil
+	return proto.ResponseCode(t), nil
 }
 
 // recv receives a message from the backend, but if an error happened while
 // reading the message or the received message was an ErrorResponse, it panics.
 // NoticeResponses are ignored.  This function should generally be used only
 // during the startup sequence.
-func (cn *conn) recv() (t byte, r *readBuf) {
+func (cn *conn) recv() (t proto.ResponseCode, r *readBuf) {
 	for {
 		var err error
 		r = &readBuf{}
@@ -920,13 +920,13 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 			panic(err)
 		}
 		switch t {
-		case 'E':
+		case proto.ErrorResponse:
 			panic(parseError(r, ""))
-		case 'N':
+		case proto.NoticeResponse:
 			if n := cn.noticeHandler; n != nil {
 				n(parseError(r, ""))
 			}
-		case 'A':
+		case proto.NotificationResponse:
 			if n := cn.notificationHandler; n != nil {
 				n(recvNotification(r))
 			}
@@ -938,7 +938,7 @@ func (cn *conn) recv() (t byte, r *readBuf) {
 
 // recv1Buf is exactly equivalent to recv1, except it uses a buffer supplied by
 // the caller to avoid an allocation.
-func (cn *conn) recv1Buf(r *readBuf) byte {
+func (cn *conn) recv1Buf(r *readBuf) proto.ResponseCode {
 	for {
 		t, err := cn.recvMessage(r)
 		if err != nil {
@@ -946,15 +946,15 @@ func (cn *conn) recv1Buf(r *readBuf) byte {
 		}
 
 		switch t {
-		case 'A':
+		case proto.NotificationResponse:
 			if n := cn.notificationHandler; n != nil {
 				n(recvNotification(r))
 			}
-		case 'N':
+		case proto.NoticeResponse:
 			if n := cn.noticeHandler; n != nil {
 				n(parseError(r, ""))
 			}
-		case 'S':
+		case proto.ParameterStatus:
 			cn.processParameterStatus(r)
 		default:
 			return t
@@ -965,7 +965,7 @@ func (cn *conn) recv1Buf(r *readBuf) byte {
 // recv1 receives a message from the backend, panicking if an error occurs
 // while attempting to read it.  All asynchronous messages are ignored, with
 // the exception of ErrorResponse.
-func (cn *conn) recv1() (t byte, r *readBuf) {
+func (cn *conn) recv1() (t proto.ResponseCode, r *readBuf) {
 	r = &readBuf{}
 	t = cn.recv1Buf(r)
 	return t, r
@@ -1090,12 +1090,12 @@ func (cn *conn) auth(r *readBuf, o values) error {
 		return nil
 
 	case proto.AuthReqPassword:
-		w := cn.writeBuf(byte(proto.PasswordMessage))
+		w := cn.writeBuf(proto.PasswordMessage)
 		w.string(o["password"])
 		cn.send(w)
 
 		t, r := cn.recv()
-		if t != byte(proto.AuthenticationRequest) {
+		if t != proto.AuthenticationRequest {
 			return fmt.Errorf("pq: unexpected password response: %q", t)
 		}
 		if r.int32() != int(proto.AuthReqOk) {
@@ -1105,12 +1105,12 @@ func (cn *conn) auth(r *readBuf, o values) error {
 
 	case proto.AuthReqMD5:
 		s := string(r.next(4))
-		w := cn.writeBuf(byte(proto.PasswordMessage))
+		w := cn.writeBuf(proto.PasswordMessage)
 		w.string("md5" + md5s(md5s(o["password"]+o["user"])+s))
 		cn.send(w)
 
 		t, r := cn.recv()
-		if t != byte(proto.AuthenticationRequest) {
+		if t != proto.AuthenticationRequest {
 			return fmt.Errorf("pq: unexpected password response: %q", t)
 		}
 		if r.int32() != int(proto.AuthReqOk) {
@@ -1144,7 +1144,7 @@ func (cn *conn) auth(r *readBuf, o values) error {
 			return fmt.Errorf("pq: failed to get Kerberos ticket: %w", err)
 		}
 
-		w := cn.writeBuf(byte(proto.GSSResponse))
+		w := cn.writeBuf(proto.GSSResponse)
 		w.bytes(token)
 		cn.send(w)
 
@@ -1159,7 +1159,7 @@ func (cn *conn) auth(r *readBuf, o values) error {
 
 		done, tokOut, err := cn.gss.Continue([]byte(*r))
 		if err == nil && !done {
-			w := cn.writeBuf(byte(proto.SASLInitialResponse))
+			w := cn.writeBuf(proto.SASLInitialResponse)
 			w.bytes(tokOut)
 			cn.send(w)
 		}
@@ -1176,14 +1176,14 @@ func (cn *conn) auth(r *readBuf, o values) error {
 		}
 		scOut := sc.Out()
 
-		w := cn.writeBuf(byte(proto.SASLResponse))
+		w := cn.writeBuf(proto.SASLResponse)
 		w.string("SCRAM-SHA-256")
 		w.int32(len(scOut))
 		w.bytes(scOut)
 		cn.send(w)
 
 		t, r := cn.recv()
-		if t != byte(proto.AuthenticationRequest) {
+		if t != proto.AuthenticationRequest {
 			return fmt.Errorf("pq: unexpected password response: %q", t)
 		}
 
@@ -1198,12 +1198,12 @@ func (cn *conn) auth(r *readBuf, o values) error {
 		}
 
 		scOut = sc.Out()
-		w = cn.writeBuf(byte(proto.SASLResponse))
+		w = cn.writeBuf(proto.SASLResponse)
 		w.bytes(scOut)
 		cn.send(w)
 
 		t, r = cn.recv()
-		if t != byte(proto.AuthenticationRequest) {
+		if t != proto.AuthenticationRequest {
 			return fmt.Errorf("pq: unexpected password response: %q", t)
 		}
 
@@ -1317,25 +1317,25 @@ func (cn *conn) sendBinaryModeQuery(query string, args []driver.NamedValue) {
 		errorf("got %d parameters but PostgreSQL only supports 65535 parameters", len(args))
 	}
 
-	b := cn.writeBuf('P')
+	b := cn.writeBuf(proto.Parse)
 	b.byte(0) // unnamed statement
 	b.string(query)
 	b.int16(0)
 
-	b.next('B')
+	b.next(proto.Bind)
 	b.int16(0) // unnamed portal and statement
 	cn.sendBinaryParameters(b, args)
 	b.bytes(colFmtDataAllText)
 
-	b.next('D')
-	b.byte('P')
+	b.next(proto.Describe)
+	b.byte(proto.Parse)
 	b.byte(0) // unnamed portal
 
-	b.next('E')
+	b.next(proto.Execute)
 	b.byte(0)
 	b.int32(0)
 
-	b.next('S')
+	b.next(proto.Sync)
 	cn.send(b)
 }
 
@@ -1370,10 +1370,10 @@ func (cn *conn) processReadyForQuery(r *readBuf) {
 func (cn *conn) readReadyForQuery() {
 	t, r := cn.recv1()
 	switch t {
-	case 'Z':
+	case proto.ReadyForQuery:
 		cn.processReadyForQuery(r)
 		return
-	case 'E':
+	case proto.ErrorResponse:
 		err := parseError(r, "")
 		cn.err.set(driver.ErrBadConn)
 		panic(err)
@@ -1391,9 +1391,9 @@ func (cn *conn) processBackendKeyData(r *readBuf) {
 func (cn *conn) readParseResponse() {
 	t, r := cn.recv1()
 	switch t {
-	case '1':
+	case proto.ParseComplete:
 		return
-	case 'E':
+	case proto.ErrorResponse:
 		err := parseError(r, "")
 		cn.readReadyForQuery()
 		panic(err)
@@ -1407,18 +1407,18 @@ func (cn *conn) readStatementDescribeResponse() (paramTyps []oid.Oid, colNames [
 	for {
 		t, r := cn.recv1()
 		switch t {
-		case 't':
+		case proto.ParameterDescription:
 			nparams := r.int16()
 			paramTyps = make([]oid.Oid, nparams)
 			for i := range paramTyps {
 				paramTyps[i] = r.oid()
 			}
-		case 'n':
+		case proto.NoData:
 			return paramTyps, nil, nil
-		case 'T':
+		case proto.RowDescription:
 			colNames, colTyps = parseStatementRowDescribe(r)
 			return paramTyps, colNames, colTyps
-		case 'E':
+		case proto.ErrorResponse:
 			err := parseError(r, "")
 			cn.readReadyForQuery()
 			panic(err)
@@ -1432,11 +1432,11 @@ func (cn *conn) readStatementDescribeResponse() (paramTyps []oid.Oid, colNames [
 func (cn *conn) readPortalDescribeResponse() rowsHeader {
 	t, r := cn.recv1()
 	switch t {
-	case 'T':
+	case proto.RowDescription:
 		return parsePortalRowDescribe(r)
-	case 'n':
+	case proto.NoData:
 		return rowsHeader{}
-	case 'E':
+	case proto.ErrorResponse:
 		err := parseError(r, "")
 		cn.readReadyForQuery()
 		panic(err)
@@ -1450,9 +1450,9 @@ func (cn *conn) readPortalDescribeResponse() rowsHeader {
 func (cn *conn) readBindResponse() {
 	t, r := cn.recv1()
 	switch t {
-	case '2':
+	case proto.BindComplete:
 		return
-	case 'E':
+	case proto.ErrorResponse:
 		err := parseError(r, "")
 		cn.readReadyForQuery()
 		panic(err)
@@ -1475,11 +1475,11 @@ func (cn *conn) postExecuteWorkaround() {
 	for {
 		t, r := cn.recv1()
 		switch t {
-		case 'E':
+		case proto.ErrorResponse:
 			err := parseError(r, "")
 			cn.readReadyForQuery()
 			panic(err)
-		case 'C', 'D', 'I':
+		case proto.CommandComplete, proto.DataRow, proto.EmptyQueryResponse:
 			// the query didn't fail, but we can't process this message
 			cn.saveMessage(t, r)
 			return
@@ -1495,26 +1495,26 @@ func (cn *conn) readExecuteResponse(protocolState string) (res driver.Result, co
 	for {
 		t, r := cn.recv1()
 		switch t {
-		case 'C':
+		case proto.CommandComplete:
 			if err != nil {
 				cn.err.set(driver.ErrBadConn)
 				errorf("unexpected CommandComplete after error %s", err)
 			}
 			res, commandTag = cn.parseComplete(r.string())
-		case 'Z':
+		case proto.ReadyForQuery:
 			cn.processReadyForQuery(r)
 			if res == nil && err == nil {
 				err = errUnexpectedReady
 			}
 			return res, commandTag, err
-		case 'E':
+		case proto.ErrorResponse:
 			err = parseError(r, "")
-		case 'T', 'D', 'I':
+		case proto.RowDescription, proto.DataRow, proto.EmptyQueryResponse:
 			if err != nil {
 				cn.err.set(driver.ErrBadConn)
 				errorf("unexpected %q after error %s", t, err)
 			}
-			if t == 'I' {
+			if t == proto.EmptyQueryResponse {
 				res = emptyRows
 			}
 			// ignore any results
