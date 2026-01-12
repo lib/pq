@@ -653,7 +653,11 @@ func (cn *conn) prepareTo(q, stmtName string) *stmt {
 	cn.readParseResponse()
 	st.paramTyps, st.colNames, st.colTyps = cn.readStatementDescribeResponse()
 	st.colFmts, st.colFmtData = decideColumnFormats(st.colTyps, cn.disablePreparedBinaryResult)
-	cn.readReadyForQuery()
+
+	err := cn.readReadyForQuery()
+	if err != nil {
+		panic(err)
+	}
 	return st
 }
 
@@ -1363,19 +1367,19 @@ func (cn *conn) processReadyForQuery(r *readBuf) {
 	cn.txnStatus = transactionStatus(r.byte())
 }
 
-func (cn *conn) readReadyForQuery() {
+func (cn *conn) readReadyForQuery() error {
 	t, r := cn.recv1()
 	switch t {
 	case proto.ReadyForQuery:
 		cn.processReadyForQuery(r)
-		return
+		return nil
 	case proto.ErrorResponse:
 		err := parseError(r, "")
 		cn.err.set(driver.ErrBadConn)
-		panic(err)
+		return err
 	default:
 		cn.err.set(driver.ErrBadConn)
-		errorf("unexpected message %q; expected ReadyForQuery", t)
+		return fmt.Errorf("pq: unexpected message %q; expected ReadyForQuery", t)
 	}
 }
 
@@ -1391,7 +1395,7 @@ func (cn *conn) readParseResponse() {
 		return
 	case proto.ErrorResponse:
 		err := parseError(r, "")
-		cn.readReadyForQuery()
+		_ = cn.readReadyForQuery()
 		panic(err)
 	default:
 		cn.err.set(driver.ErrBadConn)
@@ -1416,7 +1420,7 @@ func (cn *conn) readStatementDescribeResponse() (paramTyps []oid.Oid, colNames [
 			return paramTyps, colNames, colTyps
 		case proto.ErrorResponse:
 			err := parseError(r, "")
-			cn.readReadyForQuery()
+			_ = cn.readReadyForQuery()
 			panic(err)
 		default:
 			cn.err.set(driver.ErrBadConn)
@@ -1434,7 +1438,7 @@ func (cn *conn) readPortalDescribeResponse() rowsHeader {
 		return rowsHeader{}
 	case proto.ErrorResponse:
 		err := parseError(r, "")
-		cn.readReadyForQuery()
+		_ = cn.readReadyForQuery()
 		panic(err)
 	default:
 		cn.err.set(driver.ErrBadConn)
@@ -1450,7 +1454,7 @@ func (cn *conn) readBindResponse() {
 		return
 	case proto.ErrorResponse:
 		err := parseError(r, "")
-		cn.readReadyForQuery()
+		_ = cn.readReadyForQuery()
 		panic(err)
 	default:
 		cn.err.set(driver.ErrBadConn)
@@ -1473,7 +1477,7 @@ func (cn *conn) postExecuteWorkaround() {
 		switch t {
 		case proto.ErrorResponse:
 			err := parseError(r, "")
-			cn.readReadyForQuery()
+			_ = cn.readReadyForQuery()
 			panic(err)
 		case proto.CommandComplete, proto.DataRow, proto.EmptyQueryResponse:
 			// the query didn't fail, but we can't process this message
