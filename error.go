@@ -558,10 +558,6 @@ func (e *Error) ErrorWithDetail() string {
 	return b.String()
 }
 
-func errorf(s string, args ...any) {
-	panic(fmt.Errorf("pq: %s", fmt.Sprintf(s, args...)))
-}
-
 func posToLine(pos int, lines []string) (line, col int) {
 	read := 0
 	for i := range lines {
@@ -606,18 +602,6 @@ func expandTab(s string) string {
 	return b.String()
 }
 
-func errRecoverNoErrBadConn(err *error) {
-	r := recover()
-	if r == nil {
-		return
-	}
-	var ok bool
-	*err, ok = r.(error)
-	if !ok {
-		*err = fmt.Errorf("pq: unexpected error: %#v", r)
-	}
-}
-
 func (cn *conn) handleError(reported error, query ...string) error {
 	switch err := reported.(type) {
 	case nil:
@@ -650,16 +634,4 @@ func (cn *conn) handleError(reported error, query ...string) error {
 		cn.err.set(driver.ErrBadConn)
 	}
 	return reported
-}
-
-func (cn *conn) errRecover(err *error, query ...string) {
-	r := recover()
-	if r != nil {
-		e, ok := r.(error)
-		if !ok {
-			cn.err.set(driver.ErrBadConn)
-			panic(fmt.Sprintf("pq: unknown error %T: %[1]s", e))
-		}
-		*err = cn.handleError(e, query...)
-	}
 }

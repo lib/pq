@@ -75,7 +75,7 @@ const ciBufferSize = 64 * 1024
 // flush buffer before the buffer is filled up and needs reallocation
 const ciBufferFlushSize = 63 * 1024
 
-func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
+func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, resErr error) {
 	if !cn.isInTransaction() {
 		return nil, errCopyNotSupportedOutsideTxn
 	}
@@ -91,68 +91,79 @@ func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, err error) {
 
 	b := cn.writeBuf(proto.Query)
 	b.string(q)
-	cn.send(b)
+	err := cn.send(b)
+	if err != nil {
+		return nil, err
+	}
 
 awaitCopyInResponse:
 	for {
-		t, r := cn.recv1()
+		t, r, err := cn.recv1()
+		if err != nil {
+			return nil, err
+		}
 		switch t {
 		case proto.CopyInResponse:
 			if r.byte() != 0 {
-				err = errBinaryCopyNotSupported
+				resErr = errBinaryCopyNotSupported
 				break awaitCopyInResponse
 			}
 			go ci.resploop()
 			return ci, nil
 		case proto.CopyOutResponse:
-			err = errCopyToNotSupported
+			resErr = errCopyToNotSupported
 			break awaitCopyInResponse
 		case proto.ErrorResponse:
-			err = parseError(r, q)
+			resErr = parseError(r, q)
 		case proto.ReadyForQuery:
-			if err == nil {
+			if resErr == nil {
 				ci.setBad(driver.ErrBadConn)
-				errorf("unexpected ReadyForQuery in response to COPY")
+				return nil, fmt.Errorf("pq: unexpected ReadyForQuery in response to COPY")
 			}
 			cn.processReadyForQuery(r)
-			return nil, err
+			return nil, resErr
 		default:
 			ci.setBad(driver.ErrBadConn)
-			errorf("unknown response for copy query: %q", t)
+			return nil, fmt.Errorf("pq: unknown response for copy query: %q", t)
 		}
 	}
 
 	// something went wrong, abort COPY before we return
 	b = cn.writeBuf(proto.CopyFail)
-	b.string(err.Error())
-	cn.send(b)
+	b.string(resErr.Error())
+	err = cn.send(b)
+	if err != nil {
+		return nil, err
+	}
 
 	for {
-		t, r := cn.recv1()
+		t, r, err := cn.recv1()
+		if err != nil {
+			return nil, err
+		}
+
 		switch t {
 		case proto.CopyDoneResponse, proto.CommandComplete, proto.ErrorResponse:
 		case proto.ReadyForQuery:
 			// correctly aborted, we're done
 			cn.processReadyForQuery(r)
-			return nil, err
+			return nil, resErr
 		default:
 			ci.setBad(driver.ErrBadConn)
-			errorf("unknown response for CopyFail: %q", t)
+			return nil, fmt.Errorf("pq: unknown response for CopyFail: %q", t)
 		}
 	}
 }
 
-func (ci *copyin) flush(buf []byte) {
+func (ci *copyin) flush(buf []byte) error {
 	if len(buf)-1 > math.MaxUint32 {
-		panic("too many columns")
+		return errors.New("pq: too many columns")
 	}
 	// set message length (without message identifier)
 	binary.BigEndian.PutUint32(buf[1:], uint32(len(buf)-1))
 
 	_, err := ci.cn.c.Write(buf)
-	if err != nil {
-		panic(err)
-	}
+	return err
 }
 
 func (ci *copyin) resploop() {
@@ -168,7 +179,10 @@ func (ci *copyin) resploop() {
 		switch t {
 		case proto.CommandComplete:
 			// complete
-			res, _ := ci.cn.parseComplete(r.string())
+			res, _, err := ci.cn.parseComplete(r.string())
+			if err != nil {
+				panic(err)
+			}
 			ci.setResult(res)
 		case proto.NoticeResponse:
 			if n := ci.cn.noticeHandler; n != nil {
@@ -246,16 +260,13 @@ func (ci *copyin) Query(v []driver.Value) (r driver.Rows, err error) {
 // You need to call Exec(nil) to sync the COPY stream and to get any
 // errors from pending data, since Stmt.Close() doesn't return errors
 // to the user.
-func (ci *copyin) Exec(v []driver.Value) (r driver.Result, err error) {
+func (ci *copyin) Exec(v []driver.Value) (driver.Result, error) {
 	if ci.closed {
 		return nil, errCopyInClosed
 	}
-
 	if err := ci.getBad(); err != nil {
 		return nil, err
 	}
-	defer ci.cn.errRecover(&err)
-
 	if err := ci.err(); err != nil {
 		return nil, err
 	}
@@ -264,13 +275,18 @@ func (ci *copyin) Exec(v []driver.Value) (r driver.Result, err error) {
 		if err := ci.Close(); err != nil {
 			return driver.RowsAffected(0), err
 		}
-
 		return ci.getResult(), nil
 	}
 
-	numValues := len(v)
+	var (
+		numValues = len(v)
+		err       error
+	)
 	for i, value := range v {
-		ci.buffer = appendEncodedText(&ci.cn.parameterStatus, ci.buffer, value)
+		ci.buffer, err = appendEncodedText(&ci.cn.parameterStatus, ci.buffer, value)
+		if err != nil {
+			return nil, ci.cn.handleError(err)
+		}
 		if i < numValues-1 {
 			ci.buffer = append(ci.buffer, '\t')
 		}
@@ -279,7 +295,10 @@ func (ci *copyin) Exec(v []driver.Value) (r driver.Result, err error) {
 	ci.buffer = append(ci.buffer, '\n')
 
 	if len(ci.buffer) > ciBufferFlushSize {
-		ci.flush(ci.buffer)
+		err := ci.flush(ci.buffer)
+		if err != nil {
+			return nil, ci.cn.handleError(err)
+		}
 		// reset buffer, keep bytes for message identifier and length
 		ci.buffer = ci.buffer[:5]
 	}
@@ -294,20 +313,16 @@ func (ci *copyin) Exec(v []driver.Value) (r driver.Result, err error) {
 // You need to call Exec(nil) to sync the COPY stream and to get any
 // errors from pending data, since Stmt.Close() doesn't return errors
 // to the user.
-func (ci *copyin) CopyData(ctx context.Context, line string) (r driver.Result, err error) {
+func (ci *copyin) CopyData(ctx context.Context, line string) (driver.Result, error) {
 	if ci.closed {
 		return nil, errCopyInClosed
 	}
-
 	if finish := ci.cn.watchCancel(ctx); finish != nil {
 		defer finish()
 	}
-
 	if err := ci.getBad(); err != nil {
 		return nil, err
 	}
-	defer ci.cn.errRecover(&err)
-
 	if err := ci.err(); err != nil {
 		return nil, err
 	}
@@ -316,7 +331,11 @@ func (ci *copyin) CopyData(ctx context.Context, line string) (r driver.Result, e
 	ci.buffer = append(ci.buffer, '\n')
 
 	if len(ci.buffer) > ciBufferFlushSize {
-		ci.flush(ci.buffer)
+		err := ci.flush(ci.buffer)
+		if err != nil {
+			return nil, ci.cn.handleError(err)
+		}
+
 		// reset buffer, keep bytes for message identifier and length
 		ci.buffer = ci.buffer[:5]
 	}
@@ -324,7 +343,7 @@ func (ci *copyin) CopyData(ctx context.Context, line string) (r driver.Result, e
 	return driver.RowsAffected(0), nil
 }
 
-func (ci *copyin) Close() (err error) {
+func (ci *copyin) Close() error {
 	if ci.closed { // Don't do anything, we're already closed
 		return nil
 	}
@@ -333,15 +352,17 @@ func (ci *copyin) Close() (err error) {
 	if err := ci.getBad(); err != nil {
 		return err
 	}
-	defer ci.cn.errRecover(&err)
 
 	if len(ci.buffer) > 0 {
-		ci.flush(ci.buffer)
+		err := ci.flush(ci.buffer)
+		if err != nil {
+			return ci.cn.handleError(err)
+		}
 	}
 	// Avoid touching the scratch buffer as resploop could be using it.
-	err = ci.cn.sendSimpleMessage(proto.CopyDoneRequest)
+	err := ci.cn.sendSimpleMessage(proto.CopyDoneRequest)
 	if err != nil {
-		return err
+		return ci.cn.handleError(err)
 	}
 
 	<-ci.done

@@ -3,6 +3,8 @@ package pq
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"math"
 
 	"github.com/lib/pq/internal/proto"
@@ -33,7 +35,7 @@ func (b *readBuf) int16() (n int) {
 func (b *readBuf) string() string {
 	i := bytes.IndexByte(*b, 0)
 	if i < 0 {
-		errorf("invalid message format; expected string terminator")
+		panic(errors.New("pq: invalid message format; expected string terminator"))
 	}
 	s := (*b)[:i]
 	*b = (*b)[i+1:]
@@ -82,7 +84,7 @@ func (b *writeBuf) bytes(v []byte) {
 func (b *writeBuf) wrap() []byte {
 	p := b.buf[b.pos:]
 	if len(p) > math.MaxUint32 {
-		errorf("message too large (%d > math.MaxUint32)", len(p))
+		panic(fmt.Errorf("pq: message too large (%d > math.MaxUint32)", len(p)))
 	}
 	binary.BigEndian.PutUint32(p, uint32(len(p)))
 	return b.buf
@@ -91,7 +93,7 @@ func (b *writeBuf) wrap() []byte {
 func (b *writeBuf) next(c proto.RequestCode) {
 	p := b.buf[b.pos:]
 	if len(p) > math.MaxUint32 {
-		errorf("message too large (%d > math.MaxUint32)", len(p))
+		panic(fmt.Errorf("pq: message too large (%d > math.MaxUint32)", len(p)))
 	}
 	binary.BigEndian.PutUint32(p, uint32(len(p)))
 	b.pos = len(b.buf) + 1

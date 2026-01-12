@@ -86,7 +86,7 @@ func (cn *conn) Ping(ctx context.Context) error {
 	if err != nil {
 		return driver.ErrBadConn // https://golang.org/pkg/database/sql/driver/#Pinger
 	}
-	rows.Close()
+	_ = rows.Close()
 	return nil
 }
 
@@ -122,7 +122,7 @@ func (cn *conn) watchCancel(ctx context.Context) func() {
 			select {
 			case <-finished:
 				cn.err.set(ctx.Err())
-				cn.Close()
+				_ = cn.Close()
 			case finished <- struct{}{}:
 			}
 		}
@@ -144,7 +144,7 @@ func (cn *conn) cancel(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	{
 		can := conn{
@@ -187,19 +187,20 @@ func (st *stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (dri
 }
 
 // Implement the "StmtExecContext" interface
-func (st *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (res driver.Result, err error) {
+func (st *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
 	if finish := st.watchCancel(ctx); finish != nil {
 		defer finish()
 	}
-
 	if err := st.cn.err.get(); err != nil {
 		return nil, err
 	}
-	defer st.cn.errRecover(&err)
 
-	st.exec(args)
-	res, _, err = st.cn.readExecuteResponse("simple query")
-	return res, err
+	err := st.exec(args)
+	if err != nil {
+		return nil, st.cn.handleError(err)
+	}
+	res, _, err := st.cn.readExecuteResponse("simple query")
+	return res, st.cn.handleError(err)
 }
 
 // watchCancel is implemented on stmt in order to not mark the parent conn as bad

@@ -684,10 +684,10 @@ func (a StringArray) Value() (driver.Value, error) {
 	return "{}", nil
 }
 
-// appendArray appends rv to the buffer, returning the extended buffer and
-// the delimiter used between elements.
+// appendArray appends rv to the buffer, returning the extended buffer and the
+// delimiter used between elements.
 //
-// It panics when n <= 0 or rv's Kind is not reflect.Array nor reflect.Slice.
+// Returns an error when n <= 0 or rv is not a reflect.Array or reflect.Slice.
 func appendArray(b []byte, rv reflect.Value, n int) ([]byte, string, error) {
 	var del string
 	var err error
@@ -770,7 +770,11 @@ func appendArrayQuotedBytes(b, v []byte) []byte {
 }
 
 func appendValue(b []byte, v driver.Value) ([]byte, error) {
-	return append(b, encode(nil, v, 0)...), nil
+	enc, err := encode(nil, v, 0)
+	if err != nil {
+		return nil, err
+	}
+	return append(b, enc...), nil
 }
 
 // parseArray extracts the dimensions and elements of an array represented in

@@ -696,7 +696,10 @@ func TestTextDecodeIntoString(t *testing.T) {
 	input := []byte("hello world")
 	want := string(input)
 	for _, typ := range []oid.Oid{oid.T_char, oid.T_bpchar, oid.T_varchar, oid.T_text} {
-		got := decode(&parameterStatus{}, input, typ, formatText)
+		got, err := decode(&parameterStatus{}, input, typ, formatText)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if got != want {
 			t.Errorf("invalid string decoding output for %T(%+v), got %v but expected %v", typ, typ, got, want)
 		}
@@ -706,13 +709,19 @@ func TestTextDecodeIntoString(t *testing.T) {
 func TestByteaOutputFormatEncoding(t *testing.T) {
 	input := []byte("\\x\x00\x01\x02\xFF\xFEabcdefg0123")
 	want := []byte("\\x5c78000102fffe6162636465666730313233")
-	got := encode(&parameterStatus{serverVersion: 90000}, input, oid.T_bytea)
+	got, err := encode(&parameterStatus{serverVersion: 90000}, input, oid.T_bytea)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !bytes.Equal(want, got) {
 		t.Errorf("invalid hex bytea output, got %v but expected %v", got, want)
 	}
 
 	want = []byte("\\\\x\\000\\001\\002\\377\\376abcdefg0123")
-	got = encode(&parameterStatus{serverVersion: 84000}, input, oid.T_bytea)
+	got, err = encode(&parameterStatus{serverVersion: 84000}, input, oid.T_bytea)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !bytes.Equal(want, got) {
 		t.Errorf("invalid escape bytea output, got %v but expected %v", got, want)
 	}
@@ -786,15 +795,30 @@ func TestByteaOutputFormats(t *testing.T) {
 }
 
 func TestAppendEncodedText(t *testing.T) {
-	var buf []byte
+	var (
+		buf []byte
+		err error
+	)
 
-	buf = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, int64(10))
+	buf, err = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, int64(10))
+	if err != nil {
+		t.Fatal(err)
+	}
 	buf = append(buf, '\t')
-	buf = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, 42.0000000001)
+	buf, err = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, 42.0000000001)
+	if err != nil {
+		t.Fatal(err)
+	}
 	buf = append(buf, '\t')
-	buf = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, "hello\tworld")
+	buf, err = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, "hello\tworld")
+	if err != nil {
+		t.Fatal(err)
+	}
 	buf = append(buf, '\t')
-	buf = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, []byte{0, 128, 255})
+	buf, err = appendEncodedText(&parameterStatus{serverVersion: 90000}, buf, []byte{0, 128, 255})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if string(buf) != "10\t42.0000000001\thello\\tworld\t\\\\x0080ff" {
 		t.Fatal(string(buf))
