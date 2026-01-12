@@ -182,8 +182,6 @@ func (l *ListenerConn) setState(newState int32) bool {
 // away or should be discarded because we couldn't agree on the state with the
 // server backend.
 func (l *ListenerConn) listenerConnLoop() (err error) {
-	defer errRecoverNoErrBadConn(&err)
-
 	r := &readBuf{}
 	for {
 		t, err := l.cn.recvMessage(r)
@@ -255,7 +253,7 @@ func (l *ListenerConn) listenerConnMain() {
 	if l.err == nil {
 		l.err = err
 	}
-	l.cn.Close()
+	_ = l.cn.Close()
 	l.connectionLock.Unlock()
 
 	// There might be a query in-flight; make sure nobody's waiting for a
@@ -283,15 +281,14 @@ func (l *ListenerConn) UnlistenAll() (bool, error) {
 	return l.ExecSimpleQuery("UNLISTEN *")
 }
 
-// Ping the remote server to make sure it's alive.  Non-nil error means the
+// Ping the remote server to make sure it's alive. Non-nil error means the
 // connection has failed and should be abandoned.
 func (l *ListenerConn) Ping() error {
 	sent, err := l.ExecSimpleQuery("")
 	if !sent {
 		return err
 	}
-	if err != nil {
-		// shouldn't happen
+	if err != nil { // shouldn't happen
 		panic(err)
 	}
 	return nil
@@ -302,11 +299,9 @@ func (l *ListenerConn) Ping() error {
 // The caller must be holding senderLock (see acquireSenderLock and
 // releaseSenderLock).
 func (l *ListenerConn) sendSimpleQuery(q string) (err error) {
-	defer errRecoverNoErrBadConn(&err)
-
-	// must set connection state before sending the query
+	// Must set connection state before sending the query
 	if !l.setState(connStateExpectResponse) {
-		panic("two queries running at the same time")
+		return errors.New("pq: two queries running at the same time")
 	}
 
 	// Can't use l.cn.writeBuf here because it uses the scratch buffer which
@@ -316,9 +311,7 @@ func (l *ListenerConn) sendSimpleQuery(q string) (err error) {
 		pos: 1,
 	}
 	b.string(q)
-	l.cn.send(b)
-
-	return nil
+	return l.cn.send(b)
 }
 
 // ExecSimpleQuery executes a "simple query" (i.e. one with no bindable
@@ -349,7 +342,7 @@ func (l *ListenerConn) ExecSimpleQuery(q string) (executed bool, err error) {
 			l.err = err
 		}
 		l.connectionLock.Unlock()
-		l.cn.c.Close()
+		_ = l.cn.c.Close()
 		return false, err
 	}
 
@@ -682,7 +675,7 @@ func (l *Listener) disconnectCleanup() error {
 	}
 
 	err := l.cn.Err()
-	l.cn.Close()
+	_ = l.cn.Close()
 	l.cn = nil
 	return err
 }
@@ -752,7 +745,7 @@ func (l *Listener) connect() error {
 
 	err = l.resync(cn, notificationChan)
 	if err != nil {
-		cn.Close()
+		_ = cn.Close()
 		return err
 	}
 
@@ -775,7 +768,7 @@ func (l *Listener) Close() error {
 	}
 
 	if l.cn != nil {
-		l.cn.Close()
+		_ = l.cn.Close()
 	}
 	l.isClosed = true
 

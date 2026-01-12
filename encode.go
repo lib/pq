@@ -19,77 +19,74 @@ import (
 
 var time2400Regex = regexp.MustCompile(`^(24:00(?::00(?:\.0+)?)?)(?:[Z+-].*)?$`)
 
-func binaryEncode(parameterStatus *parameterStatus, x any) []byte {
+func binaryEncode(parameterStatus *parameterStatus, x any) ([]byte, error) {
 	switch v := x.(type) {
 	case []byte:
-		return v
+		return v, nil
 	default:
 		return encode(parameterStatus, x, oid.T_unknown)
 	}
 }
 
-func encode(parameterStatus *parameterStatus, x any, pgtypOid oid.Oid) []byte {
+func encode(parameterStatus *parameterStatus, x any, pgtypOid oid.Oid) ([]byte, error) {
 	switch v := x.(type) {
 	case int64:
-		return strconv.AppendInt(nil, v, 10)
+		return strconv.AppendInt(nil, v, 10), nil
 	case float64:
-		return strconv.AppendFloat(nil, v, 'f', -1, 64)
+		return strconv.AppendFloat(nil, v, 'f', -1, 64), nil
 	case []byte:
 		if v == nil {
-			return nil
+			return nil, nil
 		}
 		if pgtypOid == oid.T_bytea {
-			return encodeBytea(parameterStatus.serverVersion, v)
+			return encodeBytea(parameterStatus.serverVersion, v), nil
 		}
-		return v
+		return v, nil
 	case string:
 		if pgtypOid == oid.T_bytea {
-			return encodeBytea(parameterStatus.serverVersion, []byte(v))
+			return encodeBytea(parameterStatus.serverVersion, []byte(v)), nil
 		}
-		return []byte(v)
+		return []byte(v), nil
 	case bool:
-		return strconv.AppendBool(nil, v)
+		return strconv.AppendBool(nil, v), nil
 	case time.Time:
-		return formatTs(v)
+		return formatTs(v), nil
 	default:
-		errorf("encode: unknown type for %T", v)
+		return nil, fmt.Errorf("pq: encode: unknown type for %T", v)
 	}
-	panic("not reached")
 }
 
-func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid, f format) any {
+func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid, f format) (any, error) {
 	switch f {
 	case formatBinary:
 		return binaryDecode(parameterStatus, s, typ)
 	case formatText:
 		return textDecode(parameterStatus, s, typ)
 	default:
-		panic("not reached")
+		panic("unreachable")
 	}
 }
 
-func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) any {
+func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) (any, error) {
 	switch typ {
 	case oid.T_bytea:
-		return s
+		return s, nil
 	case oid.T_int8:
-		return int64(binary.BigEndian.Uint64(s))
+		return int64(binary.BigEndian.Uint64(s)), nil
 	case oid.T_int4:
-		return int64(int32(binary.BigEndian.Uint32(s)))
+		return int64(int32(binary.BigEndian.Uint32(s))), nil
 	case oid.T_int2:
-		return int64(int16(binary.BigEndian.Uint16(s)))
+		return int64(int16(binary.BigEndian.Uint16(s))), nil
 	case oid.T_uuid:
 		b, err := decodeUUIDBinary(s)
 		if err != nil {
-			panic(err)
+			err = errors.New("pq: " + err.Error())
 		}
-		return b
-
+		return b, err
 	default:
-		errorf("don't know how to decode binary parameter of type %d", uint32(typ))
+		return nil, fmt.Errorf("pq: don't know how to decode binary parameter of type %d", uint32(typ))
 	}
 
-	panic("not reached")
 }
 
 // decodeUUIDBinary interprets the binary format of a uuid, returning it in text format.
@@ -109,70 +106,67 @@ func decodeUUIDBinary(src []byte) ([]byte, error) {
 	return dst, nil
 }
 
-func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) any {
+func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) (any, error) {
 	switch typ {
 	case oid.T_char, oid.T_bpchar, oid.T_varchar, oid.T_text:
-		return string(s)
+		return string(s), nil
 	case oid.T_bytea:
 		b, err := parseBytea(s)
 		if err != nil {
-			errorf("%s", err)
+			err = errors.New("pq: " + err.Error())
 		}
-		return b
+		return b, err
 	case oid.T_timestamptz:
 		return parseTs(parameterStatus.currentLocation, string(s))
 	case oid.T_timestamp, oid.T_date:
 		return parseTs(nil, string(s))
 	case oid.T_time:
-		return mustParse("15:04:05", typ, s)
+		return parseTime("15:04:05", typ, s)
 	case oid.T_timetz:
-		return mustParse("15:04:05-07", typ, s)
+		return parseTime("15:04:05-07", typ, s)
 	case oid.T_bool:
-		return s[0] == 't'
+		return s[0] == 't', nil
 	case oid.T_int8, oid.T_int4, oid.T_int2:
 		i, err := strconv.ParseInt(string(s), 10, 64)
 		if err != nil {
-			errorf("%s", err)
+			err = errors.New("pq: " + err.Error())
 		}
-		return i
+		return i, err
 	case oid.T_float4, oid.T_float8:
 		// We always use 64 bit parsing, regardless of whether the input text is for
 		// a float4 or float8, because clients expect float64s for all float datatypes
 		// and returning a 32-bit parsed float64 produces lossy results.
 		f, err := strconv.ParseFloat(string(s), 64)
 		if err != nil {
-			errorf("%s", err)
+			err = errors.New("pq: " + err.Error())
 		}
-		return f
+		return f, err
 	}
-
-	return s
+	return s, nil
 }
 
 // appendEncodedText encodes item in text format as required by COPY
 // and appends to buf
-func appendEncodedText(parameterStatus *parameterStatus, buf []byte, x any) []byte {
+func appendEncodedText(parameterStatus *parameterStatus, buf []byte, x any) ([]byte, error) {
 	switch v := x.(type) {
 	case int64:
-		return strconv.AppendInt(buf, v, 10)
+		return strconv.AppendInt(buf, v, 10), nil
 	case float64:
-		return strconv.AppendFloat(buf, v, 'f', -1, 64)
+		return strconv.AppendFloat(buf, v, 'f', -1, 64), nil
 	case []byte:
 		encodedBytea := encodeBytea(parameterStatus.serverVersion, v)
-		return appendEscapedText(buf, string(encodedBytea))
+		return appendEscapedText(buf, string(encodedBytea)), nil
 	case string:
-		return appendEscapedText(buf, v)
+		return appendEscapedText(buf, v), nil
 	case bool:
-		return strconv.AppendBool(buf, v)
+		return strconv.AppendBool(buf, v), nil
 	case time.Time:
-		return append(buf, formatTs(v)...)
+		return append(buf, formatTs(v)...), nil
 	case nil:
-		return append(buf, "\\N"...)
+		return append(buf, "\\N"...), nil
 	default:
-		errorf("encode: unknown type for %T", v)
+		return nil, fmt.Errorf("pq: encode: unknown type for %T", v)
 	}
-
-	panic("not reached")
 }
 
 func appendEscapedText(buf []byte, text string) []byte {
@@ -213,7 +207,7 @@ func appendEscapedText(buf []byte, text string) []byte {
 	return result
 }
 
-func mustParse(f string, typ oid.Oid, s []byte) time.Time {
+func parseTime(f string, typ oid.Oid, s []byte) (time.Time, error) {
 	str := string(s)
 
 	// Check for a minute and second offset in the timezone.
@@ -243,12 +237,12 @@ func mustParse(f string, typ oid.Oid, s []byte) time.Time {
 	}
 	t, err := time.Parse(f, str)
 	if err != nil {
-		errorf("decode: %s", err)
+		return time.Time{}, errors.New("pq: " + err.Error())
 	}
 	if is2400Time {
 		t = t.Add(24 * time.Hour)
 	}
-	return t
+	return t, nil
 }
 
 var errInvalidTimestamp = errors.New("invalid timestamp")
@@ -371,24 +365,24 @@ func disableInfinityTs() {
 // setting ("ISO, MDY"), the only one we currently support. This
 // accounts for the discrepancies between the parsing available with
 // time.Parse and the Postgres date formatting quirks.
-func parseTs(currentLocation *time.Location, str string) any {
+func parseTs(currentLocation *time.Location, str string) (any, error) {
 	switch str {
 	case "-infinity":
 		if infinityTsEnabled {
-			return infinityTsNegative
+			return infinityTsNegative, nil
 		}
-		return []byte(str)
+		return []byte(str), nil
 	case "infinity":
 		if infinityTsEnabled {
-			return infinityTsPositive
+			return infinityTsPositive, nil
 		}
-		return []byte(str)
+		return []byte(str), nil
 	}
 	t, err := ParseTimestamp(currentLocation, str)
 	if err != nil {
-		panic(err)
+		err = errors.New("pq: " + err.Error())
 	}
-	return t
+	return t, err
 }
 
 // ParseTimestamp parses Postgres' text format. It returns a time.Time in

@@ -2,6 +2,7 @@ package pq
 
 import (
 	"database/sql/driver"
+	"fmt"
 	"io"
 	"math"
 	"reflect"
@@ -77,39 +78,42 @@ func (rs *rows) Tag() string {
 	return rs.tag
 }
 
-func (rs *rows) Next(dest []driver.Value) (err error) {
+func (rs *rows) Next(dest []driver.Value) (resErr error) {
 	if rs.done {
 		return io.EOF
 	}
-
-	conn := rs.cn
-	if err := conn.err.getForNext(); err != nil {
+	if err := rs.cn.err.getForNext(); err != nil {
 		return err
 	}
-	defer conn.errRecover(&err)
 
 	for {
-		t := conn.recv1Buf(&rs.rb)
+		t, err := rs.cn.recv1Buf(&rs.rb)
+		if err != nil {
+			return rs.cn.handleError(err)
+		}
 		switch t {
 		case proto.ErrorResponse:
-			err = parseError(&rs.rb, "")
+			resErr = parseError(&rs.rb, "")
 		case proto.CommandComplete, proto.EmptyQueryResponse:
 			if t == proto.CommandComplete {
-				rs.result, rs.tag = conn.parseComplete(rs.rb.string())
+				rs.result, rs.tag, err = rs.cn.parseComplete(rs.rb.string())
+				if err != nil {
+					return rs.cn.handleError(err)
+				}
 			}
 			continue
 		case proto.ReadyForQuery:
-			conn.processReadyForQuery(&rs.rb)
+			rs.cn.processReadyForQuery(&rs.rb)
 			rs.done = true
-			if err != nil {
-				return err
+			if resErr != nil {
+				return rs.cn.handleError(resErr)
 			}
 			return io.EOF
 		case proto.DataRow:
 			n := rs.rb.int16()
-			if err != nil {
-				conn.err.set(driver.ErrBadConn)
-				errorf("unexpected DataRow after error %s", err)
+			if resErr != nil {
+				rs.cn.err.set(driver.ErrBadConn)
+				return fmt.Errorf("pq: unexpected DataRow after error %s", resErr)
 			}
 			if n < len(dest) {
 				dest = dest[:n]
@@ -120,15 +124,18 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 					dest[i] = nil
 					continue
 				}
-				dest[i] = decode(&conn.parameterStatus, rs.rb.next(l), rs.colTyps[i].OID, rs.colFmts[i])
+				dest[i], err = decode(&rs.cn.parameterStatus, rs.rb.next(l), rs.colTyps[i].OID, rs.colFmts[i])
+				if err != nil {
+					return rs.cn.handleError(err)
+				}
 			}
-			return
+			return rs.cn.handleError(resErr)
 		case proto.RowDescription:
 			next := parsePortalRowDescribe(&rs.rb)
 			rs.next = &next
 			return io.EOF
 		default:
-			errorf("unexpected message after execute: %q", t)
+			return fmt.Errorf("pq: unexpected message after execute: %q", t)
 		}
 	}
 }

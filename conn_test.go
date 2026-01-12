@@ -642,15 +642,9 @@ func TestErrorDuringStartupClosesConn(t *testing.T) {
 func TestBadConn(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []error{io.EOF, &Error{Severity: Efatal}} {
-		t.Run(fmt.Sprintf("%s", io.EOF), func(t *testing.T) {
-			var (
-				err error
-				cn  conn
-			)
-			func() {
-				defer cn.errRecover(&err)
-				panic(tt)
-			}()
+		t.Run(fmt.Sprintf("%s", tt), func(t *testing.T) {
+			var cn conn
+			err := cn.handleError(tt)
 			if err != driver.ErrBadConn {
 				t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
 			}
@@ -680,10 +674,8 @@ func TestCloseBadConn(t *testing.T) {
 		t.Fatal(err)
 	}
 	cn := conn{c: nc}
-	func() {
-		defer cn.errRecover(&err)
-		panic(io.EOF)
-	}()
+	cn.handleError(io.EOF)
+
 	// Verify we can write before closing.
 	if _, err := nc.Write(nil); err != nil {
 		t.Fatal(err)
@@ -1149,15 +1141,14 @@ func TestXactMultiStmt(t *testing.T) {
 
 func TestParseComplete(t *testing.T) {
 	tpc := func(commandTag string, command string, affectedRows int64, shouldFail bool) {
-		defer func() {
-			if p := recover(); p != nil {
-				if !shouldFail {
-					t.Error(p)
-				}
+		cn := new(conn)
+		res, c, err := cn.parseComplete(commandTag)
+		if err != nil {
+			if !shouldFail {
+				t.Fatal(err)
 			}
-		}()
-		cn := &conn{}
-		res, c := cn.parseComplete(commandTag)
+			return
+		}
 		if c != command {
 			t.Errorf("Expected %v, got %v", command, c)
 		}
