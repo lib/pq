@@ -98,11 +98,16 @@ func TestParseEnviron(t *testing.T) {
 			map[string]string{"connect_timeout": "30"}},
 	}
 
-	for i, tt := range tests {
-		results := parseEnviron(tt.in)
-		if !reflect.DeepEqual(tt.want, results) {
-			t.Errorf("%d: want: %#v Got: %#v", i, tt.want, results)
-		}
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			have, err := parseEnviron(tt.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(tt.want, have) {
+				t.Errorf("want: %#v; have: %#v", tt.want, have)
+			}
+		})
 	}
 }
 

@@ -62,7 +62,11 @@ func NewConnector(dsn string) (*Connector, error) {
 	// * Explicitly passed connection information
 	o["host"] = "localhost"
 	o["port"] = "5432"
-	for k, v := range parseEnviron(os.Environ()) {
+	env, err := parseEnviron(os.Environ())
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range env {
 		o[k] = v
 	}
 
@@ -297,36 +301,35 @@ func convertURL(url string) (string, error) {
 
 // parseEnviron tries to mimic some of libpq's environment handling
 //
-// To ease testing, it does not directly reference os.Environ, but is
-// designed to accept its output.
+// To ease testing, it does not directly reference os.Environ, but is designed
+// to accept its output.
 //
 // Environment-set connection information is intended to have a higher
-// precedence than a library default but lower than any explicitly
-// passed information (such as in the URL or connection string).
-func parseEnviron(env []string) (out map[string]string) {
-	out = make(map[string]string)
-
-	for _, v := range env {
-		parts := strings.SplitN(v, "=", 2)
-
-		accrue := func(keyname string) {
-			out[keyname] = parts[1]
-		}
-		unsupported := func() {
-			panic(fmt.Sprintf("setting %v not supported", parts[0]))
+// precedence than a library default but lower than any explicitly passed
+// information (such as in the URL or connection string).
+func parseEnviron(env []string) (map[string]string, error) {
+	out := make(map[string]string)
+	for _, e := range env {
+		k, v, ok := strings.Cut(e, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid environment: %q", e)
 		}
 
-		// The order of these is the same as is seen in the
-		// PostgreSQL 9.1 manual. Unsupported but well-defined
-		// keys cause a panic; these should be unset prior to
-		// execution. Options which pq expects to be set to a
-		// certain value are allowed, but must be set to that
-		// value if present (they can, of course, be absent).
-		switch parts[0] {
+		accrue := func(key string) { out[key] = v }
+
+		// Last updated for PostgreSQL 18
+		switch k {
+		case "PGHOSTADDR", "PGREQUIREAUTH", "PGCHANNELBINDING", "PGSERVICE", "PGSERVICEFILE", "PGREALM",
+			"PGSSLCERTMODE", "PGSSLCOMPRESSION", "PGREQUIRESSL", "PGSSLCRL", "PGREQUIREPEER",
+			"PGSYSCONFDIR", "PGLOCALEDIR", "PGSSLCRLDIR", "PGSSLMINPROTOCOLVERSION", "PGSSLMAXPROTOCOLVERSION",
+			"PGGSSENCMODE", "PGGSSDELEGATION", "PGTARGETSESSIONATTRS", "PGLOADBALANCEHOSTS", "PGMINPROTOCOLVERSION",
+			"PGMAXPROTOCOLVERSION":
+			return nil, fmt.Errorf("setting %q not supported", k)
+
 		case "PGHOST":
 			accrue("host")
-		case "PGHOSTADDR":
-			unsupported()
+		case "PGSSLNEGOTIATION":
+			accrue("sslnegotiation")
 		case "PGPORT":
 			accrue("port")
 		case "PGDATABASE":
@@ -337,8 +340,6 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("password")
 		case "PGPASSFILE":
 			accrue("passfile")
-		case "PGSERVICE", "PGSERVICEFILE", "PGREALM":
-			unsupported()
 		case "PGOPTIONS":
 			accrue("options")
 		case "PGAPPNAME":
@@ -353,18 +354,14 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("sslrootcert")
 		case "PGSSLSNI":
 			accrue("sslsni")
-		case "PGREQUIRESSL", "PGSSLCRL":
-			unsupported()
-		case "PGREQUIREPEER":
-			unsupported()
 		case "PGGSSLIB":
 			if newGss == nil {
-				unsupported()
+				return nil, fmt.Errorf("setting %q not supported", k)
 			}
 			accrue("gsslib")
 		case "PGKRBSRVNAME":
 			if newGss == nil {
-				unsupported()
+				return nil, fmt.Errorf("setting %q not supported", k)
 			}
 			accrue("krbsrvname")
 		case "PGCONNECT_TIMEOUT":
@@ -377,12 +374,9 @@ func parseEnviron(env []string) (out map[string]string) {
 			accrue("timezone")
 		case "PGGEQO":
 			accrue("geqo")
-		case "PGSYSCONFDIR", "PGLOCALEDIR":
-			unsupported()
 		}
 	}
-
-	return out
+	return out, nil
 }
 
 // isUTF8 returns whether name is a fuzzy variation of the string "UTF-8".
