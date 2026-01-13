@@ -552,7 +552,7 @@ func (cn *conn) simpleQuery(q string) (res *rows, err error) {
 			// Upon success, ensure res is always non-nil.
 			//
 			// See https://github.com/lib/pq/issues/1059
-			if err == nil && res == nil {
+			if res == nil && err == nil {
 				res = &rows{
 					done: true,
 				}
