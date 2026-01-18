@@ -17,6 +17,7 @@ import (
 
 	"github.com/lib/pq/internal/pgpass"
 	"github.com/lib/pq/internal/pqtest"
+	"github.com/lib/pq/internal/proto"
 )
 
 func TestReconnect(t *testing.T) {
@@ -901,6 +902,41 @@ func TestSimpleQuery(t *testing.T) {
 
 	if !r.Next() {
 		t.Fatal("expected row")
+	}
+}
+
+// Make sure SimpleQuery doesn't panic if there is no query response. See #1059
+// and #1173
+func TestSimpleQueryWithoutResponse(t *testing.T) {
+	t.Parallel()
+
+	f := pqtest.NewFake(t)
+	f.Accept(func(cn net.Conn) {
+		f.Startup(cn)
+
+		for {
+			code, _, ok := f.ReadMsg(cn)
+			if !ok {
+				return
+			}
+			switch code {
+			case proto.Query:
+				// Make sure we DON'T send this
+				//f.WriteMsg(cn, proto.EmptyQueryResponse)
+				f.WriteMsg(cn, proto.ReadyForQuery, 'I')
+			case proto.Terminate:
+				cn.Close()
+				return
+			}
+		}
+	})
+
+	db := pqtest.MustDB(t, f.DSN())
+	if err := db.Ping(); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Ping(); err != nil {
+		t.Fatal(err)
 	}
 }
 
