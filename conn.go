@@ -512,7 +512,7 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, resE
 	}
 }
 
-func (cn *conn) simpleQuery(q string) (res *rows, resErr error) {
+func (cn *conn) simpleQuery(q string) (*rows, error) {
 	if debugProto {
 		fmt.Fprintf(os.Stderr, "         START conn.simpleQuery\n")
 		defer fmt.Fprintf(os.Stderr, "         END conn.simpleQuery\n")
@@ -525,6 +525,10 @@ func (cn *conn) simpleQuery(q string) (res *rows, resErr error) {
 		return nil, cn.handleError(err, q)
 	}
 
+	var (
+		res    *rows
+		resErr error
+	)
 	for {
 		t, r, err := cn.recv1()
 		if err != nil {
@@ -533,9 +537,9 @@ func (cn *conn) simpleQuery(q string) (res *rows, resErr error) {
 		switch t {
 		case proto.CommandComplete, proto.EmptyQueryResponse:
 			// We allow queries which don't return any results through Query as
-			// well as Exec.  We still have to give database/sql a rows object
+			// well as Exec. We still have to give database/sql a rows object
 			// the user can close, though, to avoid connections from being
-			// leaked.  A "rows" with done=true works fine for that purpose.
+			// leaked. A "rows" with done=true works fine for that purpose.
 			if resErr != nil {
 				cn.err.set(driver.ErrBadConn)
 				return nil, fmt.Errorf("pq: unexpected message %q in simple query execution", t)
@@ -558,8 +562,10 @@ func (cn *conn) simpleQuery(q string) (res *rows, resErr error) {
 			res.done = true
 		case proto.ReadyForQuery:
 			cn.processReadyForQuery(r)
-			// done
-			return res, cn.handleError(resErr, q)
+			if err == nil && res == nil {
+				res = &rows{done: true}
+			}
+			return res, cn.handleError(resErr, q) // done
 		case proto.ErrorResponse:
 			res = nil
 			resErr = parseError(r, q)
@@ -568,13 +574,11 @@ func (cn *conn) simpleQuery(q string) (res *rows, resErr error) {
 				cn.err.set(driver.ErrBadConn)
 				return nil, fmt.Errorf("pq: unexpected DataRow in simple query execution")
 			}
-			// the query didn't fail; kick off to Next
-			return res, cn.saveMessage(t, r)
+			return res, cn.saveMessage(t, r) // The query didn't fail; kick off to Next
 		case proto.RowDescription:
 			// res might be non-nil here if we received a previous
-			// CommandComplete, but that's fine; just overwrite it
-			res = &rows{cn: cn}
-			res.rowsHeader = parsePortalRowDescribe(r)
+			// CommandComplete, but that's fine and just overwrite it.
+			res = &rows{cn: cn, rowsHeader: parsePortalRowDescribe(r)}
 
 			// To work around a bug in QueryRow in Go 1.2 and earlier, wait
 			// until the first DataRow has been received.
