@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"runtime"
 	"sync"
 	"testing"
@@ -527,8 +528,8 @@ func TestListenerClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = l.Close()
-	if err != errListenerClosed {
-		t.Fatalf("expected errListenerClosed; got %v", err)
+	if err != net.ErrClosed {
+		t.Fatalf("expected net.ErrClosed; got %v", err)
 	}
 }
 
@@ -547,8 +548,8 @@ func TestListenerPing(t *testing.T) {
 	}
 
 	err = l.Ping()
-	if err != errListenerClosed {
-		t.Fatalf("expected errListenerClosed; got %v", err)
+	if err != net.ErrClosed {
+		t.Fatalf("expected net.ErrClosed; got %v", err)
 	}
 }
 
