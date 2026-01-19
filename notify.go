@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -400,8 +401,6 @@ func (l *ListenerConn) Err() error {
 	return l.err
 }
 
-var errListenerClosed = errors.New("pq: Listener has been closed")
-
 // ErrChannelAlreadyOpen is returned from Listen when a channel is already
 // open.
 var ErrChannelAlreadyOpen = errors.New("pq: channel is already open")
@@ -540,7 +539,7 @@ func (l *Listener) Listen(channel string) error {
 	defer l.lock.Unlock()
 
 	if l.isClosed {
-		return errListenerClosed
+		return net.ErrClosed
 	}
 
 	// The server allows you to issue a LISTEN on a channel which is already
@@ -571,7 +570,7 @@ func (l *Listener) Listen(channel string) error {
 		l.reconnectCond.Wait()
 		// we let go of the mutex for a while
 		if l.isClosed {
-			return errListenerClosed
+			return net.ErrClosed
 		}
 	}
 
@@ -590,7 +589,7 @@ func (l *Listener) Unlisten(channel string) error {
 	defer l.lock.Unlock()
 
 	if l.isClosed {
-		return errListenerClosed
+		return net.ErrClosed
 	}
 
 	// Similarly to LISTEN, this is not an error in Postgres, but it seems
@@ -624,7 +623,7 @@ func (l *Listener) UnlistenAll() error {
 	defer l.lock.Unlock()
 
 	if l.isClosed {
-		return errListenerClosed
+		return net.ErrClosed
 	}
 
 	if l.cn != nil {
@@ -649,7 +648,7 @@ func (l *Listener) Ping() error {
 	defer l.lock.Unlock()
 
 	if l.isClosed {
-		return errListenerClosed
+		return net.ErrClosed
 	}
 	if l.cn == nil {
 		return errors.New("no connection")
@@ -737,7 +736,7 @@ func (l *Listener) connect() error {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	if l.isClosed {
-		return errListenerClosed
+		return net.ErrClosed
 	}
 
 	notificationChan := make(chan *Notification, 32)
@@ -767,7 +766,7 @@ func (l *Listener) Close() error {
 	defer l.lock.Unlock()
 
 	if l.isClosed {
-		return errListenerClosed
+		return net.ErrClosed
 	}
 
 	if l.cn != nil {
