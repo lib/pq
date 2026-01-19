@@ -114,7 +114,7 @@ func (st *stmt) exec(v []driver.NamedValue) error {
 			if x.Value == nil {
 				w.int32(-1)
 			} else {
-				b, err := encode(&cn.parameterStatus, x.Value, st.paramTyps[i])
+				b, err := encode(x.Value, st.paramTyps[i])
 				if err != nil {
 					return err
 				}

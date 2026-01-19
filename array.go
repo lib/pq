@@ -773,7 +773,7 @@ func appendArrayQuotedBytes(b, v []byte) []byte {
 }
 
 func appendValue(b []byte, v driver.Value) ([]byte, error) {
-	enc, err := encode(nil, v, 0)
+	enc, err := encode(v, 0)
 	if err != nil {
 		return nil, err
 	}

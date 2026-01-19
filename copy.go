@@ -283,7 +283,7 @@ func (ci *copyin) Exec(v []driver.Value) (driver.Result, error) {
 		err       error
 	)
 	for i, value := range v {
-		ci.buffer, err = appendEncodedText(&ci.cn.parameterStatus, ci.buffer, value)
+		ci.buffer, err = appendEncodedText(ci.buffer, value)
 		if err != nil {
 			return nil, ci.cn.handleError(err)
 		}
