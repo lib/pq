@@ -96,12 +96,12 @@ func (g *GSS) GetInitTokenFromSpn(spn string) ([]byte, error) {
 
 	st, err := s.InitSecContext()
 	if err != nil {
-		return nil, fmt.Errorf("kerberos error (InitSecContext): %s", err.Error())
+		return nil, fmt.Errorf("kerberos error (InitSecContext): %w", err)
 	}
 
 	b, err := st.Marshal()
 	if err != nil {
-		return nil, fmt.Errorf("kerberos error (Marshaling token): %s", err.Error())
+		return nil, fmt.Errorf("kerberos error (Marshaling token): %w", err)
 	}
 
 	return b, nil
@@ -112,7 +112,7 @@ func (g *GSS) Continue(inToken []byte) (done bool, outToken []byte, err error) {
 	t := &spnego.SPNEGOToken{}
 	err = t.Unmarshal(inToken)
 	if err != nil {
-		return true, nil, fmt.Errorf("kerberos error (Unmarshaling token): %s", err.Error())
+		return true, nil, fmt.Errorf("kerberos error (Unmarshaling token): %w", err)
 	}
 
 	state := t.NegTokenResp.State()

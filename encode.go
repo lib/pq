@@ -575,7 +575,7 @@ func parseBytea(s []byte) (result []byte, err error) {
 				}
 				r, err := strconv.ParseUint(string(s[1:4]), 8, 8)
 				if err != nil {
-					return nil, fmt.Errorf("could not parse bytea value: %s", err.Error())
+					return nil, fmt.Errorf("could not parse bytea value: %w", err)
 				}
 				result = append(result, byte(r))
 				s = s[4:]

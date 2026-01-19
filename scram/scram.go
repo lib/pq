@@ -130,7 +130,7 @@ func (c *Client) step1(in []byte) error {
 		const nonceLen = 16
 		buf := make([]byte, nonceLen+b64.EncodedLen(nonceLen))
 		if _, err := rand.Read(buf[:nonceLen]); err != nil {
-			return fmt.Errorf("cannot read random SCRAM-SHA-256 nonce from operating system: %v", err)
+			return fmt.Errorf("cannot read random SCRAM-SHA-256 nonce from operating system: %w", err)
 		}
 		c.clientNonce = buf[nonceLen:]
 		b64.Encode(c.clientNonce, buf[:nonceLen])

@@ -177,7 +177,7 @@ func (a *ByteaArray) scanBytes(src []byte) error {
 		for i, v := range elems {
 			b[i], err = parseBytea(v)
 			if err != nil {
-				return fmt.Errorf("could not parse bytea array index %d: %s", i, err.Error())
+				return fmt.Errorf("could not parse bytea array index %d: %w", i, err)
 			}
 		}
 		*a = b
@@ -247,8 +247,9 @@ func (a *Float64Array) scanBytes(src []byte) error {
 	} else {
 		b := make(Float64Array, len(elems))
 		for i, v := range elems {
-			if b[i], err = strconv.ParseFloat(string(v), 64); err != nil {
-				return fmt.Errorf("pq: parsing array element index %d: %v", i, err)
+			b[i], err = strconv.ParseFloat(string(v), 64)
+			if err != nil {
+				return fmt.Errorf("pq: parsing array element index %d: %w", i, err)
 			}
 		}
 		*a = b
@@ -309,9 +310,9 @@ func (a *Float32Array) scanBytes(src []byte) error {
 	} else {
 		b := make(Float32Array, len(elems))
 		for i, v := range elems {
-			var x float64
-			if x, err = strconv.ParseFloat(string(v), 32); err != nil {
-				return fmt.Errorf("pq: parsing array element index %d: %v", i, err)
+			x, err := strconv.ParseFloat(string(v), 32)
+			if err != nil {
+				return fmt.Errorf("pq: parsing array element index %d: %w", i, err)
 			}
 			b[i] = float32(x)
 		}
@@ -450,8 +451,9 @@ func (a GenericArray) scanBytes(src []byte, dv reflect.Value) error {
 
 	values := reflect.MakeSlice(reflect.SliceOf(dtype), len(elems), len(elems))
 	for i, e := range elems {
-		if err := assign(e, values.Index(i)); err != nil {
-			return fmt.Errorf("pq: parsing array element index %d: %v", i, err)
+		err := assign(e, values.Index(i))
+		if err != nil {
+			return fmt.Errorf("pq: parsing array element index %d: %w", i, err)
 		}
 	}
 
@@ -527,8 +529,9 @@ func (a *Int64Array) scanBytes(src []byte) error {
 	} else {
 		b := make(Int64Array, len(elems))
 		for i, v := range elems {
-			if b[i], err = strconv.ParseInt(string(v), 10, 64); err != nil {
-				return fmt.Errorf("pq: parsing array element index %d: %v", i, err)
+			b[i], err = strconv.ParseInt(string(v), 10, 64)
+			if err != nil {
+				return fmt.Errorf("pq: parsing array element index %d: %w", i, err)
 			}
 		}
 		*a = b
@@ -590,7 +593,7 @@ func (a *Int32Array) scanBytes(src []byte) error {
 		for i, v := range elems {
 			x, err := strconv.ParseInt(string(v), 10, 32)
 			if err != nil {
-				return fmt.Errorf("pq: parsing array element index %d: %v", i, err)
+				return fmt.Errorf("pq: parsing array element index %d: %w", i, err)
 			}
 			b[i] = int32(x)
 		}
