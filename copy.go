@@ -21,38 +21,41 @@ var (
 	errCopyInProgress             = errors.New("pq: COPY in progress")
 )
 
-// CopyIn creates a COPY FROM statement which can be prepared with
-// Tx.Prepare().  The target table should be visible in search_path.
+// CopyIn creates a COPY FROM statement which can be prepared with Tx.Prepare().
+// The target table should be visible in search_path.
+//
+// It copies all columns if the list of columns is empty.
 func CopyIn(table string, columns ...string) string {
-	buffer := bytes.NewBufferString("COPY ")
-	BufferQuoteIdentifier(table, buffer)
-	buffer.WriteString(" (")
-	makeStmt(buffer, columns...)
-	return buffer.String()
-}
-
-// MakeStmt makes the stmt string for CopyIn and CopyInSchema.
-func makeStmt(buffer *bytes.Buffer, columns ...string) {
-	//s := bytes.NewBufferString()
-	for i, col := range columns {
-		if i != 0 {
-			buffer.WriteString(", ")
-		}
-		BufferQuoteIdentifier(col, buffer)
-	}
-	buffer.WriteString(") FROM STDIN")
+	b := bytes.NewBufferString("COPY ")
+	BufferQuoteIdentifier(table, b)
+	makeStmt(b, columns...)
+	return b.String()
 }
 
 // CopyInSchema creates a COPY FROM statement which can be prepared with
 // Tx.Prepare().
 func CopyInSchema(schema, table string, columns ...string) string {
-	buffer := bytes.NewBufferString("COPY ")
-	BufferQuoteIdentifier(schema, buffer)
-	buffer.WriteRune('.')
-	BufferQuoteIdentifier(table, buffer)
-	buffer.WriteString(" (")
-	makeStmt(buffer, columns...)
-	return buffer.String()
+	b := bytes.NewBufferString("COPY ")
+	BufferQuoteIdentifier(schema, b)
+	b.WriteRune('.')
+	BufferQuoteIdentifier(table, b)
+	makeStmt(b, columns...)
+	return b.String()
+}
+
+func makeStmt(b *bytes.Buffer, columns ...string) {
+	if len(columns) == 0 {
+		b.WriteString(" FROM STDIN")
+		return
+	}
+	b.WriteString(" (")
+	for i, col := range columns {
+		if i != 0 {
+			b.WriteString(", ")
+		}
+		BufferQuoteIdentifier(col, b)
+	}
+	b.WriteString(") FROM STDIN")
 }
 
 type copyin struct {

@@ -14,99 +14,115 @@ import (
 )
 
 func TestCopyInStmt(t *testing.T) {
-	stmt := CopyIn("table name")
-	if stmt != `COPY "table name" () FROM STDIN` {
-		t.Fatal(stmt)
+	tests := []struct {
+		inTable string
+		inCols  []string
+		want    string
+	}{
+		{`table name`, nil, `COPY "table name" FROM STDIN`},
+		{"table name", []string{"column 1", "column 2"}, `COPY "table name" ("column 1", "column 2") FROM STDIN`},
+		{`table " name """`, []string{`co"lumn""`}, `COPY "table "" name """"""" ("co""lumn""""") FROM STDIN`},
 	}
 
-	stmt = CopyIn("table name", "column 1", "column 2")
-	if stmt != `COPY "table name" ("column 1", "column 2") FROM STDIN` {
-		t.Fatal(stmt)
-	}
-
-	stmt = CopyIn(`table " name """`, `co"lumn""`)
-	if stmt != `COPY "table "" name """"""" ("co""lumn""""") FROM STDIN` {
-		t.Fatal(stmt)
+	for _, tt := range tests {
+		tt := tt
+		t.Run("", func(t *testing.T) {
+			t.Parallel()
+			have := CopyIn(tt.inTable, tt.inCols...)
+			if have != tt.want {
+				t.Fatalf("\nhave: %q\nwant: %q", have, tt.want)
+			}
+		})
 	}
 }
 
 func TestCopyInSchemaStmt(t *testing.T) {
-	stmt := CopyInSchema("schema name", "table name")
-	if stmt != `COPY "schema name"."table name" () FROM STDIN` {
-		t.Fatal(stmt)
+	tests := []struct {
+		inSchema string
+		inTable  string
+		inCols   []string
+		want     string
+	}{
+		{"schema name", "table name", nil,
+			`COPY "schema name"."table name" FROM STDIN`},
+
+		{"schema name", "table name", []string{"column 1", "column 2"},
+			`COPY "schema name"."table name" ("column 1", "column 2") FROM STDIN`},
+
+		{`schema " name """`, `table " name """`, []string{`co"lumn""`},
+			`COPY "schema "" name """""""."table "" name """"""" ("co""lumn""""") FROM STDIN`},
 	}
 
-	stmt = CopyInSchema("schema name", "table name", "column 1", "column 2")
-	if stmt != `COPY "schema name"."table name" ("column 1", "column 2") FROM STDIN` {
-		t.Fatal(stmt)
-	}
-
-	stmt = CopyInSchema(`schema " name """`, `table " name """`, `co"lumn""`)
-	if stmt != `COPY "schema "" name """"""".`+
-		`"table "" name """"""" ("co""lumn""""") FROM STDIN` {
-		t.Fatal(stmt)
+	for _, tt := range tests {
+		tt := tt
+		t.Run("", func(t *testing.T) {
+			t.Parallel()
+			have := CopyInSchema(tt.inSchema, tt.inTable, tt.inCols...)
+			if have != tt.want {
+				t.Fatalf("\nhave: %q\nwant: %q", have, tt.want)
+			}
+		})
 	}
 }
 
 func TestCopyInMultipleValues(t *testing.T) {
-	db := pqtest.MustDB(t)
-
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer txn.Rollback()
-
-	_, err = txn.Exec("CREATE TEMP TABLE temp (a int, b varchar)")
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		cols []string
+	}{
+		{[]string{"a", "b"}},
+		{nil},
 	}
 
-	stmt, err := txn.Prepare(CopyIn("temp", "a", "b"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run("", func(t *testing.T) {
+			t.Parallel()
+			db := pqtest.MustDB(t)
 
-	longString := strings.Repeat("#", 500)
+			tx := pqtest.Begin(t, db)
+			defer tx.Rollback()
 
-	for i := 0; i < 500; i++ {
-		_, err = stmt.Exec(int64(i), longString)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
+			pqtest.Exec(t, tx, `create temp table tbl (a int, b varchar)`)
+			stmt := pqtest.Prepare(t, tx, CopyIn("tbl", tt.cols...))
 
-	result, err := stmt.Exec()
-	if err != nil {
-		t.Fatal(err)
-	}
+			str := strings.Repeat("#", 500)
+			for i := 0; i < 500; i++ {
+				_, err := stmt.Exec(int64(i), str)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		t.Fatal(err)
-	}
+			r, err := stmt.Exec()
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows, err := r.RowsAffected()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rows != 500 {
+				t.Fatalf("expected 500 rows affected, not %d", rows)
+			}
 
-	if rowsAffected != 500 {
-		t.Fatalf("expected 500 rows affected, not %d", rowsAffected)
-	}
+			if err := stmt.Close(); err != nil {
+				t.Fatal(err)
+			}
 
-	err = stmt.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var num int
-	err = txn.QueryRow("SELECT COUNT(*) FROM temp").Scan(&num)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if num != 500 {
-		t.Fatalf("expected 500 items, not %d", num)
+			var num int
+			err = tx.QueryRow("select count(*) from tbl").Scan(&num)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if num != 500 {
+				t.Fatalf("expected 500 items, not %d", num)
+			}
+		})
 	}
 }
 
 func TestCopyInRaiseStmtTrigger(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 
 	txn, err := db.Begin()
@@ -176,6 +192,7 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 }
 
 func TestCopyInTypes(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 
 	txn, err := db.Begin()
@@ -234,6 +251,7 @@ func TestCopyInTypes(t *testing.T) {
 }
 
 func TestCopyInWrongType(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 
 	txn, err := db.Begin()
@@ -268,6 +286,7 @@ func TestCopyInWrongType(t *testing.T) {
 }
 
 func TestCopyOutsideOfTxnError(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 
 	_, err := db.Prepare(CopyIn("temp", "num"))
@@ -280,6 +299,7 @@ func TestCopyOutsideOfTxnError(t *testing.T) {
 }
 
 func TestCopyInBinaryError(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 
 	txn, err := db.Begin()
@@ -304,6 +324,7 @@ func TestCopyInBinaryError(t *testing.T) {
 }
 
 func TestCopyFromError(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 
 	txn, err := db.Begin()
@@ -328,6 +349,7 @@ func TestCopyFromError(t *testing.T) {
 }
 
 func TestCopySyntaxError(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 
 	txn, err := db.Begin()
@@ -352,6 +374,7 @@ func TestCopySyntaxError(t *testing.T) {
 
 // Tests for connection errors in copyin.resploop()
 func TestCopyRespLoopConnectionError(t *testing.T) {
+	t.Parallel()
 	db := pqtest.MustDB(t)
 
 	txn, err := db.Begin()
