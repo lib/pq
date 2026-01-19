@@ -95,6 +95,18 @@ func Begin(t testing.TB, db *sql.DB) *sql.Tx {
 	return tx
 }
 
+// Prepare a new statement, calling t.Fatal() if this fails.
+func Prepare(t testing.TB, db interface {
+	Prepare(string) (*sql.Stmt, error)
+}, q string) *sql.Stmt {
+	t.Helper()
+	stmt, err := db.Prepare(q)
+	if err != nil {
+		t.Fatalf("pqtest.Prepare: %s", err)
+	}
+	return stmt
+}
+
 // Exec calls db.Exec(), calling t.Fatal if this fails.
 func Exec(t testing.TB, db interface {
 	Exec(string, ...any) (sql.Result, error)

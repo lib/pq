@@ -68,6 +68,9 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 - Handle ErrorResponse in readReadyForQuery and return proper error ([#1136]).
 
+- CopyIn() and CopyInSchema() now work if the list of columns is empty, in which
+  case it will copy all columns ([#1239]).
+
 - Treat nil []byte in query parameters as nil/NULL rather than `""` ([#838]).
 
 [`sslnegotiation`]: https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNECT-SSLNEGOTIATION
@@ -96,6 +99,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 [#1228]: https://github.com/lib/pq/pull/1228
 [#1234]: https://github.com/lib/pq/pull/1234
 [#1238]: https://github.com/lib/pq/pull/1238
+[#1239]: https://github.com/lib/pq/pull/1239
 
 
 v1.10.9 (2023-04-26)
