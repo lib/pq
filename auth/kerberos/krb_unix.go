@@ -66,7 +66,9 @@ func (g *GSS) init() error {
 		return err
 	}
 
-	cl.Login()
+	if err := cl.Login(); err != nil {
+		return err
+	}
 
 	g.cli = cl
 
@@ -96,17 +98,17 @@ func (g *GSS) GetInitTokenFromSpn(spn string) ([]byte, error) {
 
 	// Force TGS exchange to acquire service ticket
 	if err := s.AcquireCred(); err != nil {
-		return nil, fmt.Errorf("kerberos error (AcquireCred): %s", err.Error())
+		return nil, fmt.Errorf("kerberos error (AcquireCred): %v", err)
 	}
 
 	st, err := s.InitSecContext()
 	if err != nil {
-		return nil, fmt.Errorf("kerberos error (InitSecContext): %s", err.Error())
+		return nil, fmt.Errorf("kerberos error (InitSecContext): %v", err)
 	}
 
 	b, err := st.Marshal()
 	if err != nil {
-		return nil, fmt.Errorf("kerberos error (Marshaling token): %s", err.Error())
+		return nil, fmt.Errorf("kerberos error (Marshaling token): %v", err)
 	}
 
 	return b, nil
@@ -117,7 +119,7 @@ func (g *GSS) Continue(inToken []byte) (done bool, outToken []byte, err error) {
 	t := &spnego.SPNEGOToken{}
 	err = t.Unmarshal(inToken)
 	if err != nil {
-		return true, nil, fmt.Errorf("kerberos error (Unmarshaling token): %s", err.Error())
+		return true, nil, fmt.Errorf("kerberos error (Unmarshaling token): %v", err)
 	}
 
 	state := t.NegTokenResp.State()
