@@ -12,7 +12,7 @@ import (
 )
 
 func ExampleNewConnector() {
-	c, err := pq.NewConnector("postgres://")
+	c, err := pq.NewConnector("host=postgres dbname=pqgo")
 	if err != nil {
 		log.Fatalf("could not create connector: %v", err)
 	}
@@ -29,9 +29,36 @@ func ExampleNewConnector() {
 	// Output:
 }
 
+func ExampleNewConfig() {
+	cfg, err := pq.NewConfig("host=postgres dbname=pqgo")
+	if err != nil {
+		log.Fatal(err)
+	}
+	if cfg.Host == "localhost" {
+		cfg.Host = "127.0.0.1"
+	}
+
+	c, err := pq.NewConnectorConfig(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	db := sql.OpenDB(c)
+	defer db.Close()
+
+	// Use the DB
+	tx, err := db.Begin()
+	if err != nil {
+		log.Fatalf("could not start transaction: %v", err)
+	}
+	tx.Rollback()
+	// Output:
+}
+
 func ExampleConnectorWithNoticeHandler() {
 	// Base connector to wrap
-	base, err := pq.NewConnector("postgres://")
+	dsn := ""
+	base, err := pq.NewConnector(dsn)
 	if err != nil {
 		log.Fatal(err)
 	}

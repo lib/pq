@@ -41,12 +41,19 @@ func RegisterTLSConfig(key string, config *tls.Config) error {
 	return nil
 }
 
+func hasTLSConfig(key string) bool {
+	tlsConfsMu.RLock()
+	defer tlsConfsMu.RUnlock()
+	_, ok := tlsConfs[key]
+	return ok
+}
+
 func getTLSConfigClone(key string) *tls.Config {
 	tlsConfsMu.RLock()
+	defer tlsConfsMu.RUnlock()
 	if v, ok := tlsConfs[key]; ok {
 		return v.Clone()
 	}
-	tlsConfsMu.RUnlock()
 	return nil
 }
 
@@ -101,9 +108,7 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 	}
 
 	// Set Server Name Indication (SNI), if enabled by connection parameters.
-	// By default SNI is on, any value which is not starting with "1" disables
-	// SNI -- that is the same check vanilla libpq uses.
-	if sslsni := o["sslsni"]; sslsni == "" || strings.HasPrefix(sslsni, "1") {
+	if o["sslsni"] == "yes" {
 		// RFC 6066 asks to not set SNI if the host is a literal IP address (IPv4
 		// or IPv6). This check is coded already crypto.tls.hostnameInSNI, so
 		// just always set ServerName here and let crypto/tls do the filtering.
@@ -152,8 +157,7 @@ func ssl(o values) (func(net.Conn) (net.Conn, error), error) {
 // in the user's home directory. The configured files must exist and have
 // the correct permissions.
 func sslClientCertificates(tlsConf *tls.Config, o values) error {
-	sslinline := o["sslinline"]
-	if sslinline == "true" {
+	if o["sslinline"] == "yes" {
 		cert, err := tls.X509KeyPair([]byte(o["sslcert"]), []byte(o["sslkey"]))
 		if err != nil {
 			return err
@@ -225,10 +229,8 @@ func sslCertificateAuthority(tlsConf *tls.Config, o values) error {
 	if sslrootcert := o["sslrootcert"]; len(sslrootcert) > 0 {
 		tlsConf.RootCAs = x509.NewCertPool()
 
-		sslinline := o["sslinline"]
-
 		var cert []byte
-		if sslinline == "true" {
+		if o["sslinline"] == "yes" {
 			cert = []byte(sslrootcert)
 		} else {
 			var err error

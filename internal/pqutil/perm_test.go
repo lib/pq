@@ -11,14 +11,14 @@ import (
 	"github.com/lib/pq/internal/pqtest"
 )
 
-type stat_t_wrapper struct{ stat syscall.Stat_t }
+type statWrapper struct{ stat syscall.Stat_t }
 
-func (stat_t *stat_t_wrapper) Name() string       { return "pem.key" }
-func (stat_t *stat_t_wrapper) Size() int64        { return int64(100) }
-func (stat_t *stat_t_wrapper) Mode() os.FileMode  { return os.FileMode(stat_t.stat.Mode) }
-func (stat_t *stat_t_wrapper) ModTime() time.Time { return time.Now() }
-func (stat_t *stat_t_wrapper) IsDir() bool        { return true }
-func (stat_t *stat_t_wrapper) Sys() any           { return &stat_t.stat }
+func (stat_t *statWrapper) Name() string       { return "pem.key" }
+func (stat_t *statWrapper) Size() int64        { return int64(100) }
+func (stat_t *statWrapper) Mode() os.FileMode  { return os.FileMode(stat_t.stat.Mode) }
+func (stat_t *statWrapper) ModTime() time.Time { return time.Now() }
+func (stat_t *statWrapper) IsDir() bool        { return true }
+func (stat_t *statWrapper) Sys() any           { return &stat_t.stat }
 
 func TestSSLKeyPermissions(t *testing.T) {
 	currentUID := uint32(os.Getuid())
@@ -36,7 +36,7 @@ func TestSSLKeyPermissions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
-			have := checkPermissions(&stat_t_wrapper{stat: tt.stat})
+			have := checkPermissions(&statWrapper{stat: tt.stat})
 			if !pqtest.ErrorContains(have, tt.wantErr) {
 				t.Errorf("\nhave: %s\nwant: %s", have, tt.wantErr)
 			}

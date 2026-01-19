@@ -3,89 +3,252 @@ package pq
 import (
 	"context"
 	"database/sql/driver"
-	"errors"
 	"fmt"
 	"net"
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/lib/pq/internal/pqutil"
 )
 
+type (
+	// SSLMode is a sslmode setting.
+	SSLMode string
+
+	// SSLNegotiation is a sslnegotiation setting.
+	SSLNegotiation string
+)
+
+// Values for [SSLMode] that pq supports.
+const (
+	// disable: No SSL
+	SSLModeDisable = SSLMode("disable")
+
+	// require: require SSL, but skip verification.
+	SSLModeRequire = SSLMode("require")
+
+	// verify-ca: require SSL and verify that the certificate was signed by a
+	// trusted CA.
+	SSLModeVerifyCA = SSLMode("verify-ca")
+
+	// verify-full: require SSK and verify that the certificate was signed by a
+	// trusted CA and the server host name matches the one in the certificate.
+	SSLModeVerifyFull = SSLMode("verify-full")
+)
+
+var sslModes = []SSLMode{SSLModeDisable, SSLModeRequire, SSLModeVerifyFull, SSLModeVerifyCA}
+
+// Values for [SSLNegotiation] that pq supports.
+const (
+	// Negotiate whether SSL should be used. This is the default.
+	SSLNegotiationPostgres = SSLNegotiation("postgres")
+
+	// Always use SSL, don't try to negotiate.
+	SSLNegotiationDirect = SSLNegotiation("direct")
+)
+
+var sslNegotiations = []SSLNegotiation{SSLNegotiationPostgres, SSLNegotiationDirect}
+
 // Connector represents a fixed configuration for the pq driver with a given
-// name. Connector satisfies the database/sql/driver Connector interface and
-// can be used to create any number of DB Conn's via the database/sql OpenDB
-// function.
-//
-// See https://golang.org/pkg/database/sql/driver/#Connector.
-// See https://golang.org/pkg/database/sql/#OpenDB.
+// dsn. Connector satisfies the [database/sql/driver.Connector] interface and
+// can be used to create any number of DB Conn's via [sql.OpenDB].
 type Connector struct {
 	opts   values
 	dialer Dialer
 }
 
-// Connect returns a connection to the database using the fixed configuration
-// of this Connector. Context is not used.
-func (c *Connector) Connect(ctx context.Context) (driver.Conn, error) {
-	return c.open(ctx)
-}
-
-// Dialer allows change the dialer used to open connections.
-func (c *Connector) Dialer(dialer Dialer) {
-	c.dialer = dialer
-}
-
-// Driver returns the underlying driver of this Connector.
-func (c *Connector) Driver() driver.Driver {
-	return &Driver{}
-}
-
 // NewConnector returns a connector for the pq driver in a fixed configuration
 // with the given dsn. The returned connector can be used to create any number
 // of equivalent Conn's. The returned connector is intended to be used with
-// database/sql.OpenDB.
-//
-// See https://golang.org/pkg/database/sql/driver/#Connector.
-// See https://golang.org/pkg/database/sql/#OpenDB.
+// [sql.OpenDB].
 func NewConnector(dsn string) (*Connector, error) {
-	var err error
-	o := make(values)
-
-	// A number of defaults are applied here, in this order:
-	//
-	// * Very low precedence defaults applied in every situation
-	// * Environment variables
-	// * Explicitly passed connection information
-	o["host"] = "localhost"
-	o["port"] = "5432"
-	env, err := parseEnviron(os.Environ())
+	cfg, err := NewConfig(dsn)
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range env {
-		o[k] = v
-	}
+	return NewConnectorConfig(cfg)
+}
 
-	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
-		dsn, err = ParseURL(dsn)
-		if err != nil {
-			return nil, err
-		}
-	}
+// NewConnectorConfig returns a connector for the pq driver in a fixed
+// configuration with the given [Config]. The returned connector can be used to
+// create any number of equivalent Conn's. The returned connector is intended to
+// be used with [sql.OpenDB].
+func NewConnectorConfig(cfg Config) (*Connector, error) {
+	return &Connector{opts: cfg.tomap(), dialer: defaultDialer{}}, nil
+}
 
-	if err := parseOpts(dsn, o); err != nil {
-		return nil, err
+// Connect returns a connection to the database using the fixed configuration of
+// this Connector. Context is not used.
+func (c *Connector) Connect(ctx context.Context) (driver.Conn, error) { return c.open(ctx) }
+
+// Dialer allows change the dialer used to open connections.
+func (c *Connector) Dialer(dialer Dialer) { c.dialer = dialer }
+
+// Driver returns the underlying driver of this Connector.
+func (c *Connector) Driver() driver.Driver { return &Driver{} }
+
+// Config holds options pq supports when connecting to PostgreSQL.
+//
+// The postgres struct tag is used for the value from the DSN (e.g.
+// "dbname=abc"), and the env struct tag is used for the environment variable
+// (e.g. "PGDATABASE=abc")
+type Config struct {
+	// The host to connect to. Absolute paths and values that start with @ are
+	// for unix domain sockets. Defaults to localhost.
+	Host string `postgres:"host" env:"PGHOST"`
+
+	// The port to connect to. Defaults to 5432.
+	Port uint16 `postgres:"port" env:"PGPORT"`
+
+	// The name of the database to connect to.
+	Database string `postgres:"dbname" env:"PGDATABASE"`
+
+	// The user to sign in as. Defaults to the current user.
+	User string `postgres:"user" env:"PGUSER"`
+
+	// The user's password.
+	Password string `postgres:"password" env:"PGPASSWORD"`
+
+	// Path to [pgpass] file to store passwords; overrides Password.
+	//
+	// [pgpass]: http://www.postgresql.org/docs/current/static/libpq-pgpass.html
+	Passfile string `postgres:"passfile" env:"PGPASSFILE"`
+
+	// Commandline options to send to the server at connection start.
+	Options string `postgres:"options" env:"PGOPTIONS"`
+
+	// Application name, displayed in pg_stat_activity and log entries.
+	ApplicationName string `postgres:"application_name" env:"PGAPPNAME"`
+
+	// Used if application_name is not given. Specifying a fallback name is
+	// useful in generic utility programs that wish to set a default application
+	// name but allow it to be overridden by the user.
+	FallbackApplicationName string `postgres:"fallback_application_name" env:"-"`
+
+	// Whether to use SSL. Defaults to "require" (different from libpq's default
+	// of "prefer").
+	//
+	// [RegisterTLSConfig] can be used to registers a custom [tls.Config], which
+	// can be used by setting sslmode=pqgo-«key» in the connection string.
+	SSLMode SSLMode `postgres:"sslmode" env:"PGSSLMODE"`
+
+	// When set to "direct" it will use SSL without negotiation (PostgreSQL ≥17 only).
+	SSLNegotiation SSLNegotiation `postgres:"sslnegotiation" env:"PGSSLNEGOTIATION"`
+
+	// Cert file location. The file must contain PEM encoded data.
+	SSLCert string `postgres:"sslcert" env:"PGSSLCERT"`
+
+	// Key file location. The file must contain PEM encoded data.
+	SSLKey string `postgres:"sslkey" env:"PGSSLKEY"`
+
+	// The location of the root certificate file. The file must contain PEM encoded data.
+	SSLRootCert string `postgres:"sslrootcert" env:"PGSSLROOTCERT"`
+
+	// By default SNI is on, any value which is not starting with "1" disables
+	// SNI.
+	SSLSNI bool `postgres:"sslsni" env:"PGSSLSNI"`
+
+	// Interpert sslcert and sslkey as PEM encoded data, rather than a path to a
+	// PEM file. This is a pq extension, not supported in libpq.
+	SSLInline bool `postgres:"sslinline" env:"-"`
+
+	// GSS (Kerberos) service name when constructing the SPN (default is
+	// postgres). This will be combined with the host to form the full SPN:
+	// krbsrvname/host.
+	KrbSrvname string `postgres:"krbsrvname" env:"PGKRBSRVNAME"`
+
+	// GSS (Kerberos) SPN. This takes priority over krbsrvname if present. This
+	// is a pq extension, not supported in libpq.
+	KrbSpn string `postgres:"krbspn" env:"-"`
+
+	// Maximum time to wait while connecting, in seconds. Zero, negative, or not
+	// specified means wait indefinitely
+	ConnectTimeout time.Duration `postgres:"connect_timeout" env:"PGCONNECT_TIMEOUT"`
+
+	// Whether to always send []byte parameters over as binary. Enables single
+	// round-trip mode for non-prepared Query calls. This is a pq extension, not
+	// supported in libpq.
+	BinaryParameters bool `postgres:"binary_parameters" env:"-"`
+
+	// This connection should never use the binary format when receiving query
+	// results from prepared statements. Only provided for debugging. This is a
+	// pq extension, not supported in libpq.
+	DisablePreparedBinaryResult bool `postgres:"disable_prepared_binary_result" env:"-"`
+
+	// Client encoding; pq only supports UTF8 and this must be blank or "UTF8".
+	ClientEncoding string `postgres:"client_encoding" env:"PGCLIENTENCODING"`
+
+	// Date/time representation to use; pq only supports "ISO, MDY" and this
+	// must be blank or "ISO, MDY".
+	Datestyle string `postgres:"datestyle" env:"PGDATESTYLE"`
+
+	// Default time zone.
+	TZ string `postgres:"tz" env:"PGTZ"`
+
+	// Default mode for the genetic query optimizer.
+	Geqo string `postgres:"geqo" env:"PGGEQO"`
+
+	// Runtime parameters: any unrecognized parameter in the DSN will be added
+	// to this and sent to PostgreSQL during startup.
+	Runtime map[string]string `postgres:"-" env:"-"`
+
+	// Record which parameters were given, so we can distinguish between an
+	// empty string "not given at all".
+	//
+	// The alternative is to use pointers or sql.Null[..], but that's more
+	// awkward to use.
+	set []string `env:"set"`
+}
+
+// NewConfig creates a new [Config] from the current environment and given DSN.
+//
+// A subset of the connection parameters supported by PostgreSQL are supported
+// by pq; see the [Config] struct fields for supported parameters. pq also lets
+// you specify any [run-time parameter] (such as search_path or work_mem)
+// directly in the connection string. This is different from libpq, which does
+// not allow run-time parameters in the connection string, instead requiring you
+// to supply them in the options parameter.
+//
+// pq supports both key=value type connection strings and postgres:// URL style
+// connection strings. For key=value strings, use single quotes for values that
+// contain whitespace or empty values. A backslash will escape the next
+// character:
+//
+//	"user=pqgo password='with spaces'"
+//	"user=''"
+//	"user=space\ man password='it\'s valid'"
+//
+// Most [PostgreSQL environment variables] are supported by pq. Environment
+// variables have a lower precedence than explicitly provided connection
+// parameters. pq will return an error if environment variables it does not
+// support are set. Environment variables have a lower precedence than
+// explicitly provided connection parameters.
+//
+// [run-time parameter]: http://www.postgresql.org/docs/current/static/runtime-config.html
+// [PostgreSQL environment variables]: http://www.postgresql.org/docs/current/static/libpq-envars.html
+func NewConfig(dsn string) (Config, error) {
+	return newConfig(dsn, os.Environ())
+}
+
+func newConfig(dsn string, env []string) (Config, error) {
+	cfg := Config{Host: "localhost", Port: 5432, SSLSNI: true}
+	if err := cfg.fromEnv(env); err != nil {
+		return Config{}, err
+	}
+	if err := cfg.fromDSN(dsn); err != nil {
+		return Config{}, err
 	}
 
 	// Use the "fallback" application name if necessary
-	if fallback, ok := o["fallback_application_name"]; ok {
-		if _, ok := o["application_name"]; !ok {
-			o["application_name"] = fallback
-		}
+	if cfg.isset("fallback_application_name") && !cfg.isset("application_name") {
+		cfg.ApplicationName = cfg.FallbackApplicationName
 	}
 
 	// We can't work with any client_encoding other than UTF-8 currently.
@@ -95,90 +258,98 @@ func NewConnector(dsn string) (*Connector, error) {
 	// parsing its value is not worth it.  Instead, we always explicitly send
 	// client_encoding as a separate run-time parameter, which should override
 	// anything set in options.
-	if enc, ok := o["client_encoding"]; ok && !isUTF8(enc) {
-		return nil, errors.New("client_encoding must be absent or 'UTF8'")
+	if cfg.isset("client_encoding") && !isUTF8(cfg.ClientEncoding) {
+		return Config{}, fmt.Errorf(`pq: unsupported client_encoding %q: must be absent or "UTF8"`, cfg.ClientEncoding)
 	}
-	o["client_encoding"] = "UTF8"
 	// DateStyle needs a similar treatment.
-	if datestyle, ok := o["datestyle"]; ok {
-		if datestyle != "ISO, MDY" {
-			return nil, fmt.Errorf("setting datestyle must be absent or %v; got %v", "ISO, MDY", datestyle)
-		}
-	} else {
-		o["datestyle"] = "ISO, MDY"
+	if cfg.isset("datestyle") && cfg.Datestyle != "ISO, MDY" {
+		return Config{}, fmt.Errorf(`pq: unsupported datestyle %q: must be absent or "ISO, MDY"`, cfg.Datestyle)
 	}
+	cfg.ClientEncoding, cfg.Datestyle = "UTF8", "ISO, MDY"
 
-	// If a user is not provided by any other means, the last
-	// resort is to use the current operating system provided user
-	// name.
-	if _, ok := o["user"]; !ok {
+	// Set default user if not explicitly provided.
+	if !cfg.isset("user") {
 		u, err := pqutil.User()
 		if err != nil {
-			return nil, ErrCouldNotDetectUsername
+			return Config{}, err
 		}
-		o["user"] = u
+		cfg.User = u
 	}
 
-	// SSL is not necessary or supported over UNIX domain sockets
-	if network, _ := network(o); network == "unix" {
-		o["sslmode"] = "disable"
+	// SSL is not necessary or supported over UNIX domain sockets.
+	if nw, _ := cfg.network(); nw == "unix" {
+		cfg.SSLMode = SSLModeDisable
 	}
 
-	return &Connector{opts: o, dialer: defaultDialer{}}, nil
+	return cfg, nil
 }
 
-func network(o values) (string, string) {
-	host := o["host"]
-
+func (cfg Config) network() (string, string) {
 	// UNIX domain sockets are either represented by an (absolute) file system
 	// path or they live in the abstract name space (starting with an @).
-	if filepath.IsAbs(host) || strings.HasPrefix(host, "@") {
-		sockPath := filepath.Join(host, ".s.PGSQL."+o["port"])
+	if filepath.IsAbs(cfg.Host) || strings.HasPrefix(cfg.Host, "@") {
+		sockPath := filepath.Join(cfg.Host, ".s.PGSQL."+strconv.Itoa(int(cfg.Port)))
 		return "unix", sockPath
 	}
-
-	return "tcp", net.JoinHostPort(host, o["port"])
+	return "tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(int(cfg.Port)))
 }
 
-type values map[string]string
-
-// scanner implements a tokenizer for libpq-style option strings.
-type scanner struct {
-	s []rune
-	i int
-}
-
-// newScanner returns a new scanner initialized with the option string s.
-func newScanner(s string) *scanner {
-	return &scanner{[]rune(s), 0}
-}
-
-// Next returns the next rune.
-// It returns 0, false if the end of the text has been reached.
-func (s *scanner) Next() (rune, bool) {
-	if s.i >= len(s.s) {
-		return 0, false
+func (cfg *Config) fromEnv(env []string) error {
+	e := make(map[string]string)
+	for _, v := range env {
+		k, v, ok := strings.Cut(v, "=")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "PGHOSTADDR", "PGREQUIREAUTH", "PGCHANNELBINDING", "PGSERVICE", "PGSERVICEFILE", "PGREALM",
+			"PGSSLCERTMODE", "PGSSLCOMPRESSION", "PGREQUIRESSL", "PGSSLCRL", "PGREQUIREPEER",
+			"PGSYSCONFDIR", "PGLOCALEDIR", "PGSSLCRLDIR", "PGSSLMINPROTOCOLVERSION", "PGSSLMAXPROTOCOLVERSION",
+			"PGGSSENCMODE", "PGGSSDELEGATION", "PGTARGETSESSIONATTRS", "PGLOADBALANCEHOSTS", "PGMINPROTOCOLVERSION",
+			"PGMAXPROTOCOLVERSION", "PGGSSLIB":
+			return fmt.Errorf("pq: environment variable $%s is not supported", k)
+		case "PGKRBSRVNAME":
+			if newGss == nil {
+				return fmt.Errorf("pq: environment variable $%s is not supported as Kerberos is not enabled", k)
+			}
+		}
+		e[k] = v
 	}
-	r := s.s[s.i]
-	s.i++
-	return r, true
-}
-
-// SkipSpaces returns the next non-whitespace rune.
-// It returns 0, false if the end of the text has been reached.
-func (s *scanner) SkipSpaces() (rune, bool) {
-	r, ok := s.Next()
-	for unicode.IsSpace(r) && ok {
-		r, ok = s.Next()
-	}
-	return r, ok
+	return cfg.setFromTag(e, "env")
 }
 
 // parseOpts parses the options from name and adds them to the values.
 //
 // The parsing code is based on conninfo_parse from libpq's fe-connect.c
-func parseOpts(name string, o values) error {
-	s := newScanner(name)
+func (cfg *Config) fromDSN(dsn string) error {
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		var err error
+		dsn, err = convertURL(dsn)
+		if err != nil {
+			return err
+		}
+	}
+
+	var (
+		opt  = make(map[string]string)
+		s    = []rune(dsn)
+		i    int
+		next = func() (rune, bool) {
+			if i >= len(s) {
+				return 0, false
+			}
+			r := s[i]
+			i++
+			return r, true
+		}
+		skipSpaces = func() (rune, bool) {
+			r, ok := next()
+			for unicode.IsSpace(r) && ok {
+				r, ok = next()
+			}
+			return r, ok
+		}
+	)
 
 	for {
 		var (
@@ -187,21 +358,21 @@ func parseOpts(name string, o values) error {
 			ok                 bool
 		)
 
-		if r, ok = s.SkipSpaces(); !ok {
+		if r, ok = skipSpaces(); !ok {
 			break
 		}
 
 		// Scan the key
 		for !unicode.IsSpace(r) && r != '=' {
 			keyRunes = append(keyRunes, r)
-			if r, ok = s.Next(); !ok {
+			if r, ok = next(); !ok {
 				break
 			}
 		}
 
 		// Skip any whitespace if we're not at the = yet
 		if r != '=' {
-			r, ok = s.SkipSpaces()
+			r, ok = skipSpaces()
 		}
 
 		// The current character should be =
@@ -210,36 +381,36 @@ func parseOpts(name string, o values) error {
 		}
 
 		// Skip any whitespace after the =
-		if r, ok = s.SkipSpaces(); !ok {
+		if r, ok = skipSpaces(); !ok {
 			// If we reach the end here, the last value is just an empty string as per libpq.
-			o[string(keyRunes)] = ""
+			opt[string(keyRunes)] = ""
 			break
 		}
 
 		if r != '\'' {
 			for !unicode.IsSpace(r) {
 				if r == '\\' {
-					if r, ok = s.Next(); !ok {
+					if r, ok = next(); !ok {
 						return fmt.Errorf(`missing character after backslash`)
 					}
 				}
 				valRunes = append(valRunes, r)
 
-				if r, ok = s.Next(); !ok {
+				if r, ok = next(); !ok {
 					break
 				}
 			}
 		} else {
 		quote:
 			for {
-				if r, ok = s.Next(); !ok {
+				if r, ok = next(); !ok {
 					return fmt.Errorf(`unterminated quoted string literal in connection string`)
 				}
 				switch r {
 				case '\'':
 					break quote
 				case '\\':
-					r, _ = s.Next()
+					r, _ = next()
 					fallthrough
 				default:
 					valRunes = append(valRunes, r)
@@ -247,10 +418,204 @@ func parseOpts(name string, o values) error {
 			}
 		}
 
-		o[string(keyRunes)] = string(valRunes)
+		opt[string(keyRunes)] = string(valRunes)
+	}
+
+	return cfg.setFromTag(opt, "postgres")
+}
+
+func (cfg *Config) setFromTag(o map[string]string, tag string) error {
+	f := "pq: wrong value for %q: "
+	if tag == "env" {
+		f = "pq: wrong value for $%s: "
+	}
+	var (
+		types  = reflect.TypeOf(cfg).Elem()
+		values = reflect.ValueOf(cfg).Elem()
+	)
+	for i := 0; i < types.NumField(); i++ {
+		var (
+			rt = types.Field(i)
+			rv = values.Field(i)
+			k  = rt.Tag.Get(tag)
+		)
+		if k == "" || k == "-" {
+			continue
+		}
+
+		v, ok := o[k]
+		delete(o, k)
+		if ok {
+			if t, ok := rt.Tag.Lookup("postgres"); ok && t != "" && t != "-" {
+				cfg.set = append(cfg.set, t)
+			}
+			switch rt.Type.Kind() {
+			default:
+				return fmt.Errorf("don't know how to set %s: unknown type %s", rt.Name, rt.Type)
+			case reflect.String:
+				if ((tag == "postgres" && k == "sslmode") || (tag == "env" && k == "PGSSLMODE")) &&
+					!pqutil.Contains(sslModes, SSLMode(v)) &&
+					!(strings.HasPrefix(v, "pqgo-") && hasTLSConfig(v[5:])) {
+					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(sslModes))
+				}
+				if ((tag == "postgres" && k == "sslnegotiation") || (tag == "env" && k == "PGSSLNEGOTIATION")) &&
+					!pqutil.Contains(sslNegotiations, SSLNegotiation(v)) {
+					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(sslNegotiations))
+				}
+				rv.SetString(v)
+			case reflect.Int64:
+				n, err := strconv.ParseInt(v, 10, 64)
+				if err != nil {
+					return fmt.Errorf(f+"%w", k, err)
+				}
+				if (tag == "postgres" && k == "connect_timeout") || (tag == "env" && k == "PGCONNECT_TIMEOUT") {
+					n = int64(time.Duration(n) * time.Second)
+				}
+				rv.SetInt(n)
+			case reflect.Uint16:
+				n, err := strconv.ParseUint(v, 10, 16)
+				if err != nil {
+					return fmt.Errorf(f+"%w", k, err)
+				}
+				rv.SetUint(n)
+			case reflect.Bool:
+				b, err := pqutil.ParseBool(v)
+				if err != nil {
+					return fmt.Errorf(f+"%w", k, err)
+				}
+				rv.SetBool(b)
+			}
+		}
+	}
+
+	// Set run-time; we delete map keys as they're set in the struct.
+	if tag == "postgres" {
+		// Make sure database= sets dbname=; in startup() we send database for
+		// dbname, and if we have both set it's inconsistent as the loop order
+		// is a map.
+		if d, ok := o["database"]; ok {
+			delete(o, "database")
+			if o["dbname"] == "" {
+				o["dbname"] = d
+			}
+		}
+		cfg.Runtime = o
 	}
 
 	return nil
+}
+
+func (cfg Config) isset(name string) bool {
+	return pqutil.Contains(cfg.set, name)
+}
+
+// Convert to a map; mostly so we don't need to rewrite all the code.
+func (cfg Config) tomap() values {
+	var (
+		o      = make(values)
+		values = reflect.ValueOf(cfg)
+		types  = reflect.TypeOf(cfg)
+	)
+	for i := 0; i < types.NumField(); i++ {
+		var (
+			rt = types.Field(i)
+			rv = values.Field(i)
+			k  = rt.Tag.Get("postgres")
+		)
+		if k == "" || k == "-" {
+			continue
+		}
+		if !rv.IsZero() || pqutil.Contains(cfg.set, k) {
+			switch rt.Type.Kind() {
+			default:
+				o[k] = rv.String()
+			case reflect.Uint16:
+				n := rv.Uint()
+				o[k] = strconv.FormatUint(n, 10)
+			case reflect.Int64:
+				n := rv.Int()
+				if k == "connect_timeout" {
+					n = int64(time.Duration(n) / time.Second)
+				}
+				o[k] = strconv.FormatInt(n, 10)
+			case reflect.Bool:
+				if rv.Bool() {
+					o[k] = "yes"
+				} else {
+					o[k] = "no"
+				}
+			}
+		}
+	}
+	for k, v := range cfg.Runtime {
+		o[k] = v
+	}
+	return o
+}
+
+// Create DSN for this config; primarily for tests.
+func (cfg Config) string() string {
+	var (
+		m    = cfg.tomap()
+		keys = make([]string, 0, len(m))
+	)
+	for k := range m {
+		switch k {
+		case "datestyle", "client_encoding":
+			continue
+		case "host", "port", "user", "sslsni":
+			if !cfg.isset(k) {
+				continue
+			}
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var b strings.Builder
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(k)
+		b.WriteByte('=')
+		var (
+			v     = m[k]
+			nv    = make([]rune, 0, len(v)+2)
+			quote = v == ""
+		)
+		for _, c := range v {
+			if c == ' ' {
+				quote = true
+			}
+			if c == '\'' {
+				nv = append(nv, '\\')
+			}
+			nv = append(nv, c)
+		}
+		if quote {
+			b.WriteByte('\'')
+		}
+		b.WriteString(string(nv))
+		if quote {
+			b.WriteByte('\'')
+		}
+	}
+	return b.String()
+}
+
+// Recognize all sorts of silly things as "UTF-8", like Postgres does
+func isUTF8(name string) bool {
+	s := strings.Map(func(c rune) rune {
+		if 'A' <= c && c <= 'Z' {
+			return c + ('a' - 'A')
+		}
+		if 'a' <= c && c <= 'z' || '0' <= c && c <= '9' {
+			return c
+		}
+		return -1 // discard
+	}, name)
+	return s == "utf8" || s == "unicode"
 }
 
 func convertURL(url string) (string, error) {
@@ -272,11 +637,9 @@ func convertURL(url string) (string, error) {
 	}
 
 	if u.User != nil {
-		v := u.User.Username()
-		accrue("user", v)
-
-		v, _ = u.User.Password()
-		accrue("password", v)
+		pw, _ := u.User.Password()
+		accrue("user", u.User.Username())
+		accrue("password", pw)
 	}
 
 	if host, port, err := net.SplitHostPort(u.Host); err != nil {
@@ -297,99 +660,4 @@ func convertURL(url string) (string, error) {
 
 	sort.Strings(kvs) // Makes testing easier (not a performance concern)
 	return strings.Join(kvs, " "), nil
-}
-
-// parseEnviron tries to mimic some of libpq's environment handling
-//
-// To ease testing, it does not directly reference os.Environ, but is designed
-// to accept its output.
-//
-// Environment-set connection information is intended to have a higher
-// precedence than a library default but lower than any explicitly passed
-// information (such as in the URL or connection string).
-func parseEnviron(env []string) (map[string]string, error) {
-	out := make(map[string]string)
-	for _, e := range env {
-		k, v, ok := strings.Cut(e, "=")
-		if !ok {
-			return nil, fmt.Errorf("invalid environment: %q", e)
-		}
-
-		accrue := func(key string) { out[key] = v }
-
-		// Last updated for PostgreSQL 18
-		switch k {
-		case "PGHOSTADDR", "PGREQUIREAUTH", "PGCHANNELBINDING", "PGSERVICE", "PGSERVICEFILE", "PGREALM",
-			"PGSSLCERTMODE", "PGSSLCOMPRESSION", "PGREQUIRESSL", "PGSSLCRL", "PGREQUIREPEER",
-			"PGSYSCONFDIR", "PGLOCALEDIR", "PGSSLCRLDIR", "PGSSLMINPROTOCOLVERSION", "PGSSLMAXPROTOCOLVERSION",
-			"PGGSSENCMODE", "PGGSSDELEGATION", "PGTARGETSESSIONATTRS", "PGLOADBALANCEHOSTS", "PGMINPROTOCOLVERSION",
-			"PGMAXPROTOCOLVERSION":
-			return nil, fmt.Errorf("setting %q not supported", k)
-
-		case "PGHOST":
-			accrue("host")
-		case "PGSSLNEGOTIATION":
-			accrue("sslnegotiation")
-		case "PGPORT":
-			accrue("port")
-		case "PGDATABASE":
-			accrue("dbname")
-		case "PGUSER":
-			accrue("user")
-		case "PGPASSWORD":
-			accrue("password")
-		case "PGPASSFILE":
-			accrue("passfile")
-		case "PGOPTIONS":
-			accrue("options")
-		case "PGAPPNAME":
-			accrue("application_name")
-		case "PGSSLMODE":
-			accrue("sslmode")
-		case "PGSSLCERT":
-			accrue("sslcert")
-		case "PGSSLKEY":
-			accrue("sslkey")
-		case "PGSSLROOTCERT":
-			accrue("sslrootcert")
-		case "PGSSLSNI":
-			accrue("sslsni")
-		case "PGGSSLIB":
-			if newGss == nil {
-				return nil, fmt.Errorf("setting %q not supported", k)
-			}
-			accrue("gsslib")
-		case "PGKRBSRVNAME":
-			if newGss == nil {
-				return nil, fmt.Errorf("setting %q not supported", k)
-			}
-			accrue("krbsrvname")
-		case "PGCONNECT_TIMEOUT":
-			accrue("connect_timeout")
-		case "PGCLIENTENCODING":
-			accrue("client_encoding")
-		case "PGDATESTYLE":
-			accrue("datestyle")
-		case "PGTZ":
-			accrue("timezone")
-		case "PGGEQO":
-			accrue("geqo")
-		}
-	}
-	return out, nil
-}
-
-// isUTF8 returns whether name is a fuzzy variation of the string "UTF-8".
-func isUTF8(name string) bool {
-	// Recognize all sorts of silly things as "UTF-8", like Postgres does
-	s := strings.Map(func(c rune) rune {
-		if 'A' <= c && c <= 'Z' {
-			return c + ('a' - 'A')
-		}
-		if 'a' <= c && c <= 'z' || '0' <= c && c <= '9' {
-			return c
-		}
-		return -1 // discard
-	}, name)
-	return s == "utf8" || s == "unicode"
 }

@@ -66,7 +66,7 @@ func (f Fake) Startup(cn net.Conn) {
 	f.WriteMsg(cn, proto.ReadyForQuery, 'I')
 }
 
-// ReadStart reads the startup message.
+// ReadStartup reads the startup message.
 func (f Fake) ReadStartup(cn net.Conn) bool {
 	_, _, ok := f.read(cn, true)
 	return ok

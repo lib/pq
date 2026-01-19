@@ -50,7 +50,7 @@ func encode(x any, pgtypOid oid.Oid) ([]byte, error) {
 	case bool:
 		return strconv.AppendBool(nil, v), nil
 	case time.Time:
-		return formatTs(v), nil
+		return formatTS(v), nil
 	default:
 		return nil, fmt.Errorf("pq: encode: unknown type for %T", v)
 	}
@@ -117,9 +117,9 @@ func textDecode(ps *parameterStatus, s []byte, typ oid.Oid) (any, error) {
 		}
 		return b, err
 	case oid.T_timestamptz:
-		return parseTs(ps.currentLocation, string(s))
+		return parseTS(ps.currentLocation, string(s))
 	case oid.T_timestamp, oid.T_date:
-		return parseTs(nil, string(s))
+		return parseTS(nil, string(s))
 	case oid.T_time:
 		return parseTime("15:04:05", typ, s)
 	case oid.T_timetz:
@@ -161,7 +161,7 @@ func appendEncodedText(buf []byte, x any) ([]byte, error) {
 	case bool:
 		return strconv.AppendBool(buf, v), nil
 	case time.Time:
-		return append(buf, formatTs(v)...), nil
+		return append(buf, formatTS(v)...), nil
 	case nil:
 		return append(buf, "\\N"...), nil
 	default:
@@ -314,14 +314,14 @@ func (c *locationCache) getLocation(offset int) *time.Location {
 }
 
 var (
-	infinityTsEnabled  = false
-	infinityTsNegative time.Time
-	infinityTsPositive time.Time
+	infinityTSEnabled  = false
+	infinityTSNegative time.Time
+	infinityTSPositive time.Time
 )
 
 const (
-	infinityTsEnabledAlready        = "pq: infinity timestamp enabled already"
-	infinityTsNegativeMustBeSmaller = "pq: infinity timestamp: negative value must be smaller (before) than positive"
+	infinityTSEnabledAlready        = "pq: infinity timestamp enabled already"
+	infinityTSNegativeMustBeSmaller = "pq: infinity timestamp: negative value must be smaller (before) than positive"
 )
 
 // EnableInfinityTs controls the handling of Postgres' "-infinity" and
@@ -345,36 +345,36 @@ const (
 // undefined behavior.  If EnableInfinityTs is called more than once, it will
 // panic.
 func EnableInfinityTs(negative time.Time, positive time.Time) {
-	if infinityTsEnabled {
-		panic(infinityTsEnabledAlready)
+	if infinityTSEnabled {
+		panic(infinityTSEnabledAlready)
 	}
 	if !negative.Before(positive) {
-		panic(infinityTsNegativeMustBeSmaller)
+		panic(infinityTSNegativeMustBeSmaller)
 	}
-	infinityTsEnabled = true
-	infinityTsNegative = negative
-	infinityTsPositive = positive
+	infinityTSEnabled = true
+	infinityTSNegative = negative
+	infinityTSPositive = positive
 }
 
-// Testing might want to toggle infinityTsEnabled
-func disableInfinityTs() {
-	infinityTsEnabled = false
+// Testing might want to toggle infinityTSEnabled
+func disableInfinityTS() {
+	infinityTSEnabled = false
 }
 
 // This is a time function specific to the Postgres default DateStyle
 // setting ("ISO, MDY"), the only one we currently support. This
 // accounts for the discrepancies between the parsing available with
 // time.Parse and the Postgres date formatting quirks.
-func parseTs(currentLocation *time.Location, str string) (any, error) {
+func parseTS(currentLocation *time.Location, str string) (any, error) {
 	switch str {
 	case "-infinity":
-		if infinityTsEnabled {
-			return infinityTsNegative, nil
+		if infinityTSEnabled {
+			return infinityTSNegative, nil
 		}
 		return []byte(str), nil
 	case "infinity":
-		if infinityTsEnabled {
-			return infinityTsPositive, nil
+		if infinityTSEnabled {
+			return infinityTSPositive, nil
 		}
 		return []byte(str), nil
 	}
@@ -498,15 +498,15 @@ func ParseTimestamp(currentLocation *time.Location, str string) (time.Time, erro
 	return t, p.err
 }
 
-// formatTs formats t into a format postgres understands.
-func formatTs(t time.Time) []byte {
-	if infinityTsEnabled {
+// formatTS formats t into a format postgres understands.
+func formatTS(t time.Time) []byte {
+	if infinityTSEnabled {
 		// t <= -infinity : ! (t > -infinity)
-		if !t.After(infinityTsNegative) {
+		if !t.After(infinityTSNegative) {
 			return []byte("-infinity")
 		}
 		// t >= infinity : ! (!t < infinity)
-		if !t.Before(infinityTsPositive) {
+		if !t.Before(infinityTSPositive) {
 			return []byte("infinity")
 		}
 	}
