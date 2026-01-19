@@ -94,6 +94,11 @@ func (g *GSS) GetInitToken(host string, service string) ([]byte, error) {
 func (g *GSS) GetInitTokenFromSpn(spn string) ([]byte, error) {
 	s := spnego.SPNEGOClient(g.cli, spn)
 
+	// Force TGS exchange to acquire service ticket
+	if err := s.AcquireCred(); err != nil {
+		return nil, fmt.Errorf("kerberos error (AcquireCred): %s", err.Error())
+	}
+
 	st, err := s.InitSecContext()
 	if err != nil {
 		return nil, fmt.Errorf("kerberos error (InitSecContext): %s", err.Error())
