@@ -19,16 +19,16 @@ import (
 
 var time2400Regex = regexp.MustCompile(`^(24:00(?::00(?:\.0+)?)?)(?:[Z+-].*)?$`)
 
-func binaryEncode(parameterStatus *parameterStatus, x any) ([]byte, error) {
+func binaryEncode(x any) ([]byte, error) {
 	switch v := x.(type) {
 	case []byte:
 		return v, nil
 	default:
-		return encode(parameterStatus, x, oid.T_unknown)
+		return encode(x, oid.T_unknown)
 	}
 }
 
-func encode(parameterStatus *parameterStatus, x any, pgtypOid oid.Oid) ([]byte, error) {
+func encode(x any, pgtypOid oid.Oid) ([]byte, error) {
 	switch v := x.(type) {
 	case int64:
 		return strconv.AppendInt(nil, v, 10), nil
@@ -39,12 +39,12 @@ func encode(parameterStatus *parameterStatus, x any, pgtypOid oid.Oid) ([]byte, 
 			return nil, nil
 		}
 		if pgtypOid == oid.T_bytea {
-			return encodeBytea(parameterStatus.serverVersion, v), nil
+			return encodeBytea(v), nil
 		}
 		return v, nil
 	case string:
 		if pgtypOid == oid.T_bytea {
-			return encodeBytea(parameterStatus.serverVersion, []byte(v)), nil
+			return encodeBytea([]byte(v)), nil
 		}
 		return []byte(v), nil
 	case bool:
@@ -56,18 +56,18 @@ func encode(parameterStatus *parameterStatus, x any, pgtypOid oid.Oid) ([]byte, 
 	}
 }
 
-func decode(parameterStatus *parameterStatus, s []byte, typ oid.Oid, f format) (any, error) {
+func decode(ps *parameterStatus, s []byte, typ oid.Oid, f format) (any, error) {
 	switch f {
 	case formatBinary:
-		return binaryDecode(parameterStatus, s, typ)
+		return binaryDecode(s, typ)
 	case formatText:
-		return textDecode(parameterStatus, s, typ)
+		return textDecode(ps, s, typ)
 	default:
 		panic("unreachable")
 	}
 }
 
-func binaryDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) (any, error) {
+func binaryDecode(s []byte, typ oid.Oid) (any, error) {
 	switch typ {
 	case oid.T_bytea:
 		return s, nil
@@ -106,7 +106,7 @@ func decodeUUIDBinary(src []byte) ([]byte, error) {
 	return dst, nil
 }
 
-func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) (any, error) {
+func textDecode(ps *parameterStatus, s []byte, typ oid.Oid) (any, error) {
 	switch typ {
 	case oid.T_char, oid.T_bpchar, oid.T_varchar, oid.T_text:
 		return string(s), nil
@@ -117,7 +117,7 @@ func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) (any, e
 		}
 		return b, err
 	case oid.T_timestamptz:
-		return parseTs(parameterStatus.currentLocation, string(s))
+		return parseTs(ps.currentLocation, string(s))
 	case oid.T_timestamp, oid.T_date:
 		return parseTs(nil, string(s))
 	case oid.T_time:
@@ -147,14 +147,14 @@ func textDecode(parameterStatus *parameterStatus, s []byte, typ oid.Oid) (any, e
 
 // appendEncodedText encodes item in text format as required by COPY
 // and appends to buf
-func appendEncodedText(parameterStatus *parameterStatus, buf []byte, x any) ([]byte, error) {
+func appendEncodedText(buf []byte, x any) ([]byte, error) {
 	switch v := x.(type) {
 	case int64:
 		return strconv.AppendInt(buf, v, 10), nil
 	case float64:
 		return strconv.AppendFloat(buf, v, 'f', -1, 64), nil
 	case []byte:
-		encodedBytea := encodeBytea(parameterStatus.serverVersion, v)
+		encodedBytea := encodeBytea(v)
 		return appendEscapedText(buf, string(encodedBytea)), nil
 	case string:
 		return appendEscapedText(buf, v), nil
@@ -596,26 +596,11 @@ func parseBytea(s []byte) (result []byte, err error) {
 	return result, nil
 }
 
-func encodeBytea(serverVersion int, v []byte) (result []byte) {
-	if serverVersion >= 90000 {
-		// Use the hex format if we know that the server supports it
-		result = make([]byte, 2+hex.EncodedLen(len(v)))
-		result[0] = '\\'
-		result[1] = 'x'
-		hex.Encode(result[2:], v)
-	} else {
-		// .. or resort to "escape"
-		for _, b := range v {
-			if b == '\\' {
-				result = append(result, '\\', '\\')
-			} else if b < 0x20 || b > 0x7e {
-				result = append(result, []byte(fmt.Sprintf("\\%03o", b))...)
-			} else {
-				result = append(result, b)
-			}
-		}
-	}
-
+func encodeBytea(v []byte) (result []byte) {
+	result = make([]byte, 2+hex.EncodedLen(len(v)))
+	result[0] = '\\'
+	result[1] = 'x'
+	hex.Encode(result[2:], v)
 	return result
 }
 

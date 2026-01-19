@@ -81,12 +81,11 @@ func (d Driver) Open(name string) (driver.Conn, error) {
 }
 
 type parameterStatus struct {
-	// server version in the same format as server_version_num, or 0 if
-	// unavailable
+	// Server version in the same format as server_version_num, or 0 if
+	// unavailable.
 	serverVersion int
 
-	// the current location based on the TimeZone value of the session, if
-	// available
+	// Current location from the TimeZone value of the session, if available.
 	currentLocation *time.Location
 }
 
@@ -1395,7 +1394,7 @@ func (cn *conn) sendBinaryParameters(b *writeBuf, args []driver.NamedValue) erro
 		} else if xx, ok := x.Value.([]byte); ok && xx == nil {
 			b.int32(-1)
 		} else {
-			datum, err := binaryEncode(&cn.parameterStatus, x.Value)
+			datum, err := binaryEncode(x.Value)
 			if err != nil {
 				return err
 			}

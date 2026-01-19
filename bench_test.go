@@ -282,13 +282,13 @@ func benchPreparedMockQuery(b *testing.B, c *conn, stmt driver.Stmt) {
 
 func BenchmarkEncodeInt64(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		encode(&parameterStatus{}, int64(1234), oid.T_int8)
+		encode(int64(1234), oid.T_int8)
 	}
 }
 
 func BenchmarkEncodeFloat64(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		encode(&parameterStatus{}, 3.14159, oid.T_float8)
+		encode(3.14159, oid.T_float8)
 	}
 }
 
@@ -296,18 +296,18 @@ var testByteString = []byte("abcdefghijklmnopqrstuvwxyz")
 
 func BenchmarkEncodeByteaHex(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		encode(&parameterStatus{serverVersion: 90000}, testByteString, oid.T_bytea)
+		encode(testByteString, oid.T_bytea)
 	}
 }
 func BenchmarkEncodeByteaEscape(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		encode(&parameterStatus{serverVersion: 84000}, testByteString, oid.T_bytea)
+		encode(testByteString, oid.T_bytea)
 	}
 }
 
 func BenchmarkEncodeBool(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		encode(&parameterStatus{}, true, oid.T_bool)
+		encode(true, oid.T_bool)
 	}
 }
 
@@ -315,7 +315,7 @@ var testTimestamptz = time.Date(2001, time.January, 1, 0, 0, 0, 0, time.Local)
 
 func BenchmarkEncodeTimestamptz(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		encode(&parameterStatus{}, testTimestamptz, oid.T_timestamptz)
+		encode(testTimestamptz, oid.T_timestamptz)
 	}
 }
 
@@ -323,7 +323,7 @@ var testIntBytes = []byte("1234")
 
 func BenchmarkDecodeInt64(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		decode(&parameterStatus{}, testIntBytes, oid.T_int8, formatText)
+		decode(nil, testIntBytes, oid.T_int8, formatText)
 	}
 }
 
@@ -331,7 +331,7 @@ var testFloatBytes = []byte("3.14159")
 
 func BenchmarkDecodeFloat64(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		decode(&parameterStatus{}, testFloatBytes, oid.T_float8, formatText)
+		decode(nil, testFloatBytes, oid.T_float8, formatText)
 	}
 }
 
@@ -339,7 +339,7 @@ var testBoolBytes = []byte{'t'}
 
 func BenchmarkDecodeBool(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		decode(&parameterStatus{}, testBoolBytes, oid.T_bool, formatText)
+		decode(nil, testBoolBytes, oid.T_bool, formatText)
 	}
 }
 
