@@ -13,7 +13,6 @@ import (
 )
 
 func TestScanTimestamp(t *testing.T) {
-
 	var nt NullTime
 	tn := time.Now()
 	nt.Scan(tn)
@@ -26,7 +25,6 @@ func TestScanTimestamp(t *testing.T) {
 }
 
 func TestScanNilTimestamp(t *testing.T) {
-
 	var nt NullTime
 	nt.Scan(nil)
 	if nt.Valid {
