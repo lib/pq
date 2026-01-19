@@ -30,6 +30,9 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 - Allow using a custom `tls.Config`, for example for encrypted keys ([#1228]).
 
+- Add `Config`, `NewConfig()`, and `NewConnectorConfig()` to supply connection
+  details in a more structured way ([#1240]).
+
 - Add `PQGO_DEBUG=1` print the communication with PostgreSQL to stderr, to aid
   in debugging, testing, and bug reports ([#1223]).
 
@@ -100,6 +103,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 [#1234]: https://github.com/lib/pq/pull/1234
 [#1238]: https://github.com/lib/pq/pull/1238
 [#1239]: https://github.com/lib/pq/pull/1239
+[#1240]: https://github.com/lib/pq/pull/1240
 
 
 v1.10.9 (2023-04-26)

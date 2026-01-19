@@ -11,7 +11,7 @@ import (
 	"unicode/utf8"
 )
 
-// Error severities
+// [pq.Error.Severity] values.
 const (
 	Efatal   = "FATAL"
 	Epanic   = "PANIC"

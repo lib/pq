@@ -1,5 +1,11 @@
 package pq
 
+import (
+	"net"
+	"path/filepath"
+	"strings"
+)
+
 // PGError is an interface used by previous versions of pq.
 //
 // Deprecated: use the Error type. This is never used.
@@ -65,3 +71,16 @@ func (e *Error) Get(k byte) (v string) {
 // Deprecated: directly passing an URL to sql.Open("postgres", "postgres://...")
 // now works, and calling this manually is no longer required.
 func ParseURL(url string) (string, error) { return convertURL(url) }
+
+type values map[string]string
+
+func (o values) network() (string, string) {
+	host := o["host"]
+	// UNIX domain sockets are either represented by an (absolute) file system
+	// path or they live in the abstract name space (starting with an @).
+	if filepath.IsAbs(host) || strings.HasPrefix(host, "@") {
+		sockPath := filepath.Join(host, ".s.PGSQL."+o["port"])
+		return "unix", sockPath
+	}
+	return "tcp", net.JoinHostPort(host, o["port"])
+}

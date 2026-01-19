@@ -13,9 +13,9 @@ var (
 	ErrSSLKeyHasWorldPermissions = errors.New("pq: private key has world access; permissions should be u=rw,g=r (0640) if owned by root, or u=rw (0600), or less")
 )
 
-// KeyPermissions checks the permissions on user-supplied SSL key files, which
-// should have very little access. libpq does not check key file permissions on
-// Windows.
+// SSLKeyPermissions checks the permissions on user-supplied SSL key files,
+// which should have very little access. libpq does not check key file
+// permissions on Windows.
 //
 // If the file is owned by the same user the process is running as, the file
 // should only have 0600. If the file is owned by root, and the group matches

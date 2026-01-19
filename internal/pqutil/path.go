@@ -8,7 +8,8 @@ import (
 	"runtime"
 )
 
-// Matches pqGetHomeDirectory() from PostgreSQL
+// Home gets the user's home directory. Matches pqGetHomeDirectory() from
+// PostgreSQL
 //
 // https://github.com/postgres/postgres/blob/2b117bb/src/interfaces/libpq/fe-connect.c#L8214
 func Home() string {

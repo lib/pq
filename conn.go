@@ -315,7 +315,7 @@ func (c *Connector) open(ctx context.Context) (cn *conn, err error) {
 }
 
 func dial(ctx context.Context, d Dialer, o values) (net.Conn, error) {
-	network, address := network(o)
+	network, address := o.network()
 
 	// Zero or not specified means wait indefinitely.
 	if timeout, ok := o["connect_timeout"]; ok && timeout != "0" {
@@ -722,7 +722,7 @@ func toNamedValue(v []driver.Value) []driver.NamedValue {
 }
 
 // CheckNamedValue implements [driver.NamedValueChecker].
-func (c *conn) CheckNamedValue(nv *driver.NamedValue) error {
+func (cn *conn) CheckNamedValue(nv *driver.NamedValue) error {
 	// Ignore Valuer, for backward compatibility with pq.Array().
 	if _, ok := nv.Value.(driver.Valuer); ok {
 		return driver.ErrSkip
@@ -1077,23 +1077,10 @@ func (cn *conn) ssl(o values) error {
 // startup packet.
 func isDriverSetting(key string) bool {
 	switch key {
-	case "host", "port":
-		return true
-	case "password":
-		return true
-	case "sslmode", "sslcert", "sslkey", "sslrootcert", "sslinline", "sslsni":
-		return true
-	case "fallback_application_name":
-		return true
-	case "connect_timeout":
-		return true
-	case "disable_prepared_binary_result":
-		return true
-	case "binary_parameters":
-		return true
-	case "krbsrvname":
-		return true
-	case "krbspn":
+	case "host", "port", "password", "fallback_application_name",
+		"sslmode", "sslcert", "sslkey", "sslrootcert", "sslinline", "sslsni",
+		"connect_timeout", "binary_parameters", "disable_prepared_binary_result",
+		"krbsrvname", "krbspn":
 		return true
 	default:
 		return false

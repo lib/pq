@@ -16,7 +16,8 @@ func ParseBool(str string) (bool, error) {
 	return false, &strconv.NumError{Func: "ParseBool", Num: str, Err: strconv.ErrSyntax}
 }
 
-// We want to retain compat with Go 1.18, and slices wasn't added until 1.21
+// Contains is [slices.Contains]. We want to retain compat with Go 1.18, and
+// slices wasn't added until 1.21
 func Contains[S ~[]E, E comparable](s S, v E) bool {
 	for i := range s {
 		if v == s[i] {

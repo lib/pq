@@ -173,7 +173,7 @@ var formatTimeTests = []struct {
 
 func TestFormatTs(t *testing.T) {
 	for i, tt := range formatTimeTests {
-		val := string(formatTs(tt.time))
+		val := string(formatTS(tt.time))
 		if val != tt.expected {
 			t.Errorf("%d: incorrect time format %q, want %q", i, val, tt.expected)
 		}
@@ -498,7 +498,7 @@ func TestInfinityTimestamp(t *testing.T) {
 		t.Errorf("Encoding infinity, expected %q, got %q", "infinity", s)
 	}
 
-	disableInfinityTs()
+	disableInfinityTS()
 
 	var panicErrorString string
 	func() {
@@ -507,8 +507,8 @@ func TestInfinityTimestamp(t *testing.T) {
 		}()
 		EnableInfinityTs(y2500, y1500)
 	}()
-	if panicErrorString != infinityTsNegativeMustBeSmaller {
-		t.Errorf("Expected error, %q, got %q", infinityTsNegativeMustBeSmaller, panicErrorString)
+	if panicErrorString != infinityTSNegativeMustBeSmaller {
+		t.Errorf("Expected error, %q, got %q", infinityTSNegativeMustBeSmaller, panicErrorString)
 	}
 }
 
