@@ -322,7 +322,7 @@ func dial(ctx context.Context, d Dialer, o values) (net.Conn, error) {
 	if timeout, ok := o["connect_timeout"]; ok && timeout != "0" {
 		seconds, err := strconv.ParseInt(timeout, 10, 0)
 		if err != nil {
-			return nil, fmt.Errorf("invalid value for parameter connect_timeout: %s", err)
+			return nil, fmt.Errorf("invalid value for parameter connect_timeout: %w", err)
 		}
 		duration := time.Duration(seconds) * time.Second
 
