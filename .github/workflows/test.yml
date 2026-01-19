@@ -14,6 +14,22 @@ jobs:
       - uses: 'dominikh/staticcheck-action@v1.3.1'
         with: {version: '2025.1.1'}
 
+  fuzz:
+    runs-on: 'ubuntu-latest'
+    steps:
+      - uses: 'actions/checkout@v6'
+      - uses: 'actions/setup-go@v6'
+        with: {go-version: 'stable'}
+      - shell: 'bash'
+        run: |
+          set -eu
+          f=($(grep -Eo '^func Fuzz[a-zA-Z0-9_]+' fuzz_test.go | cut -d' ' -f2))
+          t=$(( 300 / ${#f[@]} ))s
+          for ff in ${f[@]}; do
+            echo go test -test.run=DontRunTests -fuzztime=$t -fuzz=$ff
+            go test -test.run=DontRunTests -fuzztime=$t -fuzz=$ff
+          done
+
   ubuntu:
     runs-on: 'ubuntu-latest'
     strategy:
