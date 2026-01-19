@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"os"
 	"reflect"
@@ -2299,4 +2300,28 @@ func TestAuth(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestUint64(t *testing.T) {
+	db := pqtest.MustDB(t)
+
+	pqtest.Exec(t, db, `create temp table tbl (n numeric)`)
+	pqtest.Exec(t, db, `insert into tbl values ($1)`, uint64(math.MaxUint64))
+
+	rows, err := db.Query("select n from tbl")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rows.Next() {
+		var i uint64
+		err := rows.Scan(&i)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if i != math.MaxUint64 {
+			t.Fatalf("\nwant: %d\nhave: %d", uint64(math.MaxUint64), i)
+		}
+	}
 }

@@ -723,8 +723,8 @@ func toNamedValue(v []driver.Value) []driver.NamedValue {
 
 // CheckNamedValue implements [driver.NamedValueChecker].
 func (c *conn) CheckNamedValue(nv *driver.NamedValue) error {
+	// Ignore Valuer, for backward compatibility with pq.Array().
 	if _, ok := nv.Value.(driver.Valuer); ok {
-		// Ignore Valuer, for backward compatibility with pq.Array().
 		return driver.ErrSkip
 	}
 
@@ -737,13 +737,23 @@ func (c *conn) CheckNamedValue(nv *driver.NamedValue) error {
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
-	if v.Kind() == reflect.Slice {
+
+	switch v.Kind() {
+	default:
+		return driver.ErrSkip
+	case reflect.Slice:
 		var err error
 		nv.Value, err = Array(v.Interface()).Value()
 		return err
+	case reflect.Uint64:
+		value := v.Uint()
+		if value >= math.MaxInt64 {
+			nv.Value = strconv.FormatUint(value, 10)
+		} else {
+			nv.Value = int64(value)
+		}
+		return nil
 	}
-
-	return driver.ErrSkip
 }
 
 // Implement the "Queryer" interface

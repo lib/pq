@@ -7,7 +7,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 ### Features
 
-- Add support for NamedValueChecker interface ([#1125]).
+- Add support for NamedValueChecker interface ([#1125], [#1238]).
 
 - Support [`sslnegotiation`] to use SSL without negotiation ([#1180]).
 
@@ -95,6 +95,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 [#1226]: https://github.com/lib/pq/pull/1226
 [#1228]: https://github.com/lib/pq/pull/1228
 [#1234]: https://github.com/lib/pq/pull/1234
+[#1238]: https://github.com/lib/pq/pull/1238
 
 
 v1.10.9 (2023-04-26)
