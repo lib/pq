@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"net"
+	"net/netip"
 	neturl "net/url"
 	"os"
 	"path/filepath"
@@ -103,6 +104,25 @@ type Config struct {
 	// The host to connect to. Absolute paths and values that start with @ are
 	// for unix domain sockets. Defaults to localhost.
 	Host string `postgres:"host" env:"PGHOST"`
+
+	// IPv4 or IPv6 address to connect to. Using hostaddr allows the application
+	// to avoid a host name lookup, which might be important in applications
+	// with time constraints. A hostname is required for sslmode=verify-full and
+	// the GSSAPI or SSPI authentication methods.
+	//
+	// The following rules are used:
+	//
+	// - If host is given without hostaddr, a host name lookup occurs.
+	//
+	// - If hostaddr is given without host, the value for hostaddr gives the
+	//   server network address. The connection attempt will fail if the
+	//   authentication method requires a host name.
+	//
+	// - If both host and hostaddr are given, the value for hostaddr gives the
+	//   server network address. The value for host is ignored unless the
+	//   authentication method requires it, in which case it will be used as the
+	//   host name.
+	Hostaddr netip.Addr `postgres:"hostaddr" env:"PGHOSTADDR"`
 
 	// The port to connect to. Defaults to 5432.
 	Port uint16 `postgres:"port" env:"PGPORT"`
@@ -302,6 +322,9 @@ func newConfig(dsn string, env []string) (Config, error) {
 }
 
 func (cfg Config) network() (string, string) {
+	if cfg.Hostaddr != (netip.Addr{}) {
+		return "tcp", net.JoinHostPort(cfg.Hostaddr.String(), strconv.Itoa(int(cfg.Port)))
+	}
 	// UNIX domain sockets are either represented by an (absolute) file system
 	// path or they live in the abstract name space (starting with an @).
 	if filepath.IsAbs(cfg.Host) || strings.HasPrefix(cfg.Host, "@") {
@@ -319,7 +342,7 @@ func (cfg *Config) fromEnv(env []string) error {
 			continue
 		}
 		switch k {
-		case "PGHOSTADDR", "PGREQUIREAUTH", "PGCHANNELBINDING", "PGSERVICE", "PGSERVICEFILE", "PGREALM",
+		case "PGREQUIREAUTH", "PGCHANNELBINDING", "PGSERVICE", "PGSERVICEFILE", "PGREALM",
 			"PGSSLCERTMODE", "PGSSLCOMPRESSION", "PGREQUIRESSL", "PGSSLCRL", "PGREQUIREPEER",
 			"PGSYSCONFDIR", "PGLOCALEDIR", "PGSSLCRLDIR", "PGSSLMINPROTOCOLVERSION", "PGSSLMAXPROTOCOLVERSION",
 			"PGGSSENCMODE", "PGGSSDELEGATION", "PGTARGETSESSIONATTRS", "PGLOADBALANCEHOSTS", "PGMINPROTOCOLVERSION",
@@ -468,7 +491,17 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 			}
 			switch rt.Type.Kind() {
 			default:
-				return fmt.Errorf("don't know how to set %s: unknown type %s", rt.Name, rt.Type)
+				return fmt.Errorf("don't know how to set %s: unknown type %s", rt.Name, rt.Type.Kind())
+			case reflect.Struct:
+				if rt.Type == reflect.TypeOf(netip.Addr{}) {
+					ip, err := netip.ParseAddr(v)
+					if err != nil {
+						return fmt.Errorf(f+"%w", k, err)
+					}
+					rv.Set(reflect.ValueOf(ip))
+				} else {
+					return fmt.Errorf("don't know how to set %s: unknown type %s", rt.Name, rt.Type)
+				}
 			case reflect.String:
 				if ((tag == "postgres" && k == "sslmode") || (tag == "env" && k == "PGSSLMODE")) &&
 					!pqutil.Contains(sslModes, SSLMode(v)) &&
@@ -545,7 +578,11 @@ func (cfg Config) tomap() values {
 		if !rv.IsZero() || pqutil.Contains(cfg.set, k) {
 			switch rt.Type.Kind() {
 			default:
-				o[k] = rv.String()
+				if s, ok := rv.Interface().(fmt.Stringer); ok {
+					o[k] = s.String()
+				} else {
+					o[k] = rv.String()
+				}
 			case reflect.Uint16:
 				n := rv.Uint()
 				o[k] = strconv.FormatUint(n, 10)

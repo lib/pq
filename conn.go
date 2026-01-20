@@ -1077,7 +1077,7 @@ func (cn *conn) ssl(o values) error {
 // startup packet.
 func isDriverSetting(key string) bool {
 	switch key {
-	case "host", "port", "password", "fallback_application_name",
+	case "host", "hostaddr", "port", "password", "fallback_application_name",
 		"sslmode", "sslcert", "sslkey", "sslrootcert", "sslinline", "sslsni",
 		"connect_timeout", "binary_parameters", "disable_prepared_binary_result",
 		"krbsrvname", "krbspn":

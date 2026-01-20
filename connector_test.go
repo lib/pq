@@ -357,6 +357,11 @@ func TestNewConfig(t *testing.T) {
 		{"port=5s", nil, "", `pq: wrong value for "port": strconv.ParseUint: parsing "5s": invalid syntax`},
 		{"", []string{"PGPORT=5s"}, "", `pq: wrong value for $PGPORT: strconv.ParseUint: parsing "5s": invalid syntax`},
 
+		// hostaddr
+		{"hostaddr=127.1.2.3", nil, "hostaddr=127.1.2.3", ""},
+		{"hostaddr=::1", nil, "hostaddr=::1", ""},
+		{"", []string{"PGHOSTADDR=2a01:4f9:3081:5413::2"}, "hostaddr=2a01:4f9:3081:5413::2", ""},
+
 		// Runtime
 		{"user=u search_path=abc", nil, "search_path=abc user=u", ""},
 		{"database=db", nil, "dbname=db", ``},

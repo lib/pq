@@ -75,6 +75,10 @@ func ParseURL(url string) (string, error) { return convertURL(url) }
 type values map[string]string
 
 func (o values) network() (string, string) {
+	if ho := o["hostaddr"]; ho != "" {
+		return "tcp", net.JoinHostPort(ho, o["port"])
+	}
+
 	host := o["host"]
 	// UNIX domain sockets are either represented by an (absolute) file system
 	// path or they live in the abstract name space (starting with an @).
