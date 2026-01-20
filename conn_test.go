@@ -69,20 +69,34 @@ func TestCommitInFailedTransaction(t *testing.T) {
 	}
 }
 
-func TestOpenURL(t *testing.T) {
-	t.Parallel()
-	testURL := func(url string) {
-		db := pqtest.MustDB(t, url)
-		// database/sql might not call our Open at all unless we do something with
-		// the connection
-		txn, err := db.Begin()
-		if err != nil {
-			t.Fatal(err)
-		}
-		txn.Rollback()
+func TestOpen(t *testing.T) {
+	tests := []struct {
+		dsn, wantErr string
+	}{
+		{"postgres://", ""},
+		{"postgresql://", ""},
+		{"host=doesnotexist hostaddr=127.0.0.1", ""}, // Should ignore the host
+
+		{"hostaddr=255.255.255.255", "dial tcp 255.255.255.255"},
 	}
-	testURL("postgres://")
-	testURL("postgresql://")
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.dsn, func(t *testing.T) {
+			t.Parallel()
+
+			db, err := pqtest.DB(tt.dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+
+			err = db.Ping()
+			if !pqtest.ErrorContains(err, tt.wantErr) {
+				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
+			}
+		})
+	}
 }
 
 func TestPgpass(t *testing.T) {
