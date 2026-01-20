@@ -110,3 +110,72 @@ func ExampleRegisterTLSConfig() {
 	}
 	// Output:
 }
+
+func ExampleCopyIn() {
+	// Connect and create table.
+	db, err := sql.Open("postgres", "")
+	if err != nil {
+		log.Fatal(err)
+	}
+	_, err = db.Exec(`create temp table users (name text, age int)`)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Need to start transaction and prepare a statement.
+	tx, err := db.Begin()
+	if err != nil {
+		log.Fatal(err)
+	}
+	stmt, err := tx.Prepare(pq.CopyIn("users", "name", "age"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Insert rows.
+	users := []struct {
+		Name string
+		Age  int
+	}{
+		{"Donald Duck", 36},
+		{"Scrooge McDuck", 86},
+	}
+	for _, user := range users {
+		_, err = stmt.Exec(user.Name, int64(user.Age))
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	// Finalize copy and statement, and commit transaction.
+	if _, err := stmt.Exec(); err != nil {
+		log.Fatal(err)
+	}
+	if err := stmt.Close(); err != nil {
+		log.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		log.Fatal(err)
+	}
+
+	// Query rows to verify.
+	rows, err := db.Query(`select * from users order by name`)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for rows.Next() {
+		var (
+			name string
+			age  int
+		)
+		err := rows.Scan(&name, &age)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(name, age)
+	}
+
+	// Output:
+	// Donald Duck 36
+	// Scrooge McDuck 86
+}
