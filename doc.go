@@ -90,40 +90,6 @@ failed.
 CopyIn uses COPY FROM internally. It is not possible to COPY outside of an
 explicit transaction in pq.
 
-Usage example:
-
-	tx, err := db.Begin()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	stmt, err := tx.Prepare(pq.CopyIn("users", "name", "age"))
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for _, user := range users {
-		_, err = stmt.Exec(user.Name, int64(user.Age))
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	_, err = stmt.Exec()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	err = stmt.Close()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	err = tx.Commit()
-	if err != nil {
-		log.Fatal(err)
-	}
-
 # Notifications
 
 PostgreSQL supports a simple publish/subscribe model using PostgreSQL's [NOTIFY] mechanism.
