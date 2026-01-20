@@ -216,14 +216,31 @@ type Config struct {
 // not allow run-time parameters in the connection string, instead requiring you
 // to supply them in the options parameter.
 //
-// pq supports both key=value type connection strings and postgres:// URL style
-// connection strings. For key=value strings, use single quotes for values that
-// contain whitespace or empty values. A backslash will escape the next
-// character:
+// # key=value connection strings
+//
+// For key=value strings, use single quotes for values that contain whitespace
+// or empty values. A backslash will escape the next character:
 //
 //	"user=pqgo password='with spaces'"
 //	"user=''"
 //	"user=space\ man password='it\'s valid'"
+//
+// # URL connection strings
+//
+// pq supports URL-style postgres:// or postgresql:// connection strings in the
+// form:
+//
+//	postgres[ql]://[user[:pwd]@][net-location][:port][/dbname][?param1=value1&...]
+//
+// Go's [net/url.Parse] is more strict than PostgreSQL's URL parser and will
+// (correctly) reject %2F in the host part. This means that unix-socket URLs:
+//
+//	postgres://[user[:pwd]@][unix-socket][:port[/dbname]][?param1=value1&...]
+//	postgres://%2Ftmp%2Fpostgres/db
+//
+// will not work. You will need to use "host=/tmp/postgres dbname=db".
+//
+// # Environment
 //
 // Most [PostgreSQL environment variables] are supported by pq. Environment
 // variables have a lower precedence than explicitly provided connection
