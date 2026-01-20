@@ -296,9 +296,7 @@ func TestParseURL(t *testing.T) {
 		{"", "", "invalid connection protocol:"},
 		{"http://hostname.remote", "", "invalid connection protocol: http"},
 
-		//{"postgresql://%2Fvar%2Flib%2Fpostgresql/dbname", "", ``},
-		//{"postgres:// host/db", "dbname='db' host='host'", ""},
-		//{"postgres://host/db ", "dbname='db' host='host'", ""},
+		{"postgresql://%2Fvar%2Flib%2Fpostgresql/dbname", "", `invalid URL escape "%2F"`},
 	}
 
 	t.Parallel()
