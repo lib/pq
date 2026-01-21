@@ -61,7 +61,7 @@ var sslNegotiations = []SSLNegotiation{SSLNegotiationPostgres, SSLNegotiationDir
 // dsn. Connector satisfies the [database/sql/driver.Connector] interface and
 // can be used to create any number of DB Conn's via [sql.OpenDB].
 type Connector struct {
-	opts   values
+	cfg    Config
 	dialer Dialer
 }
 
@@ -82,7 +82,7 @@ func NewConnector(dsn string) (*Connector, error) {
 // create any number of equivalent Conn's. The returned connector is intended to
 // be used with [sql.OpenDB].
 func NewConnectorConfig(cfg Config) (*Connector, error) {
-	return &Connector{opts: cfg.tomap(), dialer: defaultDialer{}}, nil
+	return &Connector{cfg: cfg, dialer: defaultDialer{}}, nil
 }
 
 // Connect returns a connection to the database using the fixed configuration of
@@ -272,6 +272,18 @@ type Config struct {
 // [PostgreSQL environment variables]: http://www.postgresql.org/docs/current/static/libpq-envars.html
 func NewConfig(dsn string) (Config, error) {
 	return newConfig(dsn, os.Environ())
+}
+
+// Clone returns a copy of the [Config].
+func (cfg Config) Clone() Config {
+	rt := make(map[string]string)
+	for k, v := range cfg.Runtime {
+		rt[k] = v
+	}
+	c := cfg
+	c.Runtime = rt
+	c.set = append([]string{}, cfg.set...)
+	return c
 }
 
 func newConfig(dsn string, env []string) (Config, error) {
@@ -560,9 +572,9 @@ func (cfg Config) isset(name string) bool {
 }
 
 // Convert to a map; mostly so we don't need to rewrite all the code.
-func (cfg Config) tomap() values {
+func (cfg Config) tomap() map[string]string {
 	var (
-		o      = make(values)
+		o      = make(map[string]string)
 		values = reflect.ValueOf(cfg)
 		types  = reflect.TypeOf(cfg)
 	)

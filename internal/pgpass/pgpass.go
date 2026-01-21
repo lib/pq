@@ -9,13 +9,13 @@ import (
 	"github.com/lib/pq/internal/pqutil"
 )
 
-func PasswordFromPgpass(o map[string]string) string {
+func PasswordFromPgpass(passfile, user, password, host, port, dbname string, passwordSet bool) string {
 	// Do not process .pgpass if a password was supplied.
-	if _, ok := o["password"]; ok {
-		return o["password"]
+	if passwordSet {
+		return password
 	}
 
-	filename := pqutil.Pgpass(o["passfile"])
+	filename := pqutil.Pgpass(passfile)
 	if filename == "" {
 		return ""
 	}
@@ -37,11 +37,11 @@ func PasswordFromPgpass(o map[string]string) string {
 			continue
 		}
 
-		socket := o["host"] == "" || filepath.IsAbs(o["host"]) || strings.HasPrefix(o["host"], "@")
-		if (split[0] == "*" || split[0] == o["host"] || (split[0] == "localhost" && socket)) &&
-			(split[1] == "*" || split[1] == o["port"]) &&
-			(split[2] == "*" || split[2] == o["dbname"]) &&
-			(split[3] == "*" || split[3] == o["user"]) {
+		socket := host == "" || filepath.IsAbs(host) || strings.HasPrefix(host, "@")
+		if (split[0] == "*" || split[0] == host || (split[0] == "localhost" && socket)) &&
+			(split[1] == "*" || split[1] == port) &&
+			(split[2] == "*" || split[2] == dbname) &&
+			(split[3] == "*" || split[3] == user) {
 			return split[4]
 		}
 	}

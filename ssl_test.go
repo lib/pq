@@ -233,7 +233,7 @@ func TestUnreadableHome(t *testing.T) {
 	// Ignore HOME being unset or not a directory
 	for _, h := range []string{"", "/dev/null"} {
 		os.Setenv("HOME", h)
-		err := sslClientCertificates(&tls.Config{}, values{})
+		err := sslClientCertificates(&tls.Config{}, Config{})
 		if err != nil {
 			t.Fatal(err)
 		}

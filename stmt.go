@@ -102,7 +102,7 @@ func (st *stmt) exec(v []driver.NamedValue) error {
 	w.byte(0) // unnamed portal
 	w.string(st.name)
 
-	if cn.binaryParameters {
+	if cn.cfg.BinaryParameters {
 		err := cn.sendBinaryParameters(w, v)
 		if err != nil {
 			return err
