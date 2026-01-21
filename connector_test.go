@@ -4,13 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/lib/pq/internal/pqtest"
+	"github.com/lib/pq/internal/proto"
 )
 
 func TestNewConnector(t *testing.T) {
@@ -354,11 +357,14 @@ func TestNewConfig(t *testing.T) {
 		{"", []string{"PGCONNECT_TIMEOUT=5s"}, "", `pq: wrong value for $PGCONNECT_TIMEOUT: strconv.ParseInt: parsing "5s": invalid syntax`},
 		{"port=5s", nil, "", `pq: wrong value for "port": strconv.ParseUint: parsing "5s": invalid syntax`},
 		{"", []string{"PGPORT=5s"}, "", `pq: wrong value for $PGPORT: strconv.ParseUint: parsing "5s": invalid syntax`},
+		{"host=a,b port=1,a", nil, "", `strconv.ParseUint: parsing "a": invalid syntax`},
 
 		// hostaddr
 		{"hostaddr=127.1.2.3", nil, "hostaddr=127.1.2.3", ""},
 		{"hostaddr=::1", nil, "hostaddr=::1", ""},
 		{"", []string{"PGHOSTADDR=2a01:4f9:3081:5413::2"}, "hostaddr=2a01:4f9:3081:5413::2", ""},
+		{"", []string{"PGHOSTADDR=lol"}, "", "unable to parse IP"},
+		{"hostaddr=1.1.1.1,lol", nil, "", "unable to parse IP"},
 
 		// Runtime
 		{"user=u search_path=abc", nil, "search_path=abc user=u", ""},
@@ -369,6 +375,14 @@ func TestNewConfig(t *testing.T) {
 			"dbname=db host=example.com port=1 user=u", ""},
 		{"postgres://u:pw@example.com:1/db?opt=val&sslmode=require", nil,
 			"dbname=db host=example.com opt=val password=pw port=1 sslmode=require user=u", ""},
+		{"postgres://pqgo@localhost/pqgo?hostaddr=1.1.1.1", nil, "dbname=pqgo host=localhost hostaddr=1.1.1.1 user=pqgo", ""},
+
+		{"postgres://pqgo@a,,b:1/pqgo?hostaddr=1.1.1.1,,2.2.2.2", nil,
+			"dbname=pqgo host=a,localhost,b hostaddr=1.1.1.1,,2.2.2.2 port=1 user=pqgo", ""},
+		// net/url doesn't support multiple ports, but can use ?port= (libpq
+		// also supports this).
+		{"postgres://pqgo@a,b:1,2/pqgo", nil, "", "invalid port"},
+		{"postgres://pqgo@a,b/pqgo?port=1,2", nil, "dbname=pqgo host=a,b port=1,2 user=pqgo", ""},
 
 		// Unsupported env vars
 		{"", []string{"PGREALM=abc"}, "", `pq: environment variable $PGREALM is not supported`},
@@ -381,6 +395,23 @@ func TestNewConfig(t *testing.T) {
 		{"sslnegotiation=sslmeharder", nil, "", `pq: wrong value for "sslnegotiation"`},
 		{"postgres://u:pw@example.com:1/db?sslnegotiation=sslmeharder", nil, "", `pq: wrong value for "sslnegotiation"`},
 		{"", []string{"PGSSLNEGOTIATION=sslmeharder"}, "", `pq: wrong value for $PGSSLNEGOTIATION`},
+
+		// multihost
+		{"host=a,b", nil, "host=a,b", ""},
+		{"host=a,b port=1,2", nil, "host=a,b port=1,2", ""},
+		{"", []string{"PGHOST=a,b"}, "host=a,b", ""},
+		{"hostaddr=127.2.2.2,127.3.3.3", nil, "hostaddr=127.2.2.2,127.3.3.3", ""},
+		// Fill in defaults
+		{"host=a,,b port=1,,2", nil, "host=a,localhost,b port=1,5432,2", ""},
+		{"host=a,,c hostaddr=1.1.1.1,,2.2.2.2", nil, "host=a,localhost,c hostaddr=1.1.1.1,,2.2.2.2", ""},
+		// Must have either one port or match number of hosts
+		{"host=a,,b port=1", nil, "host=a,localhost,b port=1", ""},
+		{"host=a,,b port=1,2", nil, "", "could not match 2 port numbers to 3 hosts"},
+		{"host=a,,b port=1,2,,4", nil, "", "could not match 4 port numbers to 3 hosts"},
+		// host and hostaddr must match
+		{"host=a,b,c hostaddr=1.1.1.1,2.2.2.2", nil, "", "could not match 3 host names to 2 hostaddr values"},
+		{"host=a hostaddr=1.1.1.1,2.2.2.2", nil, "", "could not match 1 host names to 2 hostaddr values"},
+		{"", []string{"PGHOST=a,,b", "PGHOSTADDR=1.1.1.1,,2.2.2.2", "PGPORT=3,,4"}, "host=a,localhost,b hostaddr=1.1.1.1,,2.2.2.2 port=3,5432,4", ""},
 	}
 
 	t.Parallel()
@@ -442,5 +473,110 @@ func TestConfigClone(t *testing.T) {
 		if have := cc.string(); have != want {
 			t.Errorf("\nhave: %q\nwant: %q", have, want)
 		}
+	}
+}
+
+func TestConnectMulti(t *testing.T) {
+	var (
+		connectedTo [3]bool
+		accept      = func(f pqtest.Fake, n int) func(net.Conn) {
+			return func(cn net.Conn) {
+				params, ok := f.ReadStartup(cn)
+				if !ok {
+					return
+				}
+
+				if params["database"] != "pqgo" {
+					f.WriteMsg(cn, proto.ErrorResponse, []byte(fmt.Sprintf(
+						"SFATAL\x00VFATAL\x00C3D000\x00Mdatabase %q does not exist\x00Fpostinit.c\x00L1014\x00RInitPostgres\x00\x00",
+						params["database"]))...)
+					return
+				}
+
+				f.WriteMsg(cn, proto.AuthenticationRequest, 0, 0, 0, 0)
+				f.WriteMsg(cn, proto.ReadyForQuery, 'I')
+				for {
+					code, _, ok := f.ReadMsg(cn)
+					if !ok {
+						return
+					}
+					switch code {
+					case proto.Query:
+						connectedTo[n] = true
+						f.WriteMsg(cn, proto.EmptyQueryResponse)
+						f.WriteMsg(cn, proto.ReadyForQuery, 'I')
+					case proto.Terminate:
+						cn.Close()
+						return
+					}
+				}
+			}
+		}
+		f1 = pqtest.NewFake(t)
+		f2 = pqtest.NewFake(t)
+		f3 = pqtest.NewFake(t)
+	)
+	f1.Accept(accept(f1, 0))
+	f2.Accept(accept(f2, 1))
+	f3.Accept(accept(f3, 2))
+
+	// The host from the test servers is always 127.0.0.1. Can't reliably use
+	// anything else AFAIK, as macOS only routes 127.0.0.1 instead of 127/8 like
+	// it should so then the tests will work on Linux but not macOS. One of many
+	// reasons macOS is wank. At any rate, make sure to add the port or you'll
+	// accidentally connect to the Docker container.
+	//
+	// TestNewConfig() already test if everything is parsed correctly, so don't
+	// need to extensively test that here.
+	tests := []struct {
+		dsn     string
+		want    [3]bool
+		wantErr []string
+	}{
+		{fmt.Sprintf(`host=%s,%s port=%s`, f1.Host(), f2.Host(), f1.Port()), [3]bool{true, false, false}, nil},
+		{fmt.Sprintf(`host=255.255.255.255,%s port=%s`, f2.Host(), f2.Port()), [3]bool{false, true, false}, nil},
+		{fmt.Sprintf(`host=wrong,wrong hostaddr=255.255.255.255,%s port=%s`, f2.Host(), f2.Port()), [3]bool{false, true, false}, nil},
+
+		// Make sure it returns both errors.
+		{fmt.Sprintf(`host=255.255.255.255,%s port=%s dbname=wrong`, f1.Host(), f1.Port()),
+			[3]bool{false, false, false}, []string{"dial tcp", `database "wrong" does not exist`}},
+	}
+
+	t.Parallel()
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			connectedTo = [3]bool{}
+
+			db := pqtest.MustDB(t, "connect_timeout=1 "+tt.dsn)
+			err := db.Ping()
+			if err != nil {
+				if tt.wantErr == nil {
+					t.Fatal(err)
+				}
+
+				jerr, ok := errors.Unwrap(err).(interface {
+					Unwrap() []error
+				})
+				if !ok {
+					t.Fatalf("Unwrap() []error missing on %T: %[1]s", err)
+				}
+				errs := jerr.Unwrap()
+				if len(errs) != len(tt.wantErr) {
+					t.Fatalf("wrong number of errors: %d", len(errs))
+				}
+				for i, e := range errs {
+					if !pqtest.ErrorContains(e, tt.wantErr[i]) {
+						t.Errorf("error %d wrong\nhave: %v\nwant: %v", i+1, e, tt.wantErr[i])
+					}
+				}
+				if t.Failed() {
+					t.FailNow()
+				}
+			}
+
+			if !reflect.DeepEqual(connectedTo, tt.want) {
+				t.Errorf("\nhave: %v\nwant: %v", connectedTo, tt.want)
+			}
+		})
 	}
 }

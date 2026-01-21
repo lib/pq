@@ -246,37 +246,67 @@ func DialOpen(d Dialer, dsn string) (_ driver.Conn, err error) {
 	return c.open(context.Background())
 }
 
-func (c *Connector) open(ctx context.Context) (cn *conn, err error) {
-	// Use a copy of cfg since it's written to.
-	cn = &conn{cfg: c.cfg.Clone(), dialer: c.dialer}
-	cn.cfg.Password = pgpass.PasswordFromPgpass(cn.cfg.Passfile, cn.cfg.User, cn.cfg.Password,
-		cn.cfg.Host, strconv.Itoa(int(cn.cfg.Port)), cn.cfg.Database, cn.cfg.isset("password"))
-
-	cn.c, err = dial(ctx, c.dialer, cn.cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	err = cn.ssl(cn.cfg)
-	if err != nil {
-		if cn.c != nil {
-			_ = cn.c.Close()
+func (c *Connector) open(ctx context.Context) (*conn, error) {
+	var (
+		errs []error
+		app  = func(err error, cfg Config) bool {
+			if err != nil {
+				if debugProto {
+					fmt.Println("CONNECT  (error)", err)
+				}
+				errs = append(errs, fmt.Errorf("connecting to %s:%d: %w", cfg.Host, cfg.Port, err))
+			}
+			return err != nil
 		}
-		return nil, err
+	)
+	for _, cfg := range c.cfg.hosts() {
+		if debugProto {
+			fmt.Println("CONNECT ", cfg.string())
+		}
+
+		cn := &conn{cfg: cfg, dialer: c.dialer}
+		cn.cfg.Password = pgpass.PasswordFromPgpass(cn.cfg.Passfile, cn.cfg.User, cn.cfg.Password,
+			cn.cfg.Host, strconv.Itoa(int(cn.cfg.Port)), cn.cfg.Database, cn.cfg.isset("password"))
+
+		var err error
+		cn.c, err = dial(ctx, c.dialer, cn.cfg)
+		if app(err, cfg) {
+			continue
+		}
+
+		err = cn.ssl(cn.cfg)
+		if app(err, cfg) {
+			if cn.c != nil {
+				_ = cn.c.Close()
+			}
+			continue
+		}
+
+		cn.buf = bufio.NewReader(cn.c)
+		err = cn.startup(cn.cfg)
+		if app(err, cfg) {
+			_ = cn.c.Close()
+			continue
+		}
+
+		// Reset the deadline, in case one was set (see dial)
+		if cn.cfg.ConnectTimeout > 0 {
+			err := cn.c.SetDeadline(time.Time{})
+			if app(err, cfg) {
+				_ = cn.c.Close()
+				continue
+			}
+		}
+
+		return cn, nil
 	}
 
-	cn.buf = bufio.NewReader(cn.c)
-	err = cn.startup(cn.cfg)
-	if err != nil {
-		_ = cn.c.Close()
-		return nil, err
+	if len(c.cfg.Multi) == 0 {
+		// Remove the "connecting to [..]" when we have just one host, so the
+		// error is identical to what we had before.
+		return nil, errors.Unwrap(errs[0])
 	}
-
-	// reset the deadline, in case one was set (see dial)
-	if cn.cfg.ConnectTimeout > 0 {
-		err = cn.c.SetDeadline(time.Time{})
-	}
-	return cn, err
+	return nil, fmt.Errorf("pq: could not connect to any of the hosts:\n%w", errors.Join(errs...))
 }
 
 func dial(ctx context.Context, d Dialer, cfg Config) (net.Conn, error) {

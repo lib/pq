@@ -143,28 +143,23 @@ func (cn *conn) cancel(ctx context.Context) error {
 	}
 	defer func() { _ = c.Close() }()
 
-	{
-		can := conn{c: c}
-		err = can.ssl(cfg)
-		if err != nil {
-			return err
-		}
+	cn2 := conn{c: c}
+	err = cn2.ssl(cfg)
+	if err != nil {
+		return err
+	}
 
-		w := can.writeBuf(0)
-		w.int32(proto.CancelRequestCode)
-		w.int32(cn.processID)
-		w.int32(cn.secretKey)
-
-		if err := can.sendStartupPacket(w); err != nil {
-			return err
-		}
+	w := cn2.writeBuf(0)
+	w.int32(proto.CancelRequestCode)
+	w.int32(cn.processID)
+	w.int32(cn.secretKey)
+	if err := cn2.sendStartupPacket(w); err != nil {
+		return err
 	}
 
 	// Read until EOF to ensure that the server received the cancel.
-	{
-		_, err := io.Copy(io.Discard, c)
-		return err
-	}
+	_, err = io.Copy(io.Discard, c)
+	return err
 }
 
 // Implement the "StmtQueryContext" interface
