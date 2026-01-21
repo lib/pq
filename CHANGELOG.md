@@ -35,6 +35,9 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 - Support `hostaddr` and `$PGHOSTADDR` ([#1243]).
 
+- Support multiple values in `host`, `port`, and `hostaddr`, which are each
+  tried in order ([#1246]).
+
 - Add `PQGO_DEBUG=1` print the communication with PostgreSQL to stderr, to aid
   in debugging, testing, and bug reports ([#1223]).
 
@@ -107,6 +110,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 [#1239]: https://github.com/lib/pq/pull/1239
 [#1240]: https://github.com/lib/pq/pull/1240
 [#1243]: https://github.com/lib/pq/pull/1243
+[#1246]: https://github.com/lib/pq/pull/1246
 
 
 v1.10.9 (2023-04-26)

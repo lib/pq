@@ -3,6 +3,7 @@ package pqtest
 import (
 	"encoding/binary"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/lib/pq/internal/proto"
@@ -40,6 +41,24 @@ func (f Fake) DSN() string {
 	return "host=" + h + " port=" + p
 }
 
+// Host returns the hostname for this server.
+func (f Fake) Host() string {
+	h, _, err := net.SplitHostPort(f.l.Addr().String())
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return h
+}
+
+// Port returns the port for this server.
+func (f Fake) Port() string {
+	_, p, err := net.SplitHostPort(f.l.Addr().String())
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return p
+}
+
 // Accept callback for new connections.
 func (f Fake) Accept(fun func(net.Conn)) {
 	go func() {
@@ -57,7 +76,7 @@ func (f Fake) Accept(fun func(net.Conn)) {
 // Startup reads the startup message from the server with [f.ReadStartup] and
 // sends [proto.AuthenticationRequest] and [proto.ReadyForQuery].
 func (f Fake) Startup(cn net.Conn) {
-	if !f.ReadStartup(cn) {
+	if _, ok := f.ReadStartup(cn); !ok {
 		return
 	}
 	// Technically we don't *need* to send the AuthRequest, but the psql CLI
@@ -67,9 +86,16 @@ func (f Fake) Startup(cn net.Conn) {
 }
 
 // ReadStartup reads the startup message.
-func (f Fake) ReadStartup(cn net.Conn) bool {
-	_, _, ok := f.read(cn, true)
-	return ok
+func (f Fake) ReadStartup(cn net.Conn) (map[string]string, bool) {
+	_, msg, ok := f.read(cn, true)
+	var (
+		params = make(map[string]string)
+		m      = strings.Split(string(msg[4:len(msg)-2]), "\x00")
+	)
+	for i := 0; i < len(m); i += 2 {
+		params[m[i]] = m[i+1]
+	}
+	return params, ok
 }
 
 // ReadMsg reads a message from the client (frontend).

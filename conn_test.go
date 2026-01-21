@@ -929,7 +929,6 @@ func TestSimpleQueryWithoutResponse(t *testing.T) {
 	f := pqtest.NewFake(t)
 	f.Accept(func(cn net.Conn) {
 		f.Startup(cn)
-
 		for {
 			code, _, ok := f.ReadMsg(cn)
 			if !ok {

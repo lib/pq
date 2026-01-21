@@ -104,6 +104,10 @@ func (c *Connector) Driver() driver.Driver { return &Driver{} }
 type Config struct {
 	// The host to connect to. Absolute paths and values that start with @ are
 	// for unix domain sockets. Defaults to localhost.
+	//
+	// A comma-separated list of host names is also accepted, in which case each
+	// host name in the list is tried in order; an empty item selects the
+	// default of localhost.
 	Host string `postgres:"host" env:"PGHOST"`
 
 	// IPv4 or IPv6 address to connect to. Using hostaddr allows the application
@@ -123,9 +127,20 @@ type Config struct {
 	//   server network address. The value for host is ignored unless the
 	//   authentication method requires it, in which case it will be used as the
 	//   host name.
+	//
+	// A comma-separated list of hostaddr values is also accepted, in which case
+	// each host in the list is tried in order. An empty item causes the
+	// corresponding host name to be used, or the default host name if that is
+	// empty as well.
 	Hostaddr netip.Addr `postgres:"hostaddr" env:"PGHOSTADDR"`
 
 	// The port to connect to. Defaults to 5432.
+	//
+	// If multiple hosts were given in the host or hostaddr parameters, this
+	// parameter may specify a comma-separated list of ports of the same length
+	// as the host list, or it may specify a single port number to be used for
+	// all hosts. An empty string, or an empty item in a comma-separated list,
+	// specifies the default of 5432.
 	Port uint16 `postgres:"port" env:"PGPORT"`
 
 	// The name of the database to connect to.
@@ -220,12 +235,28 @@ type Config struct {
 	// to this and sent to PostgreSQL during startup.
 	Runtime map[string]string `postgres:"-" env:"-"`
 
+	// Multi contains additional connection details. The first value is
+	// available in [Config.Host], [Config.Hostaddr], and [Config.Port], and
+	// additional ones (if any) are available here.
+	Multi []ConfigMultihost
+
 	// Record which parameters were given, so we can distinguish between an
 	// empty string "not given at all".
 	//
 	// The alternative is to use pointers or sql.Null[..], but that's more
 	// awkward to use.
 	set []string `env:"set"`
+
+	multiHost     []string
+	multiHostaddr []netip.Addr
+	multiPort     []uint16
+}
+
+// ConfigMultihost specifies an additional server to try to connect to.
+type ConfigMultihost struct {
+	Host     string
+	Hostaddr netip.Addr
+	Port     uint16
 }
 
 // NewConfig creates a new [Config] from the current environment and given DSN.
@@ -261,6 +292,11 @@ type Config struct {
 //
 // will not work. You will need to use "host=/tmp/postgres dbname=db".
 //
+// Similarly, multiple ports also won't work, but ?port= will:
+//
+//	postgres://host1,host2:5432,6543/dbname         Doesn't work
+//	postgres://host1,host2/dbname?port=5432,6543    Works
+//
 // # Environment
 //
 // Most [PostgreSQL environment variables] are supported by pq. Environment
@@ -287,6 +323,18 @@ func (cfg Config) Clone() Config {
 	return c
 }
 
+// hosts returns a slice of copies of this config, one for each host.
+func (cfg Config) hosts() []Config {
+	cfgs := make([]Config, 1, len(cfg.Multi)+1)
+	cfgs[0] = cfg.Clone()
+	for _, m := range cfg.Multi {
+		c := cfg.Clone()
+		c.Host, c.Hostaddr, c.Port = m.Host, m.Hostaddr, m.Port
+		cfgs = append(cfgs, c)
+	}
+	return cfgs
+}
+
 func newConfig(dsn string, env []string) (Config, error) {
 	cfg := Config{Host: "localhost", Port: 5432, SSLSNI: true}
 	if err := cfg.fromEnv(env); err != nil {
@@ -294,6 +342,37 @@ func newConfig(dsn string, env []string) (Config, error) {
 	}
 	if err := cfg.fromDSN(dsn); err != nil {
 		return Config{}, err
+	}
+
+	// Need to have exactly the same number of host and hostaddr, or only specify one.
+	if cfg.isset("host") && cfg.Host != "" && cfg.Hostaddr != (netip.Addr{}) && len(cfg.multiHost) != len(cfg.multiHostaddr) {
+		return Config{}, fmt.Errorf("pq: could not match %d host names to %d hostaddr values",
+			len(cfg.multiHost)+1, len(cfg.multiHostaddr)+1)
+	}
+	// Need one port that applies to all or exactly the same number of ports as hosts.
+	l, ll := max(len(cfg.multiHost), len(cfg.multiHostaddr)), len(cfg.multiPort)
+	if l > 0 && ll > 0 && l != ll {
+		return Config{}, fmt.Errorf("pq: could not match %d port numbers to %d hosts", ll+1, l+1)
+	}
+
+	// Populate Multi
+	if len(cfg.multiHostaddr) > len(cfg.multiHost) {
+		cfg.multiHost = make([]string, len(cfg.multiHostaddr))
+	}
+	for i, h := range cfg.multiHost {
+		p := cfg.Port
+		if len(cfg.multiPort) > 0 {
+			p = cfg.multiPort[i]
+		}
+		var addr netip.Addr
+		if len(cfg.multiHostaddr) > 0 {
+			addr = cfg.multiHostaddr[i]
+		}
+		cfg.Multi = append(cfg.Multi, ConfigMultihost{
+			Host:     h,
+			Port:     p,
+			Hostaddr: addr,
+		})
 	}
 
 	// Use the "fallback" application name if necessary
@@ -488,9 +567,15 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 	)
 	for i := 0; i < types.NumField(); i++ {
 		var (
-			rt = types.Field(i)
-			rv = values.Field(i)
-			k  = rt.Tag.Get(tag)
+			rt             = types.Field(i)
+			rv             = values.Field(i)
+			k              = rt.Tag.Get(tag)
+			connectTimeout = (tag == "postgres" && k == "connect_timeout") || (tag == "env" && k == "PGCONNECT_TIMEOUT")
+			host           = (tag == "postgres" && k == "host") || (tag == "env" && k == "PGHOST")
+			hostaddr       = (tag == "postgres" && k == "hostaddr") || (tag == "env" && k == "PGHOSTADDR")
+			port           = (tag == "postgres" && k == "port") || (tag == "env" && k == "PGPORT")
+			sslmode        = (tag == "postgres" && k == "sslmode") || (tag == "env" && k == "PGSSLMODE")
+			sslnegotiation = (tag == "postgres" && k == "sslnegotiation") || (tag == "env" && k == "PGSSLNEGOTIATION")
 		)
 		if k == "" || k == "-" {
 			continue
@@ -507,6 +592,21 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 				return fmt.Errorf("don't know how to set %s: unknown type %s", rt.Name, rt.Type.Kind())
 			case reflect.Struct:
 				if rt.Type == reflect.TypeOf(netip.Addr{}) {
+					if hostaddr {
+						vv := strings.Split(v, ",")
+						v = vv[0]
+						for _, vvv := range vv[1:] {
+							if vvv == "" {
+								cfg.multiHostaddr = append(cfg.multiHostaddr, netip.Addr{})
+							} else {
+								ip, err := netip.ParseAddr(vvv)
+								if err != nil {
+									return fmt.Errorf(f+"%w", k, err)
+								}
+								cfg.multiHostaddr = append(cfg.multiHostaddr, ip)
+							}
+						}
+					}
 					ip, err := netip.ParseAddr(v)
 					if err != nil {
 						return fmt.Errorf(f+"%w", k, err)
@@ -516,14 +616,21 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 					return fmt.Errorf("don't know how to set %s: unknown type %s", rt.Name, rt.Type)
 				}
 			case reflect.String:
-				if ((tag == "postgres" && k == "sslmode") || (tag == "env" && k == "PGSSLMODE")) &&
-					!slices.Contains(sslModes, SSLMode(v)) &&
-					!(strings.HasPrefix(v, "pqgo-") && hasTLSConfig(v[5:])) {
+				if sslmode && !slices.Contains(sslModes, SSLMode(v)) && !(strings.HasPrefix(v, "pqgo-") && hasTLSConfig(v[5:])) {
 					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(sslModes))
 				}
-				if ((tag == "postgres" && k == "sslnegotiation") || (tag == "env" && k == "PGSSLNEGOTIATION")) &&
-					!slices.Contains(sslNegotiations, SSLNegotiation(v)) {
+				if sslnegotiation && !slices.Contains(sslNegotiations, SSLNegotiation(v)) {
 					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(sslNegotiations))
+				}
+				if host {
+					vv := strings.Split(v, ",")
+					v = vv[0]
+					for i, vvv := range vv[1:] {
+						if vvv == "" {
+							vv[i+1] = "localhost"
+						}
+					}
+					cfg.multiHost = append(cfg.multiHost, vv[1:]...)
 				}
 				rv.SetString(v)
 			case reflect.Int64:
@@ -531,11 +638,25 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 				if err != nil {
 					return fmt.Errorf(f+"%w", k, err)
 				}
-				if (tag == "postgres" && k == "connect_timeout") || (tag == "env" && k == "PGCONNECT_TIMEOUT") {
+				if connectTimeout {
 					n = int64(time.Duration(n) * time.Second)
 				}
 				rv.SetInt(n)
 			case reflect.Uint16:
+				if port {
+					vv := strings.Split(v, ",")
+					v = vv[0]
+					for _, vvv := range vv[1:] {
+						if vvv == "" {
+							vvv = "5432"
+						}
+						n, err := strconv.ParseUint(vvv, 10, 16)
+						if err != nil {
+							return fmt.Errorf(f+"%w", k, err)
+						}
+						cfg.multiPort = append(cfg.multiPort, uint16(n))
+					}
+				}
 				n, err := strconv.ParseUint(v, 10, 16)
 				if err != nil {
 					return fmt.Errorf(f+"%w", k, err)
@@ -572,7 +693,7 @@ func (cfg Config) isset(name string) bool {
 	return slices.Contains(cfg.set, name)
 }
 
-// Convert to a map; mostly so we don't need to rewrite all the code.
+// Convert to a map; used only in tests.
 func (cfg Config) tomap() map[string]string {
 	var (
 		o      = make(map[string]string)
@@ -620,7 +741,7 @@ func (cfg Config) tomap() map[string]string {
 	return o
 }
 
-// Create DSN for this config; primarily for tests.
+// Create DSN for this config; used only in tests.
 func (cfg Config) string() string {
 	var (
 		m    = cfg.tomap()
@@ -633,6 +754,22 @@ func (cfg Config) string() string {
 		case "host", "port", "user", "sslsni":
 			if !cfg.isset(k) {
 				continue
+			}
+		}
+		if k == "host" && len(cfg.multiHost) > 0 {
+			m[k] += "," + strings.Join(cfg.multiHost, ",")
+		}
+		if k == "hostaddr" && len(cfg.multiHostaddr) > 0 {
+			for _, ha := range cfg.multiHostaddr {
+				m[k] += ","
+				if ha != (netip.Addr{}) {
+					m[k] += ha.String()
+				}
+			}
+		}
+		if k == "port" && len(cfg.multiPort) > 0 {
+			for _, p := range cfg.multiPort {
+				m[k] += "," + strconv.Itoa(int(p))
 			}
 		}
 		keys = append(keys, k)
