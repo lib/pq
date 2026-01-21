@@ -78,7 +78,7 @@ func TestNewConnector(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if have := c.opts["passfile"]; have != "/tmp/.pgpass" {
+		if have := c.cfg.Passfile; have != "/tmp/.pgpass" {
 			t.Fatalf("wrong option for pgassfile: %q", have)
 		}
 	})
@@ -98,7 +98,7 @@ func TestNewConnector(t *testing.T) {
 		want := fmt.Sprintf(
 			`map[client_encoding:UTF8 connect_timeout:20 datestyle:ISO, MDY dbname:pqgo host:localhost port:%d search_path:foo sslmode:disable sslsni:yes user:pqgo]`,
 			cfg.Port)
-		if have := fmt.Sprintf("%v", c.opts); have != want {
+		if have := fmt.Sprintf("%v", c.cfg.tomap()); have != want {
 			t.Errorf("\nhave: %s\nwant: %s", have, want)
 		}
 
@@ -114,39 +114,39 @@ func TestNewConnector(t *testing.T) {
 func TestParseOpts(t *testing.T) {
 	tests := []struct {
 		in      string
-		want    values
+		want    map[string]string
 		wantErr string
 	}{
-		{"dbname=hello user=goodbye", values{"dbname": "hello", "user": "goodbye"}, ""},
-		{"dbname=hello user=goodbye  ", values{"dbname": "hello", "user": "goodbye"}, ""},
-		{"dbname = hello user=goodbye", values{"dbname": "hello", "user": "goodbye"}, ""},
-		{"dbname=hello user =goodbye", values{"dbname": "hello", "user": "goodbye"}, ""},
-		{"dbname=hello user= goodbye", values{"dbname": "hello", "user": "goodbye"}, ""},
-		{"host=localhost password='correct horse battery staple'", values{"host": "localhost", "password": "correct horse battery staple"}, ""},
-		{"dbname=データベース password=パスワード", values{"dbname": "データベース", "password": "パスワード"}, ""},
-		{"dbname=hello user=''", values{"dbname": "hello", "user": ""}, ""},
-		{"user='' dbname=hello", values{"dbname": "hello", "user": ""}, ""},
+		{"dbname=hello user=goodbye", map[string]string{"dbname": "hello", "user": "goodbye"}, ""},
+		{"dbname=hello user=goodbye  ", map[string]string{"dbname": "hello", "user": "goodbye"}, ""},
+		{"dbname = hello user=goodbye", map[string]string{"dbname": "hello", "user": "goodbye"}, ""},
+		{"dbname=hello user =goodbye", map[string]string{"dbname": "hello", "user": "goodbye"}, ""},
+		{"dbname=hello user= goodbye", map[string]string{"dbname": "hello", "user": "goodbye"}, ""},
+		{"host=localhost password='correct horse battery staple'", map[string]string{"host": "localhost", "password": "correct horse battery staple"}, ""},
+		{"dbname=データベース password=パスワード", map[string]string{"dbname": "データベース", "password": "パスワード"}, ""},
+		{"dbname=hello user=''", map[string]string{"dbname": "hello", "user": ""}, ""},
+		{"user='' dbname=hello", map[string]string{"dbname": "hello", "user": ""}, ""},
 		// The last option value is an empty string if there's no non-whitespace after its =
-		{"dbname=hello user=   ", values{"dbname": "hello", "user": ""}, ""},
+		{"dbname=hello user=   ", map[string]string{"dbname": "hello", "user": ""}, ""},
 
 		// The parser ignores spaces after = and interprets the next set of non-whitespace characters as the value.
-		{"user= password=foo", values{"user": "password=foo"}, ""},
+		{"user= password=foo", map[string]string{"user": "password=foo"}, ""},
 
 		// Backslash escapes next char
-		{`user=a\ \'\\b`, values{"user": `a '\b`}, ""},
-		{`user='a \'b'`, values{"user": `a 'b`}, ""},
+		{`user=a\ \'\\b`, map[string]string{"user": `a '\b`}, ""},
+		{`user='a \'b'`, map[string]string{"user": `a 'b`}, ""},
 
 		// Incomplete escape
-		{`user=x\`, values{}, "missing character after backslash"},
+		{`user=x\`, map[string]string{}, "missing character after backslash"},
 
 		// No '=' after the key
-		{"postgre://marko@internet", values{}, `missing "="`},
-		{"dbname user=goodbye", values{}, `missing "="`},
-		{"user=foo blah", values{}, `missing "="`},
-		{"user=foo blah   ", values{}, `missing "="`},
+		{"postgre://marko@internet", map[string]string{}, `missing "="`},
+		{"dbname user=goodbye", map[string]string{}, `missing "="`},
+		{"user=foo blah", map[string]string{}, `missing "="`},
+		{"user=foo blah   ", map[string]string{}, `missing "="`},
 
 		// Unterminated quoted value
-		{"dbname=hello user='unterminated", values{}, `unterminated quoted string`},
+		{"dbname=hello user='unterminated", map[string]string{}, `unterminated quoted string`},
 	}
 
 	t.Parallel()
@@ -228,7 +228,7 @@ func TestRuntimeParameters(t *testing.T) {
 func TestParseEnviron(t *testing.T) {
 	tests := []struct {
 		in   []string
-		want values
+		want map[string]string
 	}{
 		{[]string{"PGDATABASE=hello", "PGUSER=goodbye"},
 			map[string]string{"dbname": "hello", "user": "goodbye"}},
@@ -419,4 +419,30 @@ func TestNewConfig(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestConfigClone(t *testing.T) {
+	c := Config{
+		Host:    "abc",
+		Port:    5432,
+		Runtime: map[string]string{"search_path": "def"},
+		set:     []string{"host", "search_path", "port"},
+	}
+	cc := c.Clone()
+	c.Host = "NEW"
+	c.Runtime["search_path"] = "NEW"
+	c.set[2] = "NEW"
+
+	{
+		want := `host=NEW search_path=NEW`
+		if have := c.string(); have != want {
+			t.Errorf("\nhave: %q\nwant: %q", have, want)
+		}
+	}
+	{
+		want := `host=abc port=5432 search_path=def`
+		if have := cc.string(); have != want {
+			t.Errorf("\nhave: %q\nwant: %q", have, want)
+		}
+	}
 }

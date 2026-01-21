@@ -165,7 +165,7 @@ type conn struct {
 
 	// Save connection arguments to use during CancelRequest.
 	dialer Dialer
-	opts   values
+	cfg    Config
 
 	// Cancellation key data for use with CancelRequest messages.
 	processID int
@@ -181,26 +181,10 @@ type conn struct {
 	// (ErrBadConn) or getForNext().
 	err syncErr
 
-	// If set, this connection should never use the binary format when
-	// receiving query results from prepared statements.  Only provided for
-	// debugging.
-	disablePreparedBinaryResult bool
-
-	// Whether to always send []byte parameters over as binary.  Enables single
-	// round-trip mode for non-prepared Query calls.
-	binaryParameters bool
-
-	// If true this connection is in the middle of a COPY
-	inCopy bool
-
-	// If not nil, notices will be synchronously sent here
-	noticeHandler func(*Error)
-
-	// If not nil, notifications will be synchronously sent here
-	notificationHandler func(*Notification)
-
-	// GSSAPI context
-	gss GSS
+	inCopy              bool                // If true this connection is in the middle of a COPY
+	noticeHandler       func(*Error)        // If not nil, notices will be synchronously sent here
+	notificationHandler func(*Notification) // If not nil, notifications will be synchronously sent here
+	gss                 GSS                 // GSSAPI context
 }
 
 type syncErr struct {
@@ -263,36 +247,17 @@ func DialOpen(d Dialer, dsn string) (_ driver.Conn, err error) {
 }
 
 func (c *Connector) open(ctx context.Context) (cn *conn, err error) {
-	// Create a new values map (copy). This makes it so maps in different
-	// connections do not reference the same underlying data structure, so it is
-	// safe for multiple connections to concurrently write to their opts.
-	o := make(values)
-	for k, v := range c.opts {
-		o[k] = v
-	}
+	// Use a copy of cfg since it's written to.
+	cn = &conn{cfg: c.cfg.Clone(), dialer: c.dialer}
+	cn.cfg.Password = pgpass.PasswordFromPgpass(cn.cfg.Passfile, cn.cfg.User, cn.cfg.Password,
+		cn.cfg.Host, strconv.Itoa(int(cn.cfg.Port)), cn.cfg.Database, cn.cfg.isset("password"))
 
-	cn = &conn{opts: o, dialer: c.dialer}
-	if v, ok := o["disable_prepared_binary_result"]; ok {
-		cn.disablePreparedBinaryResult, err = pqutil.ParseBool(v)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if v, ok := o["binary_parameters"]; ok {
-		cn.binaryParameters, err = pqutil.ParseBool(v)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	o["password"] = pgpass.PasswordFromPgpass(o)
-
-	cn.c, err = dial(ctx, c.dialer, o)
+	cn.c, err = dial(ctx, c.dialer, cn.cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	err = cn.ssl(o)
+	err = cn.ssl(cn.cfg)
 	if err != nil {
 		if cn.c != nil {
 			_ = cn.c.Close()
@@ -301,42 +266,39 @@ func (c *Connector) open(ctx context.Context) (cn *conn, err error) {
 	}
 
 	cn.buf = bufio.NewReader(cn.c)
-	err = cn.startup(o)
+	err = cn.startup(cn.cfg)
 	if err != nil {
 		_ = cn.c.Close()
 		return nil, err
 	}
 
 	// reset the deadline, in case one was set (see dial)
-	if timeout, ok := o["connect_timeout"]; ok && timeout != "0" {
+	if cn.cfg.ConnectTimeout > 0 {
 		err = cn.c.SetDeadline(time.Time{})
 	}
 	return cn, err
 }
 
-func dial(ctx context.Context, d Dialer, o values) (net.Conn, error) {
-	network, address := o.network()
+func dial(ctx context.Context, d Dialer, cfg Config) (net.Conn, error) {
+	network, address := cfg.network()
 
 	// Zero or not specified means wait indefinitely.
-	if timeout, ok := o["connect_timeout"]; ok && timeout != "0" {
-		seconds, err := strconv.ParseInt(timeout, 10, 0)
-		if err != nil {
-			return nil, fmt.Errorf("invalid value for parameter connect_timeout: %w", err)
-		}
-		duration := time.Duration(seconds) * time.Second
-
+	if cfg.ConnectTimeout > 0 {
 		// connect_timeout should apply to the entire connection establishment
 		// procedure, so we both use a timeout for the TCP connection
-		// establishment and set a deadline for doing the initial handshake.
-		// The deadline is then reset after startup() is done.
-		deadline := time.Now().Add(duration)
-		var conn net.Conn
+		// establishment and set a deadline for doing the initial handshake. The
+		// deadline is then reset after startup() is done.
+		var (
+			deadline = time.Now().Add(cfg.ConnectTimeout)
+			conn     net.Conn
+			err      error
+		)
 		if dctx, ok := d.(DialerContext); ok {
-			ctx, cancel := context.WithTimeout(ctx, duration)
+			ctx, cancel := context.WithTimeout(ctx, cfg.ConnectTimeout)
 			defer cancel()
 			conn, err = dctx.DialContext(ctx, network, address)
 		} else {
-			conn, err = d.DialTimeout(network, address, duration)
+			conn, err = d.DialTimeout(network, address, cfg.ConnectTimeout)
 		}
 		if err != nil {
 			return nil, err
@@ -671,7 +633,7 @@ func (cn *conn) prepareTo(q, stmtName string) (*stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	st.colFmts, st.colFmtData, err = decideColumnFormats(st.colTyps, cn.disablePreparedBinaryResult)
+	st.colFmts, st.colFmtData, err = decideColumnFormats(st.colTyps, cn.cfg.DisablePreparedBinaryResult)
 	if err != nil {
 		return nil, err
 	}
@@ -779,7 +741,7 @@ func (cn *conn) query(query string, args []driver.NamedValue) (*rows, error) {
 		return cn.simpleQuery(query)
 	}
 
-	if cn.binaryParameters {
+	if cn.cfg.BinaryParameters {
 		err := cn.sendBinaryModeQuery(query, args)
 		if err != nil {
 			return nil, cn.handleError(err, query)
@@ -833,7 +795,7 @@ func (cn *conn) Exec(query string, args []driver.Value) (driver.Result, error) {
 		return r, cn.handleError(err, query)
 	}
 
-	if cn.binaryParameters {
+	if cn.cfg.BinaryParameters {
 		err := cn.sendBinaryModeQuery(query, toNamedValue(args))
 		if err != nil {
 			return nil, cn.handleError(err, query)
@@ -1037,8 +999,8 @@ func (cn *conn) recv1() (proto.ResponseCode, *readBuf, error) {
 	return t, r, nil
 }
 
-func (cn *conn) ssl(o values) error {
-	upgrade, err := ssl(o)
+func (cn *conn) ssl(cfg Config) error {
+	upgrade, err := ssl(cfg)
 	if err != nil {
 		return err
 	}
@@ -1048,9 +1010,9 @@ func (cn *conn) ssl(o values) error {
 		return nil
 	}
 
-	// only negotiate the ssl handshake if requested (which is the default).
+	// Only negotiate the ssl handshake if requested (which is the default).
 	// sllnegotiation=direct is supported by pg17 and above.
-	if sslnegotiation(o) {
+	if cfg.SSLNegotiation != SSLNegotiationDirect {
 		w := cn.writeBuf(0)
 		w.int32(80877103)
 		if err = cn.sendStartupPacket(w); err != nil {
@@ -1072,41 +1034,29 @@ func (cn *conn) ssl(o values) error {
 	return err
 }
 
-// isDriverSetting returns true iff a setting is purely for configuring the
-// driver's options and should not be sent to the server in the connection
-// startup packet.
-func isDriverSetting(key string) bool {
-	switch key {
-	case "host", "hostaddr", "port", "password", "fallback_application_name",
-		"sslmode", "sslcert", "sslkey", "sslrootcert", "sslinline", "sslsni",
-		"connect_timeout", "binary_parameters", "disable_prepared_binary_result",
-		"krbsrvname", "krbspn":
-		return true
-	default:
-		return false
-	}
-}
-
-func (cn *conn) startup(o values) error {
+func (cn *conn) startup(cfg Config) error {
 	w := cn.writeBuf(0)
-	w.int32(196608)
-	// Send the backend the name of the database we want to connect to, and the
-	// user we want to connect as. Additionally, we send over any run-time
-	// parameters potentially included in the connection string. If the server
-	// doesn't recognize any of them, it will reply with an error.
-	for k, v := range o {
-		if isDriverSetting(k) {
-			// skip options which can't be run-time parameters
-			continue
-		}
-		// The protocol requires us to supply the database name as "database"
-		// instead of "dbname".
-		if k == "dbname" {
-			k = "database"
-		}
+	w.int32(0x30000) // Protocol version
+
+	w.string("user")
+	w.string(cfg.User)
+	w.string("database")
+	w.string(cfg.Database)
+	// w.string("replication") // Sent by libpq, but we don't support that.
+	w.string("options")
+	w.string(cfg.Options)
+	if cfg.ApplicationName != "" {
+		w.string("application_name")
+		w.string(cfg.ApplicationName)
+	}
+	w.string("client_encoding")
+	w.string(cfg.ClientEncoding)
+
+	for k, v := range cfg.Runtime {
 		w.string(k)
 		w.string(v)
 	}
+
 	w.string("")
 	if err := cn.sendStartupPacket(w); err != nil {
 		return err
@@ -1123,7 +1073,7 @@ func (cn *conn) startup(o values) error {
 		case proto.ParameterStatus:
 			cn.processParameterStatus(r)
 		case proto.AuthenticationRequest:
-			err := cn.auth(r, o)
+			err := cn.auth(r, cfg)
 			if err != nil {
 				return err
 			}
@@ -1136,7 +1086,7 @@ func (cn *conn) startup(o values) error {
 	}
 }
 
-func (cn *conn) auth(r *readBuf, o values) error {
+func (cn *conn) auth(r *readBuf, cfg Config) error {
 	switch code := proto.AuthCode(r.int32()); code {
 	default:
 		return fmt.Errorf("pq: unknown authentication response: %s", code)
@@ -1148,7 +1098,7 @@ func (cn *conn) auth(r *readBuf, o values) error {
 
 	case proto.AuthReqPassword:
 		w := cn.writeBuf(proto.PasswordMessage)
-		w.string(o["password"])
+		w.string(cfg.Password)
 		err := cn.send(w)
 		if err != nil {
 			return err
@@ -1169,7 +1119,7 @@ func (cn *conn) auth(r *readBuf, o values) error {
 	case proto.AuthReqMD5:
 		s := string(r.next(4))
 		w := cn.writeBuf(proto.PasswordMessage)
-		w.string("md5" + md5s(md5s(o["password"]+o["user"])+s))
+		w.string("md5" + md5s(md5s(cfg.Password+cfg.User)+s))
 		err := cn.send(w)
 		if err != nil {
 			return err
@@ -1197,16 +1147,16 @@ func (cn *conn) auth(r *readBuf, o values) error {
 		}
 
 		var token []byte
-		if spn, ok := o["krbspn"]; ok {
+		if cfg.isset("krbspn") {
 			// Use the supplied SPN if provided..
-			token, err = cli.GetInitTokenFromSpn(spn)
+			token, err = cli.GetInitTokenFromSpn(cfg.KrbSpn)
 		} else {
 			// Allow the kerberos service name to be overridden
 			service := "postgres"
-			if val, ok := o["krbsrvname"]; ok {
-				service = val
+			if cfg.isset("krbsrvname") {
+				service = cfg.KrbSrvname
 			}
-			token, err = cli.GetInitToken(o["host"], service)
+			token, err = cli.GetInitToken(cfg.Host, service)
 		}
 		if err != nil {
 			return fmt.Errorf("pq: failed to get Kerberos ticket: %w", err)
@@ -1243,7 +1193,7 @@ func (cn *conn) auth(r *readBuf, o values) error {
 		return nil
 
 	case proto.AuthReqSASL:
-		sc := scram.NewClient(sha256.New, o["user"], o["password"])
+		sc := scram.NewClient(sha256.New, cfg.User, cfg.Password)
 		sc.Step(nil)
 		if sc.Err() != nil {
 			return fmt.Errorf("pq: SCRAM-SHA-256 error: %w", sc.Err())

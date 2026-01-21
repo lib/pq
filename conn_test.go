@@ -100,8 +100,8 @@ func TestOpen(t *testing.T) {
 }
 
 func TestPgpass(t *testing.T) {
-	assertPassword := func(want string, extra values) {
-		o := values{
+	assertPassword := func(want string, extra map[string]string) {
+		o := map[string]string{
 			"host":            "localhost",
 			"sslmode":         "disable",
 			"connect_timeout": "20",
@@ -114,7 +114,8 @@ func TestPgpass(t *testing.T) {
 		for k, v := range extra {
 			o[k] = v
 		}
-		have := pgpass.PasswordFromPgpass(o)
+		_, pwd := o["password"]
+		have := pgpass.PasswordFromPgpass(o["passfile"], o["user"], o["password"], o["host"], o["port"], o["dbname"], pwd)
 		if have != want {
 			t.Fatalf("wrong password\nhave: %q\nwant: %q", have, want)
 		}
@@ -129,27 +130,27 @@ func TestPgpass(t *testing.T) {
 	`))
 
 	// Missing passfile means empty password.
-	assertPassword("", values{"host": "server", "dbname": "some_db", "user": "some_user"})
+	assertPassword("", map[string]string{"host": "server", "dbname": "some_db", "user": "some_user"})
 
 	// wrong permissions for the pgpass file means it should be ignored
-	assertPassword("", values{"host": "example.com", "passfile": file, "user": "foo"})
+	assertPassword("", map[string]string{"host": "example.com", "passfile": file, "user": "foo"})
 
 	if err := os.Chmod(file, 0600); err != nil { // Fix the permissions
 		t.Fatal(err)
 	}
 
-	assertPassword("pass_A", values{"host": "server", "passfile": file, "dbname": "some_db", "user": "some_user"})
-	assertPassword("pass_fallback", values{"host": "example.com", "passfile": file, "user": "foo"})
-	assertPassword("pass_B", values{"host": "example.com", "passfile": file, "dbname": "some_db", "user": "some_user"})
+	assertPassword("pass_A", map[string]string{"host": "server", "passfile": file, "dbname": "some_db", "user": "some_user"})
+	assertPassword("pass_fallback", map[string]string{"host": "example.com", "passfile": file, "user": "foo"})
+	assertPassword("pass_B", map[string]string{"host": "example.com", "passfile": file, "dbname": "some_db", "user": "some_user"})
 
 	// localhost also matches the default "" and UNIX sockets
-	assertPassword("pass_C", values{"host": "", "passfile": file, "user": "some_user"})
-	assertPassword("pass_C", values{"host": "/tmp", "passfile": file, "user": "some_user"})
+	assertPassword("pass_C", map[string]string{"host": "", "passfile": file, "user": "some_user"})
+	assertPassword("pass_C", map[string]string{"host": "/tmp", "passfile": file, "user": "some_user"})
 
 	// Connection parameter takes precedence
 	os.Setenv("PGPASSFILE", "/tmp")
 	defer os.Unsetenv("PGPASSFILE")
-	assertPassword("pass_A", values{"host": "server", "passfile": file, "dbname": "some_db", "user": "some_user"})
+	assertPassword("pass_A", map[string]string{"host": "server", "passfile": file, "dbname": "some_db", "user": "some_user"})
 }
 
 func TestExecNilSlice(t *testing.T) {
@@ -2146,7 +2147,7 @@ func TestAuth(t *testing.T) {
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			t.Run("unsupported auth", func(t *testing.T) {
-				err := (&conn{}).auth(&tt.buf, values{})
+				err := (&conn{}).auth(&tt.buf, Config{})
 				if !pqtest.ErrorContains(err, tt.wantErr) {
 					t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
 				}

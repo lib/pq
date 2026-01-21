@@ -131,26 +131,19 @@ func (cn *conn) watchCancel(ctx context.Context) func() {
 }
 
 func (cn *conn) cancel(ctx context.Context) error {
-	// Create a new values map (copy). This makes sure the connection created
-	// in this method cannot write to the same underlying data, which could
-	// cause a concurrent map write panic. This is necessary because cancel
-	// is called from a goroutine in watchCancel.
-	o := make(values)
-	for k, v := range cn.opts {
-		o[k] = v
-	}
+	// Use a copy since a new connection is created here. This is necessary
+	// because cancel is called from a goroutine in watchCancel.
+	cfg := cn.cfg.Clone()
 
-	c, err := dial(ctx, cn.dialer, o)
+	c, err := dial(ctx, cn.dialer, cfg)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = c.Close() }()
 
 	{
-		can := conn{
-			c: c,
-		}
-		err = can.ssl(o)
+		can := conn{c: c}
+		err = can.ssl(cfg)
 		if err != nil {
 			return err
 		}
@@ -210,10 +203,9 @@ func (st *stmt) watchCancel(ctx context.Context) func() {
 		go func() {
 			select {
 			case <-done:
-				// At this point the function level context is canceled,
-				// so it must not be used for the additional network
-				// request to cancel the query.
-				// Create a new context to pass into the dial.
+				// At this point the function level context is canceled, so it
+				// must not be used for the additional network request to cancel
+				// the query. Create a new context to pass into the dial.
 				ctxCancel, cancel := context.WithTimeout(context.Background(), watchCancelDialContextTimeout)
 				defer cancel()
 
