@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/lib/pq/internal/proto"
 )
 
 const watchCancelDialContextTimeout = 10 * time.Second
@@ -149,7 +151,7 @@ func (cn *conn) cancel(ctx context.Context) error {
 		}
 
 		w := can.writeBuf(0)
-		w.int32(80877102) // cancel request code
+		w.int32(proto.CancelRequestCode)
 		w.int32(cn.processID)
 		w.int32(cn.secretKey)
 

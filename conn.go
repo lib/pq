@@ -1014,7 +1014,7 @@ func (cn *conn) ssl(cfg Config) error {
 	// sllnegotiation=direct is supported by pg17 and above.
 	if cfg.SSLNegotiation != SSLNegotiationDirect {
 		w := cn.writeBuf(0)
-		w.int32(80877103)
+		w.int32(proto.NegotiateSSLCode)
 		if err = cn.sendStartupPacket(w); err != nil {
 			return err
 		}
@@ -1036,7 +1036,7 @@ func (cn *conn) ssl(cfg Config) error {
 
 func (cn *conn) startup(cfg Config) error {
 	w := cn.writeBuf(0)
-	w.int32(0x30000) // Protocol version
+	w.int32(proto.ProtocolVersion30)
 
 	w.string("user")
 	w.string(cfg.User)
