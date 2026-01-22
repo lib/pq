@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -516,12 +517,12 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 				}
 			case reflect.String:
 				if ((tag == "postgres" && k == "sslmode") || (tag == "env" && k == "PGSSLMODE")) &&
-					!pqutil.Contains(sslModes, SSLMode(v)) &&
+					!slices.Contains(sslModes, SSLMode(v)) &&
 					!(strings.HasPrefix(v, "pqgo-") && hasTLSConfig(v[5:])) {
 					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(sslModes))
 				}
 				if ((tag == "postgres" && k == "sslnegotiation") || (tag == "env" && k == "PGSSLNEGOTIATION")) &&
-					!pqutil.Contains(sslNegotiations, SSLNegotiation(v)) {
+					!slices.Contains(sslNegotiations, SSLNegotiation(v)) {
 					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(sslNegotiations))
 				}
 				rv.SetString(v)
@@ -568,7 +569,7 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 }
 
 func (cfg Config) isset(name string) bool {
-	return pqutil.Contains(cfg.set, name)
+	return slices.Contains(cfg.set, name)
 }
 
 // Convert to a map; mostly so we don't need to rewrite all the code.
@@ -587,7 +588,7 @@ func (cfg Config) tomap() map[string]string {
 		if k == "" || k == "-" {
 			continue
 		}
-		if !rv.IsZero() || pqutil.Contains(cfg.set, k) {
+		if !rv.IsZero() || slices.Contains(cfg.set, k) {
 			switch rt.Type.Kind() {
 			default:
 				if s, ok := rv.Interface().(fmt.Stringer); ok {

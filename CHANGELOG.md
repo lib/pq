@@ -1,6 +1,6 @@
 unreleased
 ----------
-This version of pq requires Go 1.18 or newer.
+This version of pq requires Go 1.21 or newer.
 
 pq now supports only maintained PostgreSQL releases, which is PostgreSQL 14 and
 newer. Previously PostgreSQL 8.4 and newer were supported.

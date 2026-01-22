@@ -1,6 +1,8 @@
 package pqtest
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"os"
 	"strings"
@@ -38,6 +40,15 @@ func ForceBinaryParameters() bool {
 	default:
 		panic("unexpected value for PQTEST_BINARY_PARAMETERS")
 	}
+}
+
+// InvalidCertificate reports if this error is an "invalid certificate" error.
+func InvalidCertificate(err error) bool {
+	switch err.(type) {
+	case x509.UnknownAuthorityError, x509.HostnameError, *tls.CertificateVerificationError:
+		return true
+	}
+	return false
 }
 
 var envOnce sync.Once
