@@ -337,10 +337,10 @@ func TestBoolArrayValue(t *testing.T) {
 }
 
 func BenchmarkBoolArrayValue(b *testing.B) {
-	rand.Seed(1)
+	rnd := rand.New(rand.NewSource(1))
 	x := make([]bool, 10)
 	for i := 0; i < len(x); i++ {
-		x[i] = rand.Intn(2) == 0
+		x[i] = rnd.Intn(2) == 0
 	}
 	a := BoolArray(x)
 
@@ -488,12 +488,12 @@ func TestByteaArrayValue(t *testing.T) {
 }
 
 func BenchmarkByteaArrayValue(b *testing.B) {
-	rand.Seed(1)
+	rnd := rand.New(rand.NewSource(1))
 	x := make([][]byte, 10)
 	for i := 0; i < len(x); i++ {
 		x[i] = make([]byte, len(x))
 		for j := 0; j < len(x); j++ {
-			x[i][j] = byte(rand.Int())
+			x[i][j] = byte(rnd.Int())
 		}
 	}
 	a := ByteaArray(x)
@@ -645,10 +645,10 @@ func TestFloat64ArrayValue(t *testing.T) {
 }
 
 func BenchmarkFloat64ArrayValue(b *testing.B) {
-	rand.Seed(1)
+	rnd := rand.New(rand.NewSource(1))
 	x := make([]float64, 10)
 	for i := 0; i < len(x); i++ {
-		x[i] = rand.NormFloat64()
+		x[i] = rnd.NormFloat64()
 	}
 	a := Float64Array(x)
 
@@ -798,10 +798,10 @@ func TestInt64ArrayValue(t *testing.T) {
 }
 
 func BenchmarkInt64ArrayValue(b *testing.B) {
-	rand.Seed(1)
+	rnd := rand.New(rand.NewSource(1))
 	x := make([]int64, 10)
 	for i := 0; i < len(x); i++ {
-		x[i] = rand.Int63()
+		x[i] = rnd.Int63()
 	}
 	a := Int64Array(x)
 
@@ -952,10 +952,10 @@ func TestFloat32ArrayValue(t *testing.T) {
 }
 
 func BenchmarkFloat32ArrayValue(b *testing.B) {
-	rand.Seed(1)
+	rnd := rand.New(rand.NewSource(1))
 	x := make([]float32, 10)
 	for i := 0; i < len(x); i++ {
-		x[i] = rand.Float32()
+		x[i] = rnd.Float32()
 	}
 	a := Float32Array(x)
 
@@ -1105,10 +1105,10 @@ func TestInt32ArrayValue(t *testing.T) {
 }
 
 func BenchmarkInt32ArrayValue(b *testing.B) {
-	rand.Seed(1)
+	rnd := rand.New(rand.NewSource(1))
 	x := make([]int32, 10)
 	for i := 0; i < len(x); i++ {
-		x[i] = rand.Int31()
+		x[i] = rnd.Int31()
 	}
 	a := Int32Array(x)
 
@@ -1545,10 +1545,10 @@ func TestGenericArrayValueErrors(t *testing.T) {
 }
 
 func BenchmarkGenericArrayValueBools(b *testing.B) {
-	rand.Seed(1)
+	rnd := rand.New(rand.NewSource(1))
 	x := make([]bool, 10)
 	for i := 0; i < len(x); i++ {
-		x[i] = rand.Intn(2) == 0
+		x[i] = rnd.Intn(2) == 0
 	}
 	a := GenericArray{x}
 
@@ -1558,10 +1558,10 @@ func BenchmarkGenericArrayValueBools(b *testing.B) {
 }
 
 func BenchmarkGenericArrayValueFloat64s(b *testing.B) {
-	rand.Seed(1)
+	rnd := rand.New(rand.NewSource(1))
 	x := make([]float64, 10)
 	for i := 0; i < len(x); i++ {
-		x[i] = rand.NormFloat64()
+		x[i] = rnd.NormFloat64()
 	}
 	a := GenericArray{x}
 
@@ -1571,10 +1571,10 @@ func BenchmarkGenericArrayValueFloat64s(b *testing.B) {
 }
 
 func BenchmarkGenericArrayValueInt64s(b *testing.B) {
-	rand.Seed(1)
+	rnd := rand.New(rand.NewSource(1))
 	x := make([]int64, 10)
 	for i := 0; i < len(x); i++ {
-		x[i] = rand.Int63()
+		x[i] = rnd.Int63()
 	}
 	a := GenericArray{x}
 

@@ -1,4 +1,4 @@
-//go:build !windows && !plan8
+//go:build !windows && !plan9
 
 package pqutil
 
