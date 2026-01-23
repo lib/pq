@@ -26,6 +26,9 @@ type (
 
 	// SSLNegotiation is a sslnegotiation setting.
 	SSLNegotiation string
+
+	// TargetSessionAttrs is a target_session_attrs setting.
+	TargetSessionAttrs string
 )
 
 // Values for [SSLMode] that pq supports.
@@ -57,6 +60,34 @@ const (
 )
 
 var sslNegotiations = []SSLNegotiation{SSLNegotiationPostgres, SSLNegotiationDirect}
+
+// Values for [TargetSessionAttrs] that pq supports.
+const (
+	// Any successful connection is acceptable. This is the default.
+	TargetSessionAttrsAny = TargetSessionAttrs("any")
+
+	// Session must accept read-write transactions by default: the server must
+	// not be in hot standby mode and default_transaction_read_only must be
+	// off.
+	TargetSessionAttrsReadWrite = TargetSessionAttrs("read-write")
+
+	// Session must not accept read-write transactions by default.
+	TargetSessionAttrsReadOnly = TargetSessionAttrs("read-only")
+
+	// Server must not be in hot standby mode.
+	TargetSessionAttrsPrimary = TargetSessionAttrs("primary")
+
+	// Server must be in hot standby mode.
+	TargetSessionAttrsStandby = TargetSessionAttrs("standby")
+
+	// First try to find a standby server, but if none of the listed hosts is a
+	// standby server, try again in any mode.
+	TargetSessionAttrsPreferStandby = TargetSessionAttrs("prefer-standby")
+)
+
+var targetSessionAttrs = []TargetSessionAttrs{TargetSessionAttrsAny,
+	TargetSessionAttrsReadWrite, TargetSessionAttrsReadOnly, TargetSessionAttrsPrimary,
+	TargetSessionAttrsStandby, TargetSessionAttrsPreferStandby}
 
 // Connector represents a fixed configuration for the pq driver with a given
 // dsn. Connector satisfies the [database/sql/driver.Connector] interface and
@@ -107,7 +138,8 @@ type Config struct {
 	//
 	// A comma-separated list of host names is also accepted, in which case each
 	// host name in the list is tried in order; an empty item selects the
-	// default of localhost.
+	// default of localhost. The target_session_attrs option controls properties
+	// the host must have to be considered acceptable.
 	Host string `postgres:"host" env:"PGHOST"`
 
 	// IPv4 or IPv6 address to connect to. Using hostaddr allows the application
@@ -131,7 +163,8 @@ type Config struct {
 	// A comma-separated list of hostaddr values is also accepted, in which case
 	// each host in the list is tried in order. An empty item causes the
 	// corresponding host name to be used, or the default host name if that is
-	// empty as well.
+	// empty as well. The target_session_attrs option controls properties the
+	// host must have to be considered acceptable.
 	Hostaddr netip.Addr `postgres:"hostaddr" env:"PGHOSTADDR"`
 
 	// The port to connect to. Defaults to 5432.
@@ -239,6 +272,11 @@ type Config struct {
 	// available in [Config.Host], [Config.Hostaddr], and [Config.Port], and
 	// additional ones (if any) are available here.
 	Multi []ConfigMultihost
+
+	// Determine whether the session must have certain properties to be
+	// acceptable. It's typically used in combination with multiple host names
+	// to select the first acceptable alternative among several hosts.
+	TargetSessionAttrs TargetSessionAttrs `postgres:"target_session_attrs" env:"PGTARGETSESSIONATTRS"`
 
 	// Record which parameters were given, so we can distinguish between an
 	// empty string "not given at all".
@@ -437,7 +475,7 @@ func (cfg *Config) fromEnv(env []string) error {
 		case "PGREQUIREAUTH", "PGCHANNELBINDING", "PGSERVICE", "PGSERVICEFILE", "PGREALM",
 			"PGSSLCERTMODE", "PGSSLCOMPRESSION", "PGREQUIRESSL", "PGSSLCRL", "PGREQUIREPEER",
 			"PGSYSCONFDIR", "PGLOCALEDIR", "PGSSLCRLDIR", "PGSSLMINPROTOCOLVERSION", "PGSSLMAXPROTOCOLVERSION",
-			"PGGSSENCMODE", "PGGSSDELEGATION", "PGTARGETSESSIONATTRS", "PGLOADBALANCEHOSTS", "PGMINPROTOCOLVERSION",
+			"PGGSSENCMODE", "PGGSSDELEGATION", "PGLOADBALANCEHOSTS", "PGMINPROTOCOLVERSION",
 			"PGMAXPROTOCOLVERSION", "PGGSSLIB":
 			return fmt.Errorf("pq: environment variable $%s is not supported", k)
 		case "PGKRBSRVNAME":
@@ -567,15 +605,16 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 	)
 	for i := 0; i < types.NumField(); i++ {
 		var (
-			rt             = types.Field(i)
-			rv             = values.Field(i)
-			k              = rt.Tag.Get(tag)
-			connectTimeout = (tag == "postgres" && k == "connect_timeout") || (tag == "env" && k == "PGCONNECT_TIMEOUT")
-			host           = (tag == "postgres" && k == "host") || (tag == "env" && k == "PGHOST")
-			hostaddr       = (tag == "postgres" && k == "hostaddr") || (tag == "env" && k == "PGHOSTADDR")
-			port           = (tag == "postgres" && k == "port") || (tag == "env" && k == "PGPORT")
-			sslmode        = (tag == "postgres" && k == "sslmode") || (tag == "env" && k == "PGSSLMODE")
-			sslnegotiation = (tag == "postgres" && k == "sslnegotiation") || (tag == "env" && k == "PGSSLNEGOTIATION")
+			rt                 = types.Field(i)
+			rv                 = values.Field(i)
+			k                  = rt.Tag.Get(tag)
+			connectTimeout     = (tag == "postgres" && k == "connect_timeout") || (tag == "env" && k == "PGCONNECT_TIMEOUT")
+			host               = (tag == "postgres" && k == "host") || (tag == "env" && k == "PGHOST")
+			hostaddr           = (tag == "postgres" && k == "hostaddr") || (tag == "env" && k == "PGHOSTADDR")
+			port               = (tag == "postgres" && k == "port") || (tag == "env" && k == "PGPORT")
+			sslmode            = (tag == "postgres" && k == "sslmode") || (tag == "env" && k == "PGSSLMODE")
+			sslnegotiation     = (tag == "postgres" && k == "sslnegotiation") || (tag == "env" && k == "PGSSLNEGOTIATION")
+			targetsessionattrs = (tag == "postgres" && k == "target_session_attrs") || (tag == "env" && k == "PGTARGETSESSIONATTRS")
 		)
 		if k == "" || k == "-" {
 			continue
@@ -621,6 +660,9 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 				}
 				if sslnegotiation && !slices.Contains(sslNegotiations, SSLNegotiation(v)) {
 					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(sslNegotiations))
+				}
+				if targetsessionattrs && !slices.Contains(targetSessionAttrs, TargetSessionAttrs(v)) {
+					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(targetSessionAttrs))
 				}
 				if host {
 					vv := strings.Split(v, ",")

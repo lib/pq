@@ -80,13 +80,11 @@ func (d Driver) Open(name string) (driver.Conn, error) {
 	return Open(name)
 }
 
+// Parameters sent by PostgreSQL on startup.
 type parameterStatus struct {
-	// Server version in the same format as server_version_num, or 0 if
-	// unavailable.
-	serverVersion int
-
-	// Current location from the TimeZone value of the session, if available.
-	currentLocation *time.Location
+	serverVersion                            int
+	currentLocation                          *time.Location
+	inHotStandby, defaultTransactionReadOnly sql.NullBool
 }
 
 type format int
@@ -164,13 +162,8 @@ type conn struct {
 	txnFinish func()
 
 	// Save connection arguments to use during CancelRequest.
-	dialer Dialer
-	cfg    Config
-
-	// Cancellation key data for use with CancelRequest messages.
-	processID int
-	secretKey int
-
+	dialer          Dialer
+	cfg             Config
 	parameterStatus parameterStatus
 
 	saveMessageType   proto.ResponseCode
@@ -181,10 +174,11 @@ type conn struct {
 	// (ErrBadConn) or getForNext().
 	err syncErr
 
-	inCopy              bool                // If true this connection is in the middle of a COPY
-	noticeHandler       func(*Error)        // If not nil, notices will be synchronously sent here
-	notificationHandler func(*Notification) // If not nil, notifications will be synchronously sent here
-	gss                 GSS                 // GSSAPI context
+	processID, secretKey int                 // Cancellation key data for use with CancelRequest messages.
+	inCopy               bool                // If true this connection is in the middle of a COPY
+	noticeHandler        func(*Error)        // If not nil, notices will be synchronously sent here
+	notificationHandler  func(*Notification) // If not nil, notifications will be synchronously sent here
+	gss                  GSS                 // GSSAPI context
 }
 
 type syncErr struct {
@@ -247,6 +241,8 @@ func DialOpen(d Dialer, dsn string) (_ driver.Conn, err error) {
 }
 
 func (c *Connector) open(ctx context.Context) (*conn, error) {
+	tsa := c.cfg.TargetSessionAttrs
+restart:
 	var (
 		errs []error
 		app  = func(err error, cfg Config) bool {
@@ -298,7 +294,20 @@ func (c *Connector) open(ctx context.Context) (*conn, error) {
 			}
 		}
 
+		err = cn.checkTSA(tsa)
+		if app(err, cfg) {
+			_ = cn.c.Close()
+			continue
+		}
+
 		return cn, nil
+	}
+
+	// target_session_attrs=prefer-standby is treated as standby in checkTSA; we
+	// ran out of hosts so none are on standby. Clear the setting and try again.
+	if c.cfg.TargetSessionAttrs == TargetSessionAttrsPreferStandby {
+		tsa = TargetSessionAttrsAny
+		goto restart
 	}
 
 	if len(c.cfg.Multi) == 0 {
@@ -307,6 +316,102 @@ func (c *Connector) open(ctx context.Context) (*conn, error) {
 		return nil, errors.Unwrap(errs[0])
 	}
 	return nil, fmt.Errorf("pq: could not connect to any of the hosts:\n%w", errors.Join(errs...))
+}
+
+func (cn *conn) getBool(query string) (bool, error) {
+	res, err := cn.simpleQuery(query)
+	if err != nil {
+		return false, err
+	}
+	defer res.Close()
+
+	v := make([]driver.Value, 1)
+	err = res.Next(v)
+	if err != nil {
+		return false, err
+	}
+
+	switch vv := v[0].(type) {
+	default:
+		return false, fmt.Errorf("parseBool: unknown type %T: %[1]v", v[0])
+	case bool:
+		return vv, nil
+	case string:
+		vv, ok := v[0].(string)
+		if !ok {
+			return false, err
+		}
+		return vv == "on", nil
+	}
+}
+
+func (cn *conn) checkTSA(tsa TargetSessionAttrs) error {
+	var (
+		geths = func() (hs bool, err error) {
+			hs = cn.parameterStatus.inHotStandby.Bool
+			if !cn.parameterStatus.inHotStandby.Valid {
+				hs, err = cn.getBool("select pg_catalog.pg_is_in_recovery()")
+			}
+			return hs, err
+		}
+		getro = func() (ro bool, err error) {
+			ro = cn.parameterStatus.defaultTransactionReadOnly.Bool
+			if !cn.parameterStatus.defaultTransactionReadOnly.Valid {
+				ro, err = cn.getBool("show transaction_read_only")
+			}
+			return ro, err
+		}
+	)
+
+	switch tsa {
+	default:
+		panic("unreachable")
+	case "", TargetSessionAttrsAny:
+		return nil
+	case TargetSessionAttrsReadWrite, TargetSessionAttrsReadOnly:
+		readonly, err := getro()
+		if err != nil {
+			return err
+		}
+		if !cn.parameterStatus.defaultTransactionReadOnly.Valid {
+			var err error
+			readonly, err = cn.getBool("show transaction_read_only")
+			if err != nil {
+				return err
+			}
+		}
+		switch {
+		case tsa == TargetSessionAttrsReadOnly && !readonly:
+			return errors.New("session is not read-only")
+		case tsa == TargetSessionAttrsReadWrite:
+			if readonly {
+				return errors.New("session is read-only")
+			}
+			hs, err := geths()
+			if err != nil {
+				return err
+			}
+			if hs {
+				return errors.New("server is in hot standby mode")
+			}
+			return nil
+		default:
+			return nil
+		}
+	case TargetSessionAttrsPrimary, TargetSessionAttrsStandby, TargetSessionAttrsPreferStandby:
+		hs, err := geths()
+		if err != nil {
+			return err
+		}
+		switch {
+		case (tsa == TargetSessionAttrsStandby || tsa == TargetSessionAttrsPreferStandby) && !hs:
+			return errors.New("server is not in hot standby mode")
+		case tsa == TargetSessionAttrsPrimary && hs:
+			return errors.New("server is in hot standby mode")
+		default:
+			return nil
+		}
+	}
 }
 
 func dial(ctx context.Context, d Dialer, cfg Config) (net.Conn, error) {
@@ -1427,6 +1532,19 @@ func (cn *conn) processParameterStatus(r *readBuf) {
 		cn.parameterStatus.currentLocation, err = time.LoadLocation(r.string())
 		if err != nil {
 			cn.parameterStatus.currentLocation = nil
+		}
+	// Use sql.NullBool so we can distinguish between false and not sent. If
+	// it's not sent we use a query to get the value – I don't know when these
+	// parameters are not sent, but this is what libpq does.
+	case "in_hot_standby":
+		b, err := pqutil.ParseBool(r.string())
+		if err == nil {
+			cn.parameterStatus.inHotStandby = sql.NullBool{Valid: true, Bool: b}
+		}
+	case "default_transaction_read_only":
+		b, err := pqutil.ParseBool(r.string())
+		if err == nil {
+			cn.parameterStatus.defaultTransactionReadOnly = sql.NullBool{Valid: true, Bool: b}
 		}
 	}
 }

@@ -928,7 +928,7 @@ func TestSimpleQueryWithoutResponse(t *testing.T) {
 
 	f := pqtest.NewFake(t)
 	f.Accept(func(cn net.Conn) {
-		f.Startup(cn)
+		f.Startup(cn, nil)
 		for {
 			code, _, ok := f.ReadMsg(cn)
 			if !ok {
@@ -937,8 +937,8 @@ func TestSimpleQueryWithoutResponse(t *testing.T) {
 			switch code {
 			case proto.Query:
 				// Make sure we DON'T send this
-				//f.WriteMsg(cn, proto.EmptyQueryResponse)
-				f.WriteMsg(cn, proto.ReadyForQuery, 'I')
+				//f.WriteMsg(cn, proto.EmptyQueryResponse, "")
+				f.WriteMsg(cn, proto.ReadyForQuery, "I")
 			case proto.Terminate:
 				cn.Close()
 				return

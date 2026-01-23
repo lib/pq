@@ -33,11 +33,7 @@ func main() {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(`
-		SELECT typname, oid
-		FROM pg_type WHERE oid < 10000
-		ORDER BY oid;
-	`)
+	rows, err := db.Query(`select typname, oid from pg_type where oid < 10000 order by oid`)
 	if err != nil {
 		log.Fatal(err)
 	}

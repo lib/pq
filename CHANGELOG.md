@@ -38,6 +38,8 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 - Support multiple values in `host`, `port`, and `hostaddr`, which are each
   tried in order ([#1246]).
 
+- Support `target_session_attrs` connection parameter ([#1246]).
+
 - Add `PQGO_DEBUG=1` print the communication with PostgreSQL to stderr, to aid
   in debugging, testing, and bug reports ([#1223]).
 

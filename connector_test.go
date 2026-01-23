@@ -9,10 +9,12 @@ import (
 	"net"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/lib/pq/internal/pqtest"
+	"github.com/lib/pq/internal/pqutil"
 	"github.com/lib/pq/internal/proto"
 )
 
@@ -481,20 +483,28 @@ func TestConnectMulti(t *testing.T) {
 		connectedTo [3]bool
 		accept      = func(f pqtest.Fake, n int) func(net.Conn) {
 			return func(cn net.Conn) {
-				params, ok := f.ReadStartup(cn)
+				clientParams, ok := f.ReadStartup(cn)
 				if !ok {
 					return
 				}
-
-				if params["database"] != "pqgo" {
-					f.WriteMsg(cn, proto.ErrorResponse, []byte(fmt.Sprintf(
+				if clientParams["database"] != "pqgo" {
+					f.WriteMsg(cn, proto.ErrorResponse, fmt.Sprintf(
 						"SFATAL\x00VFATAL\x00C3D000\x00Mdatabase %q does not exist\x00Fpostinit.c\x00L1014\x00RInitPostgres\x00\x00",
-						params["database"]))...)
+						clientParams["database"]))
 					return
 				}
+				f.WriteMsg(cn, proto.AuthenticationRequest, "\x00\x00\x00\x00")
+				serverParams := map[string]string{
+					"default_transaction_read_only": "off",
+					"in_hot_standby":                "off",
+				}
+				if n == 2 {
+					serverParams["default_transaction_read_only"] = "on"
+					serverParams["in_hot_standby"] = "on"
+				}
+				f.WriteStartup(cn, serverParams)
 
-				f.WriteMsg(cn, proto.AuthenticationRequest, 0, 0, 0, 0)
-				f.WriteMsg(cn, proto.ReadyForQuery, 'I')
+				f.WriteMsg(cn, proto.ReadyForQuery, "I")
 				for {
 					code, _, ok := f.ReadMsg(cn)
 					if !ok {
@@ -503,8 +513,8 @@ func TestConnectMulti(t *testing.T) {
 					switch code {
 					case proto.Query:
 						connectedTo[n] = true
-						f.WriteMsg(cn, proto.EmptyQueryResponse)
-						f.WriteMsg(cn, proto.ReadyForQuery, 'I')
+						f.WriteMsg(cn, proto.EmptyQueryResponse, "")
+						f.WriteMsg(cn, proto.ReadyForQuery, "I")
 					case proto.Terminate:
 						cn.Close()
 						return
@@ -540,6 +550,25 @@ func TestConnectMulti(t *testing.T) {
 		// Make sure it returns both errors.
 		{fmt.Sprintf(`host=255.255.255.255,%s port=%s dbname=wrong`, f1.Host(), f1.Port()),
 			[3]bool{false, false, false}, []string{"dial tcp", `database "wrong" does not exist`}},
+
+		// Test target_session_attrs; f3 is a read-only standby server
+
+		// any: just connect to the first one.
+		{fmt.Sprintf("host=%s,%s port=%s,%s", f3.Host(), f1.Host(), f3.Port(), f1.Port()),
+			[3]bool{false, false, true}, nil},
+		// read-only, and standby: skip f1 and select f3
+		{fmt.Sprintf("host=%s,%s port=%s,%s target_session_attrs=read-only", f1.Host(), f3.Host(), f1.Port(), f3.Port()),
+			[3]bool{false, false, true}, nil},
+		{fmt.Sprintf("host=%s,%s port=%s,%s target_session_attrs=standby", f1.Host(), f3.Host(), f1.Port(), f3.Port()),
+			[3]bool{false, false, true}, nil},
+		// read-write and primary: skip f3 and select f1
+		{fmt.Sprintf("host=%s,%s port=%s,%s target_session_attrs=read-write", f3.Host(), f1.Host(), f3.Port(), f1.Port()),
+			[3]bool{true, false, false}, nil},
+		{fmt.Sprintf("host=%s,%s port=%s,%s target_session_attrs=primary", f3.Host(), f1.Host(), f3.Port(), f1.Port()),
+			[3]bool{true, false, false}, nil},
+		// prefer-standby
+		{fmt.Sprintf("host=%s,%s port=%s,%s target_session_attrs=standby", f3.Host(), f3.Host(), f3.Port(), f3.Port()),
+			[3]bool{false, false, true}, nil},
 	}
 
 	t.Parallel()
@@ -576,6 +605,97 @@ func TestConnectMulti(t *testing.T) {
 
 			if !reflect.DeepEqual(connectedTo, tt.want) {
 				t.Errorf("\nhave: %v\nwant: %v", connectedTo, tt.want)
+			}
+		})
+	}
+}
+
+func TestConnectionTargetSessionAttrs(t *testing.T) {
+	tests := []struct {
+		dsn     string
+		wantErr string
+		params  map[string]string
+	}{
+		// read-only/read-write from server params
+		{"target_session_attrs=read-only", "", map[string]string{"default_transaction_read_only": "on"}},
+		{"target_session_attrs=read-write", "", map[string]string{"default_transaction_read_only": "off", "in_hot_standby": "off"}},
+		{"target_session_attrs=read-only", "session is not read-only", map[string]string{"default_transaction_read_only": "off"}},
+		{"target_session_attrs=read-write", "session is read-only", map[string]string{"default_transaction_read_only": "on"}},
+		{"target_session_attrs=read-write", "server is in hot standby mode", map[string]string{"default_transaction_read_only": "off", "in_hot_standby": "on"}},
+
+		// primary / standby / prefer-standby from server params
+		{"target_session_attrs=primary", "", map[string]string{"in_hot_standby": "off"}},
+		{"target_session_attrs=standby", "", map[string]string{"in_hot_standby": "on"}},
+		{"target_session_attrs=primary", "server is in hot standby mode", map[string]string{"in_hot_standby": "on"}},
+		{"target_session_attrs=standby", "server is not in hot standby mode", map[string]string{"in_hot_standby": "off"}},
+		{"target_session_attrs=prefer-standby", "", map[string]string{"in_hot_standby": "on"}},
+		{"target_session_attrs=prefer-standby", "", map[string]string{"in_hot_standby": "off"}},
+
+		// read-only/read-write from SHOW
+		{"target_session_attrs=read-only", "", map[string]string{"default_transaction_read_only": "show-on"}},
+		{"target_session_attrs=read-write", "", map[string]string{"default_transaction_read_only": "show-off"}},
+		{"target_session_attrs=read-only", "session is not read-only", map[string]string{"default_transaction_read_only": "show-off"}},
+		{"target_session_attrs=read-write", "session is read-only", map[string]string{"default_transaction_read_only": "show-on"}},
+
+		// primary / standby / prefer-standby from pg_is_in_recovery()
+		{"target_session_attrs=primary", "", map[string]string{"in_hot_standby": "select-off"}},
+		{"target_session_attrs=standby", "", map[string]string{"in_hot_standby": "select-on"}},
+		{"target_session_attrs=primary", "server is in hot standby mode", map[string]string{"in_hot_standby": "select-on"}},
+		{"target_session_attrs=standby", "server is not in hot standby mode", map[string]string{"in_hot_standby": "select-off"}},
+		{"target_session_attrs=prefer-standby", "", map[string]string{"in_hot_standby": "select-on"}},
+		{"target_session_attrs=prefer-standby", "", map[string]string{"in_hot_standby": "select-off"}},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run("", func(t *testing.T) {
+			t.Parallel()
+
+			var (
+				show  string
+				inrec *bool
+			)
+			if v := tt.params["default_transaction_read_only"]; strings.HasPrefix(v, "show-") {
+				delete(tt.params, "default_transaction_read_only")
+				show = v[5:]
+			}
+			if v := tt.params["in_hot_standby"]; strings.HasPrefix(v, "select-") {
+				delete(tt.params, "in_hot_standby")
+				b, err := pqutil.ParseBool(v[7:])
+				if err != nil {
+					t.Fatal(err)
+				}
+				inrec = &b
+			}
+
+			f := pqtest.NewFake(t)
+			f.Accept(func(cn net.Conn) {
+				f.Startup(cn, tt.params)
+				for {
+					code, _, ok := f.ReadMsg(cn)
+					if !ok {
+						return
+					}
+					switch code {
+					case proto.Query:
+						if show != "" {
+							f.SimpleQuery(cn, "SHOW", "transaction_read_only", show)
+						} else if inrec != nil {
+							f.SimpleQuery(cn, "SELECT", "pg_is_in_recovery", *inrec)
+						}
+						f.WriteMsg(cn, proto.ReadyForQuery, "I")
+					case proto.Terminate:
+						cn.Close()
+						return
+					}
+				}
+			})
+
+			db := pqtest.MustDB(t, f.DSN()+" "+tt.dsn)
+
+			err := db.Ping()
+			if !pqtest.ErrorContains(err, tt.wantErr) {
+				t.Errorf("\nhave: %v\nwant: %v", err, tt.wantErr)
 			}
 		})
 	}
