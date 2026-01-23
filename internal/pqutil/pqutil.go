@@ -5,12 +5,13 @@ import (
 	"strings"
 )
 
-// ParseBool is like strconv.ParseBool, but also accepts "yes" and "no".
+// ParseBool is like strconv.ParseBool, but also accepts "yes"/"no" and
+// "on"/"off".
 func ParseBool(str string) (bool, error) {
 	switch str {
-	case "1", "t", "T", "true", "TRUE", "True", "yes":
+	case "1", "t", "T", "true", "TRUE", "True", "yes", "on":
 		return true, nil
-	case "0", "f", "F", "false", "FALSE", "False", "no":
+	case "0", "f", "F", "false", "FALSE", "False", "no", "off":
 		return false, nil
 	}
 	return false, &strconv.NumError{Func: "ParseBool", Num: str, Err: strconv.ErrSyntax}
