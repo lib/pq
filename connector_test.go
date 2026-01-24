@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -608,6 +609,28 @@ func TestConnectMulti(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("load_balance_hosts=random", func(t *testing.T) {
+		hosts := [3]int{}
+		for i := 0; i < 25; i++ {
+			connectedTo = [3]bool{}
+			db := pqtest.MustDB(t, fmt.Sprintf(
+				"host=%s,%s,%s port=%s,%s,%s load_balance_hosts=random", f1.Host(), f2.Host(), f3.Host(), f1.Port(), f2.Port(), f3.Port(),
+			))
+			err := db.Ping()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := strings.Count(fmt.Sprintf("%v", connectedTo), "true"); n != 1 {
+				t.Fatal(connectedTo)
+			}
+
+			hosts[slices.Index(connectedTo[:], true)]++
+		}
+		if slices.Index(hosts[:], 0) != -1 {
+			t.Fatal(hosts)
+		}
+	})
 }
 
 func TestConnectionTargetSessionAttrs(t *testing.T) {

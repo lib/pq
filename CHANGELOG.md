@@ -36,7 +36,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 - Support `hostaddr` and `$PGHOSTADDR` ([#1243]).
 
 - Support multiple values in `host`, `port`, and `hostaddr`, which are each
-  tried in order ([#1246]).
+  tried in order, or randomly if `load_balance_hosts=random` is set ([#1246]).
 
 - Support `target_session_attrs` connection parameter ([#1246]).
 
