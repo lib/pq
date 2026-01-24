@@ -237,3 +237,55 @@ func TestRowsColumnTypes(t *testing.T) {
 		})
 	}
 }
+
+func TestRowsClose(t *testing.T) {
+	t.Run("CloseBeforeDone", func(t *testing.T) {
+		t.Parallel()
+		db := pqtest.MustDB(t)
+
+		rows, err := db.Query("select 1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		if rows.Next() {
+			t.Fatal("unexpected row")
+		}
+		if rows.Err() != nil {
+			t.Fatal(rows.Err())
+		}
+	})
+
+	// closing a query early allows a subsequent query to work.
+	t.Run("QuickClose", func(t *testing.T) {
+		t.Parallel()
+		db := pqtest.MustDB(t)
+
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := tx.Query("select 1; select 2;")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		var id int
+		err = tx.QueryRow("select 3").Scan(&id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id != 3 {
+			t.Fatalf("unexpected %d", id)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	})
+}

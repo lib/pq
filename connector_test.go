@@ -482,8 +482,8 @@ func TestConfigClone(t *testing.T) {
 func TestConnectMulti(t *testing.T) {
 	var (
 		connectedTo [3]bool
-		accept      = func(f pqtest.Fake, n int) func(net.Conn) {
-			return func(cn net.Conn) {
+		accept      = func(n int) func(pqtest.Fake, net.Conn) {
+			return func(f pqtest.Fake, cn net.Conn) {
 				clientParams, ok := f.ReadStartup(cn)
 				if !ok {
 					return
@@ -523,13 +523,13 @@ func TestConnectMulti(t *testing.T) {
 				}
 			}
 		}
-		f1 = pqtest.NewFake(t)
-		f2 = pqtest.NewFake(t)
-		f3 = pqtest.NewFake(t)
+		f1 = pqtest.NewFake(t, accept(0))
+		f2 = pqtest.NewFake(t, accept(1))
+		f3 = pqtest.NewFake(t, accept(2))
 	)
-	f1.Accept(accept(f1, 0))
-	f2.Accept(accept(f2, 1))
-	f3.Accept(accept(f3, 2))
+	defer f1.Close()
+	defer f2.Close()
+	defer f3.Close()
 
 	// The host from the test servers is always 127.0.0.1. Can't reliably use
 	// anything else AFAIK, as macOS only routes 127.0.0.1 instead of 127/8 like
@@ -691,8 +691,7 @@ func TestConnectionTargetSessionAttrs(t *testing.T) {
 				inrec = &b
 			}
 
-			f := pqtest.NewFake(t)
-			f.Accept(func(cn net.Conn) {
+			f := pqtest.NewFake(t, func(f pqtest.Fake, cn net.Conn) {
 				f.Startup(cn, tt.params)
 				for {
 					code, _, ok := f.ReadMsg(cn)
@@ -713,6 +712,7 @@ func TestConnectionTargetSessionAttrs(t *testing.T) {
 					}
 				}
 			})
+			defer f.Close()
 
 			db := pqtest.MustDB(t, f.DSN()+" "+tt.dsn)
 

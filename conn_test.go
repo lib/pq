@@ -297,28 +297,6 @@ func TestStatment(t *testing.T) {
 	}
 }
 
-func TestRowsCloseBeforeDone(t *testing.T) {
-	db := pqtest.MustDB(t)
-
-	r, err := db.Query("SELECT 1")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = r.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if r.Next() {
-		t.Fatal("unexpected row")
-	}
-
-	if r.Err() != nil {
-		t.Fatal(r.Err())
-	}
-}
-
 func TestParameterCountMismatch(t *testing.T) {
 	db := pqtest.MustDB(t)
 
@@ -672,58 +650,62 @@ func TestBadConn(t *testing.T) {
 	}
 }
 
-// TestCloseBadConn tests that the underlying connection can be closed with
-// Close after an error.
-func TestCloseBadConn(t *testing.T) {
-	host := os.Getenv("PGHOST")
-	if host == "" {
-		host = "localhost"
-	}
-	if host[0] == '/' {
-		t.Skip("cannot test bad connection close with a Unix-domain PGHOST")
-	}
-	port := os.Getenv("PGPORT")
-	if port == "" {
-		port = "5432"
-	}
-	nc, err := net.Dial("tcp", host+":"+port)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cn := conn{c: nc}
-	cn.handleError(io.EOF)
+func TestConnClose(t *testing.T) {
+	// Ensure the underlying connection can be closed with Close after an error.
+	t.Run("CloseBadConn", func(t *testing.T) {
+		host := os.Getenv("PGHOST")
+		if host == "" {
+			host = "localhost"
+		}
+		if host[0] == '/' {
+			t.Skip("cannot test bad connection close with a Unix-domain PGHOST")
+		}
+		port := os.Getenv("PGPORT")
+		if port == "" {
+			port = "5432"
+		}
+		nc, err := net.Dial("tcp", host+":"+port)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cn := conn{c: nc}
+		cn.handleError(io.EOF)
 
-	// Verify we can write before closing.
-	if _, err := nc.Write(nil); err != nil {
-		t.Fatal(err)
-	}
-	// First close should close the connection.
-	if err := cn.Close(); err != nil {
-		t.Fatal(err)
-	}
+		// Verify we can write before closing and then close.
+		if _, err := nc.Write(nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := cn.Close(); err != nil {
+			t.Fatal(err)
+		}
 
-	// During the Go 1.9 cycle, https://github.com/golang/go/commit/3792db5
-	// changed this error from
-	//
-	// net.errClosing = errors.New("use of closed network connection")
-	//
-	// to
-	//
-	// internal/poll.ErrClosing = errors.New("use of closed file or network connection")
-	const errClosing = "use of closed"
+		// During the Go 1.9 cycle, https://github.com/golang/go/commit/3792db5
+		// changed this error from
+		//
+		// net.errClosing = errors.New("use of closed network connection")
+		//
+		// to
+		//
+		// internal/poll.ErrClosing = errors.New("use of closed file or network connection")
+		const errClosing = "use of closed"
 
-	// Verify write after closing fails.
-	if _, err := nc.Write(nil); err == nil {
-		t.Fatal("expected error")
-	} else if !strings.Contains(err.Error(), errClosing) {
-		t.Fatalf("expected %s error, got %s", errClosing, err)
-	}
-	// Verify second close fails.
-	if err := cn.Close(); err == nil {
-		t.Fatal("expected error")
-	} else if !strings.Contains(err.Error(), errClosing) {
-		t.Fatalf("expected %s error, got %s", errClosing, err)
-	}
+		// Verify write after closing fails.
+		_, err = nc.Write(nil)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), errClosing) {
+			t.Fatalf("expected %s error, got %s", errClosing, err)
+		}
+		// Verify second close fails.
+		err = cn.Close()
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), errClosing) {
+			t.Fatalf("expected %s error, got %s", errClosing, err)
+		}
+	})
 }
 
 func TestErrorOnExec(t *testing.T) {
@@ -926,8 +908,7 @@ func TestSimpleQuery(t *testing.T) {
 func TestSimpleQueryWithoutResponse(t *testing.T) {
 	t.Parallel()
 
-	f := pqtest.NewFake(t)
-	f.Accept(func(cn net.Conn) {
+	f := pqtest.NewFake(t, func(f pqtest.Fake, cn net.Conn) {
 		f.Startup(cn, nil)
 		for {
 			code, _, ok := f.ReadMsg(cn)
@@ -945,6 +926,7 @@ func TestSimpleQueryWithoutResponse(t *testing.T) {
 			}
 		}
 	})
+	defer f.Close()
 
 	db := pqtest.MustDB(t, f.DSN())
 	if err := db.Ping(); err != nil {
@@ -1418,35 +1400,6 @@ func TestRowsResultTag(t *testing.T) {
 			t.Fatalf("%s: unexpected rows affected: %d", test.query, ra)
 		}
 		rows.Close()
-	}
-}
-
-// TestQuickClose tests that closing a query early allows a subsequent query to work.
-func TestQuickClose(t *testing.T) {
-	t.Parallel()
-	db := pqtest.MustDB(t)
-
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows, err := tx.Query("SELECT 1; SELECT 2;")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	var id int
-	if err := tx.QueryRow("SELECT 3").Scan(&id); err != nil {
-		t.Fatal(err)
-	}
-	if id != 3 {
-		t.Fatalf("unexpected %d", id)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
 	}
 }
 
