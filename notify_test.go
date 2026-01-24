@@ -79,7 +79,7 @@ func TestNewListenerConn(t *testing.T) {
 	defer l.Close()
 }
 
-func TestConnListen(t *testing.T) {
+func TestListenerConnListen(t *testing.T) {
 	l, channel := newTestListenerConn(t)
 
 	defer l.Close()
@@ -102,7 +102,7 @@ func TestConnListen(t *testing.T) {
 	}
 }
 
-func TestConnUnlisten(t *testing.T) {
+func TestListenerConnUnlisten(t *testing.T) {
 	l, channel := newTestListenerConn(t)
 
 	defer l.Close()
@@ -140,7 +140,7 @@ func TestConnUnlisten(t *testing.T) {
 	}
 }
 
-func TestConnUnlistenAll(t *testing.T) {
+func TestListenerConnUnlistenAll(t *testing.T) {
 	l, channel := newTestListenerConn(t)
 
 	defer l.Close()
@@ -178,7 +178,7 @@ func TestConnUnlistenAll(t *testing.T) {
 	}
 }
 
-func TestConnClose(t *testing.T) {
+func TestListenerConnClose(t *testing.T) {
 	l, _ := newTestListenerConn(t)
 	defer l.Close()
 
@@ -192,7 +192,7 @@ func TestConnClose(t *testing.T) {
 	}
 }
 
-func TestConnPing(t *testing.T) {
+func TestListernerConnPing(t *testing.T) {
 	l, _ := newTestListenerConn(t)
 	defer l.Close()
 	err := l.Ping()
@@ -210,7 +210,7 @@ func TestConnPing(t *testing.T) {
 }
 
 // Test for deadlock where a query fails while another one is queued
-func TestConnExecDeadlock(t *testing.T) {
+func TestListenerConnExecDeadlock(t *testing.T) {
 	l, _ := newTestListenerConn(t)
 	defer l.Close()
 
@@ -269,7 +269,7 @@ func TestListenerConnCloseWhileQueryIsExecuting(t *testing.T) {
 	wg.Wait()
 }
 
-func TestNotifyExtra(t *testing.T) {
+func TestListenerNotifyExtra(t *testing.T) {
 	db := pqtest.MustDB(t)
 
 	l, channel := newTestListenerConn(t)

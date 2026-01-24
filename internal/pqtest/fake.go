@@ -30,12 +30,15 @@ type Fake struct {
 //
 //	fmt.Println("\n" + f.DSN())
 //	time.Sleep(9 * time.Minute)
-func NewFake(t testing.TB) Fake {
+func NewFake(t testing.TB, fun func(Fake, net.Conn)) Fake {
 	l, err := net.Listen("tcp", "127.0.0.1:")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Fake{l: l, t: t}
+
+	f := Fake{l: l, t: t}
+	f.accept(fun)
+	return f
 }
 
 // DSN is the DSN to connect to for this server.
@@ -65,16 +68,22 @@ func (f Fake) Port() string {
 	return p
 }
 
+func (f Fake) Close() {
+	f.l.Close()
+}
+
 // Accept callback for new connections.
-func (f Fake) Accept(fun func(net.Conn)) {
+func (f Fake) accept(fun func(Fake, net.Conn)) {
 	go func() {
 		for {
 			cn, err := f.l.Accept()
 			if err != nil {
-				f.t.Errorf("accepting connection: %s", err)
+				if !errors.Is(err, net.ErrClosed) {
+					f.t.Errorf("accepting connection: %s", err)
+				}
 				return
 			}
-			go fun(cn)
+			go fun(f, cn)
 		}
 	}()
 }
@@ -157,10 +166,7 @@ func (f Fake) read(cn net.Conn, startup bool) (proto.RequestCode, []byte, bool) 
 func (f Fake) WriteMsg(cn net.Conn, code proto.ResponseCode, msg string) {
 	l := []byte{byte(code), 0, 0, 0, 0}
 	binary.BigEndian.PutUint32(l[1:], uint32(len(msg)+4))
-	_, err := cn.Write(append(l, msg...))
-	if err != nil {
-		f.t.Error(err)
-	}
+	cn.Write(append(l, msg...))
 }
 
 // SimpleQuery responds to a simpleQuery workflow; values are as a col, value
