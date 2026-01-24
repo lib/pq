@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/netip"
 	neturl "net/url"
@@ -29,6 +30,9 @@ type (
 
 	// TargetSessionAttrs is a target_session_attrs setting.
 	TargetSessionAttrs string
+
+	// LoadBalanceHosts is a load_balance_hosts setting.
+	LoadBalanceHosts string
 )
 
 // Values for [SSLMode] that pq supports.
@@ -89,6 +93,23 @@ var targetSessionAttrs = []TargetSessionAttrs{TargetSessionAttrsAny,
 	TargetSessionAttrsReadWrite, TargetSessionAttrsReadOnly, TargetSessionAttrsPrimary,
 	TargetSessionAttrsStandby, TargetSessionAttrsPreferStandby}
 
+// Values for [LoadBalanceHosts] that pq supports.
+const (
+	// Don't load balance; try hosts in the order in which they're provided.
+	// This is the default.
+	LoadBalanceHostsDisable = LoadBalanceHosts("disable")
+
+	// Hosts are tried in random order to balance connections across multiple
+	// PostgreSQL servers.
+	//
+	// When using this value it's recommended to also configure a reasonable
+	// value for connect_timeout. Because then, if one of the nodes that are
+	// used for load balancing is not responding, a new node will be tried.
+	LoadBalanceHostsRandom = LoadBalanceHosts("random")
+)
+
+var loadBalanceHosts = []LoadBalanceHosts{LoadBalanceHostsDisable, LoadBalanceHostsRandom}
+
 // Connector represents a fixed configuration for the pq driver with a given
 // dsn. Connector satisfies the [database/sql/driver.Connector] interface and
 // can be used to create any number of DB Conn's via [sql.OpenDB].
@@ -137,9 +158,10 @@ type Config struct {
 	// for unix domain sockets. Defaults to localhost.
 	//
 	// A comma-separated list of host names is also accepted, in which case each
-	// host name in the list is tried in order; an empty item selects the
-	// default of localhost. The target_session_attrs option controls properties
-	// the host must have to be considered acceptable.
+	// host name in the list is tried in order or randomly if load_balance_hosts
+	// is set. An empty item selects the default of localhost. The
+	// target_session_attrs option controls properties the host must have to be
+	// considered acceptable.
 	Host string `postgres:"host" env:"PGHOST"`
 
 	// IPv4 or IPv6 address to connect to. Using hostaddr allows the application
@@ -161,10 +183,11 @@ type Config struct {
 	//   host name.
 	//
 	// A comma-separated list of hostaddr values is also accepted, in which case
-	// each host in the list is tried in order. An empty item causes the
-	// corresponding host name to be used, or the default host name if that is
-	// empty as well. The target_session_attrs option controls properties the
-	// host must have to be considered acceptable.
+	// each host in the list is tried in order or randonly if load_balance_hosts
+	// is set. An empty item causes the corresponding host name to be used, or
+	// the default host name if that is empty as well. The target_session_attrs
+	// option controls properties the host must have to be considered
+	// acceptable.
 	Hostaddr netip.Addr `postgres:"hostaddr" env:"PGHOSTADDR"`
 
 	// The port to connect to. Defaults to 5432.
@@ -264,6 +287,22 @@ type Config struct {
 	// Default mode for the genetic query optimizer.
 	Geqo string `postgres:"geqo" env:"PGGEQO"`
 
+	// Determine whether the session must have certain properties to be
+	// acceptable. It's typically used in combination with multiple host names
+	// to select the first acceptable alternative among several hosts.
+	TargetSessionAttrs TargetSessionAttrs `postgres:"target_session_attrs" env:"PGTARGETSESSIONATTRS"`
+
+	// Controls the order in which the client tries to connect to the available
+	// hosts. Once a connection attempt is successful no other hosts will be
+	// tried. This parameter is typically used in combination with multiple host
+	// names.
+	//
+	// This parameter can be used in combination with target_session_attrs to,
+	// for example, load balance over standby servers only. Once successfully
+	// connected, subsequent queries on the returned connection will all be sent
+	// to the same server.
+	LoadBalanceHosts LoadBalanceHosts `postgres:"load_balance_hosts" env:"PGLOADBALANCEHOSTS"`
+
 	// Runtime parameters: any unrecognized parameter in the DSN will be added
 	// to this and sent to PostgreSQL during startup.
 	Runtime map[string]string `postgres:"-" env:"-"`
@@ -272,11 +311,6 @@ type Config struct {
 	// available in [Config.Host], [Config.Hostaddr], and [Config.Port], and
 	// additional ones (if any) are available here.
 	Multi []ConfigMultihost
-
-	// Determine whether the session must have certain properties to be
-	// acceptable. It's typically used in combination with multiple host names
-	// to select the first acceptable alternative among several hosts.
-	TargetSessionAttrs TargetSessionAttrs `postgres:"target_session_attrs" env:"PGTARGETSESSIONATTRS"`
 
 	// Record which parameters were given, so we can distinguish between an
 	// empty string "not given at all".
@@ -370,6 +404,11 @@ func (cfg Config) hosts() []Config {
 		c.Host, c.Hostaddr, c.Port = m.Host, m.Hostaddr, m.Port
 		cfgs = append(cfgs, c)
 	}
+
+	if cfg.LoadBalanceHosts == LoadBalanceHostsRandom {
+		rand.Shuffle(len(cfgs), func(i, j int) { cfgs[i], cfgs[j] = cfgs[j], cfgs[i] })
+	}
+
 	return cfgs
 }
 
@@ -475,8 +514,7 @@ func (cfg *Config) fromEnv(env []string) error {
 		case "PGREQUIREAUTH", "PGCHANNELBINDING", "PGSERVICE", "PGSERVICEFILE", "PGREALM",
 			"PGSSLCERTMODE", "PGSSLCOMPRESSION", "PGREQUIRESSL", "PGSSLCRL", "PGREQUIREPEER",
 			"PGSYSCONFDIR", "PGLOCALEDIR", "PGSSLCRLDIR", "PGSSLMINPROTOCOLVERSION", "PGSSLMAXPROTOCOLVERSION",
-			"PGGSSENCMODE", "PGGSSDELEGATION", "PGLOADBALANCEHOSTS", "PGMINPROTOCOLVERSION",
-			"PGMAXPROTOCOLVERSION", "PGGSSLIB":
+			"PGGSSENCMODE", "PGGSSDELEGATION", "PGMINPROTOCOLVERSION", "PGMAXPROTOCOLVERSION", "PGGSSLIB":
 			return fmt.Errorf("pq: environment variable $%s is not supported", k)
 		case "PGKRBSRVNAME":
 			if newGss == nil {
@@ -615,6 +653,7 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 			sslmode            = (tag == "postgres" && k == "sslmode") || (tag == "env" && k == "PGSSLMODE")
 			sslnegotiation     = (tag == "postgres" && k == "sslnegotiation") || (tag == "env" && k == "PGSSLNEGOTIATION")
 			targetsessionattrs = (tag == "postgres" && k == "target_session_attrs") || (tag == "env" && k == "PGTARGETSESSIONATTRS")
+			loadbalancehosts   = (tag == "postgres" && k == "load_balance_hosts") || (tag == "env" && k == "PGLOADBALANCEHOSTS")
 		)
 		if k == "" || k == "-" {
 			continue
@@ -663,6 +702,9 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 				}
 				if targetsessionattrs && !slices.Contains(targetSessionAttrs, TargetSessionAttrs(v)) {
 					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(targetSessionAttrs))
+				}
+				if loadbalancehosts && !slices.Contains(loadBalanceHosts, LoadBalanceHosts(v)) {
+					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(loadBalanceHosts))
 				}
 				if host {
 					vv := strings.Split(v, ",")
