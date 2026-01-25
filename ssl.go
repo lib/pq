@@ -59,27 +59,31 @@ func getTLSConfigClone(key string) *tls.Config {
 
 // ssl generates a function to upgrade a net.Conn based on the "sslmode" and
 // related settings. The function is nil when no upgrade should take place.
-func ssl(cfg Config) (func(net.Conn) (net.Conn, error), error) {
+//
+// Don't refer to Config.SSLMode here, as the mode in arguments may be different
+// in case of sslmode=allow or prefer.
+func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 	var (
 		verifyCaOnly = false
 		tlsConf      = &tls.Config{}
-		mode         = cfg.SSLMode
 	)
 	switch {
-	// "require" is the default.
-	case mode == "" || mode == SSLModeRequire:
+	case mode == SSLModeDisable || mode == SSLModeAllow:
+		return nil, nil
+
+	case mode == "" || mode == SSLModeRequire || mode == SSLModePrefer:
 		// We must skip TLS's own verification since it requires full
 		// verification since Go 1.3.
 		tlsConf.InsecureSkipVerify = true
 
 		// From http://www.postgresql.org/docs/current/static/libpq-ssl.html:
 		//
-		// Note: For backwards compatibility with earlier versions of
-		// PostgreSQL, if a root CA file exists, the behavior of
-		// sslmode=require will be the same as that of verify-ca, meaning the
-		// server certificate is validated against the CA. Relying on this
-		// behavior is discouraged, and applications that need certificate
-		// validation should always use verify-ca or verify-full.
+		// For backwards compatibility with earlier versions of PostgreSQL, if a
+		// root CA file exists, the behavior of sslmode=require will be the same
+		// as that of verify-ca, meaning the server certificate is validated
+		// against the CA. Relying on this behavior is discouraged, and
+		// applications that need certificate validation should always use
+		// verify-ca or verify-full.
 		if cfg.SSLRootCert != "" {
 			if _, err := os.Stat(cfg.SSLRootCert); err == nil {
 				verifyCaOnly = true
@@ -94,24 +98,19 @@ func ssl(cfg Config) (func(net.Conn) (net.Conn, error), error) {
 		verifyCaOnly = true
 	case mode == SSLModeVerifyFull:
 		tlsConf.ServerName = cfg.Host
-	case mode == SSLModeDisable:
-		return nil, nil
 	case strings.HasPrefix(string(mode), "pqgo-"):
 		tlsConf = getTLSConfigClone(string(mode[5:]))
 		if tlsConf == nil {
 			return nil, fmt.Errorf(`pq: unknown custom sslmode %q`, mode)
 		}
 	default:
-		return nil, fmt.Errorf(
-			`pq: unsupported sslmode %q; only "require" (default), "verify-full", "verify-ca", and "disable" supported`,
-			mode)
+		panic("unreachable")
 	}
 
-	// Set Server Name Indication (SNI), if enabled by connection parameters.
+	// RFC 6066 asks to not set SNI if the host is a literal IP address (IPv4 or
+	// IPv6). This check is coded already crypto.tls.hostnameInSNI, so just
+	// always set ServerName here and let crypto/tls do the filtering.
 	if cfg.SSLSNI {
-		// RFC 6066 asks to not set SNI if the host is a literal IP address (IPv4
-		// or IPv6). This check is coded already crypto.tls.hostnameInSNI, so
-		// just always set ServerName here and let crypto/tls do the filtering.
 		tlsConf.ServerName = cfg.Host
 	}
 
@@ -126,9 +125,11 @@ func ssl(cfg Config) (func(net.Conn) (net.Conn, error), error) {
 
 	// Accept renegotiation requests initiated by the backend.
 	//
-	// Renegotiation was deprecated then removed from PostgreSQL 9.5, but
-	// the default configuration of older versions has it enabled. Redshift
-	// also initiates renegotiations and cannot be reconfigured.
+	// Renegotiation was deprecated then removed from PostgreSQL 9.5, but the
+	// default configuration of older versions has it enabled. Redshift also
+	// initiates renegotiations and cannot be reconfigured.
+	//
+	// TODO: I think this can be removed?
 	tlsConf.Renegotiation = tls.RenegotiateFreelyAsClient
 
 	return func(conn net.Conn) (net.Conn, error) {

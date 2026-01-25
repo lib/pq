@@ -106,6 +106,13 @@ func (f Fake) Startup(cn net.Conn, params map[string]string) {
 // ReadStartup reads the startup message.
 func (f Fake) ReadStartup(cn net.Conn) (float32, map[string]string, bool) {
 	_, msg, ok := f.read(cn, true)
+
+	if len(msg) == 4 && binary.BigEndian.Uint32(msg) == proto.NegotiateSSLCode {
+		f.WriteMsg(cn, proto.ErrorResponse, "SFATAL\x00VFATAL\x00C28000\x00"+
+			"encryption not supported\x00Fauth.c\x00L462\x00RClientAuthentication\x00\x00")
+		return 3.0, nil, false
+	}
+
 	var (
 		params = make(map[string]string)
 		m      = strings.Split(string(msg[4:len(msg)-2]), "\x00")
