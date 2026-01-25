@@ -42,22 +42,28 @@ type (
 
 // Values for [SSLMode] that pq supports.
 const (
-	// disable: No SSL
+	// No SSL
 	SSLModeDisable = SSLMode("disable")
 
-	// require: require SSL, but skip verification.
+	// First try a non-SSL connection and if that fails try an SSL connection.
+	SSLModeAllow = SSLMode("allow")
+
+	// First try an SSL connection and if that fails try a non-SSL connection.
+	SSLModePrefer = SSLMode("prefer")
+
+	// Require SSL, but skip verification. This is the default.
 	SSLModeRequire = SSLMode("require")
 
-	// verify-ca: require SSL and verify that the certificate was signed by a
-	// trusted CA.
+	// Require SSL and verify that the certificate was signed by a trusted CA.
 	SSLModeVerifyCA = SSLMode("verify-ca")
 
-	// verify-full: require SSK and verify that the certificate was signed by a
-	// trusted CA and the server host name matches the one in the certificate.
+	// Require SSL and verify that the certificate was signed by a trusted CA
+	// and the server host name matches the one in the certificate.
 	SSLModeVerifyFull = SSLMode("verify-full")
 )
 
-var sslModes = []SSLMode{SSLModeDisable, SSLModeRequire, SSLModeVerifyFull, SSLModeVerifyCA}
+var sslModes = []SSLMode{SSLModeDisable, SSLModeAllow, SSLModePrefer, SSLModeRequire,
+	SSLModeVerifyFull, SSLModeVerifyCA}
 
 // Values for [SSLNegotiation] that pq supports.
 const (
@@ -535,6 +541,14 @@ func newConfig(dsn string, env []string) (Config, error) {
 	if cfg.MinProtocolVersion > cfg.MaxProtocolVersion {
 		return Config{}, fmt.Errorf("pq: min_protocol_version %q cannot be greater than max_protocol_version %q",
 			cfg.MinProtocolVersion, cfg.MaxProtocolVersion)
+	}
+	if cfg.SSLNegotiation == SSLNegotiationDirect {
+		switch cfg.SSLMode {
+		case SSLModeDisable, SSLModeAllow, SSLModePrefer:
+			return Config{}, fmt.Errorf(
+				`pq: weak sslmode %q may not be used with sslnegotiation=direct (use "require", "verify-ca", or "verify-full")`,
+				cfg.SSLMode)
+		}
 	}
 
 	return cfg, nil

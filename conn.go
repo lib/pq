@@ -243,13 +243,13 @@ func DialOpen(d Dialer, dsn string) (_ driver.Conn, err error) {
 
 func (c *Connector) open(ctx context.Context) (*conn, error) {
 	tsa := c.cfg.TargetSessionAttrs
-restart:
+restartAll:
 	var (
 		errs []error
 		app  = func(err error, cfg Config) bool {
 			if err != nil {
 				if debugProto {
-					fmt.Println("CONNECT  (error)", err)
+					fmt.Fprintln(os.Stderr, "CONNECT  (error)", err)
 				}
 				errs = append(errs, fmt.Errorf("connecting to %s:%d: %w", cfg.Host, cfg.Port, err))
 			}
@@ -257,10 +257,13 @@ restart:
 		}
 	)
 	for _, cfg := range c.cfg.hosts() {
+		mode := cfg.SSLMode
+	restartHost:
 		if debugProto {
-			fmt.Println("CONNECT ", cfg.string())
+			fmt.Fprintln(os.Stderr, "CONNECT ", cfg.string())
 		}
 
+		cfg.SSLMode = mode
 		cn := &conn{cfg: cfg, dialer: c.dialer}
 		cn.cfg.Password = pgpass.PasswordFromPgpass(cn.cfg.Passfile, cn.cfg.User, cn.cfg.Password,
 			cn.cfg.Host, strconv.Itoa(int(cn.cfg.Port)), cn.cfg.Database, cn.cfg.isset("password"))
@@ -271,7 +274,11 @@ restart:
 			continue
 		}
 
-		err = cn.ssl(cn.cfg)
+		err = cn.ssl(cn.cfg, mode)
+		if err != nil && mode == SSLModePrefer {
+			mode = SSLModeDisable
+			goto restartHost
+		}
 		if app(err, cfg) {
 			if cn.c != nil {
 				_ = cn.c.Close()
@@ -281,6 +288,10 @@ restart:
 
 		cn.buf = bufio.NewReader(cn.c)
 		err = cn.startup(cn.cfg)
+		if err != nil && mode == SSLModeAllow {
+			mode = SSLModeRequire
+			goto restartHost
+		}
 		if app(err, cfg) {
 			_ = cn.c.Close()
 			continue
@@ -308,7 +319,7 @@ restart:
 	// ran out of hosts so none are on standby. Clear the setting and try again.
 	if c.cfg.TargetSessionAttrs == TargetSessionAttrsPreferStandby {
 		tsa = TargetSessionAttrsAny
-		goto restart
+		goto restartAll
 	}
 
 	if len(c.cfg.Multi) == 0 {
@@ -568,8 +579,8 @@ func (cn *conn) gname() string {
 
 func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, resErr error) {
 	if debugProto {
-		fmt.Fprintf(os.Stderr, "         START conn.simpleExec\n")
-		defer fmt.Fprintf(os.Stderr, "         END conn.simpleExec\n")
+		fmt.Fprintln(os.Stderr, "         START conn.simpleExec")
+		defer fmt.Fprintln(os.Stderr, "         END conn.simpleExec")
 	}
 
 	b := cn.writeBuf(proto.Query)
@@ -611,8 +622,8 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, resE
 
 func (cn *conn) simpleQuery(q string) (*rows, error) {
 	if debugProto {
-		fmt.Fprintf(os.Stderr, "         START conn.simpleQuery\n")
-		defer fmt.Fprintf(os.Stderr, "         END conn.simpleQuery\n")
+		fmt.Fprintln(os.Stderr, "         START conn.simpleQuery")
+		defer fmt.Fprintln(os.Stderr, "         END conn.simpleQuery")
 	}
 
 	b := cn.writeBuf(proto.Query)
@@ -740,8 +751,8 @@ func decideColumnFormats(colTyps []fieldDesc, forceText bool) (colFmts []format,
 
 func (cn *conn) prepareTo(q, stmtName string) (*stmt, error) {
 	if debugProto {
-		fmt.Fprintf(os.Stderr, "         START conn.prepareTo\n")
-		defer fmt.Fprintf(os.Stderr, "         END conn.prepareTo\n")
+		fmt.Fprintln(os.Stderr, "         START conn.prepareTo")
+		defer fmt.Fprintln(os.Stderr, "         END conn.prepareTo")
 	}
 
 	st := &stmt{cn: cn, name: stmtName}
@@ -865,8 +876,8 @@ func (cn *conn) Query(query string, args []driver.Value) (driver.Rows, error) {
 
 func (cn *conn) query(query string, args []driver.NamedValue) (*rows, error) {
 	if debugProto {
-		fmt.Fprintf(os.Stderr, "         START conn.query\n")
-		defer fmt.Fprintf(os.Stderr, "         END conn.query\n")
+		fmt.Fprintln(os.Stderr, "         START conn.query")
+		defer fmt.Fprintln(os.Stderr, "         END conn.query")
 	}
 	if err := cn.err.get(); err != nil {
 		return nil, err
@@ -1000,9 +1011,7 @@ func (cn *conn) sendStartupPacket(m *writeBuf) error {
 	if debugProto {
 		w := m.wrap()
 		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n",
-			"Startup",
-			int(binary.BigEndian.Uint32(w[1:5]))-4,
-			w[5:])
+			"Startup", int(binary.BigEndian.Uint32(w[1:5]))-4, w[5:])
 	}
 	_, err := cn.c.Write((m.wrap())[1:])
 	return err
@@ -1012,8 +1021,7 @@ func (cn *conn) sendStartupPacket(m *writeBuf) error {
 // should have no payload. This method does not use the scratch buffer.
 func (cn *conn) sendSimpleMessage(typ proto.RequestCode) error {
 	if debugProto {
-		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n",
-			proto.RequestCode(typ), 0, []byte{})
+		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n", proto.RequestCode(typ), 0, []byte{})
 	}
 	_, err := cn.c.Write([]byte{byte(typ), '\x00', '\x00', '\x00', '\x04'})
 	return err
@@ -1079,7 +1087,7 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 	}
 	*r = y
 	if debugProto {
-		fmt.Fprintf(os.Stderr, "SERVER ← %-20s %5d  %q\n", t, n, y)
+		fmt.Fprintf(os.Stderr, "SERVER ← %-20s %5d  %q\n", proto.ResponseCode(t), n, y)
 	}
 	return t, nil
 }
@@ -1150,19 +1158,19 @@ func (cn *conn) recv1() (proto.ResponseCode, *readBuf, error) {
 	return t, r, nil
 }
 
-func (cn *conn) ssl(cfg Config) error {
-	upgrade, err := ssl(cfg)
+// Don't refer to Config.SSLMode here, as the mode in arguments may be different
+// in case of sslmode=allow or prefer.
+func (cn *conn) ssl(cfg Config, mode SSLMode) error {
+	upgrade, err := ssl(cfg, mode)
 	if err != nil {
 		return err
 	}
-
 	if upgrade == nil {
-		// Nothing to do
-		return nil
+		return nil // Nothing to do
 	}
 
 	// Only negotiate the ssl handshake if requested (which is the default).
-	// sllnegotiation=direct is supported by pg17 and above.
+	// sslnegotiation=direct is supported by pg17 and above.
 	if cfg.SSLNegotiation != SSLNegotiationDirect {
 		w := cn.writeBuf(0)
 		w.int32(proto.NegotiateSSLCode)

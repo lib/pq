@@ -86,7 +86,7 @@ func (cn *conn) Ping(ctx context.Context) error {
 	}
 	rows, err := cn.simpleQuery(";")
 	if err != nil {
-		return driver.ErrBadConn // https://golang.org/pkg/database/sql/driver/#Pinger
+		return driver.ErrBadConn
 	}
 	_ = rows.Close()
 	return nil
@@ -144,7 +144,7 @@ func (cn *conn) cancel(ctx context.Context) error {
 	defer func() { _ = c.Close() }()
 
 	cn2 := conn{c: c}
-	err = cn2.ssl(cfg)
+	err = cn2.ssl(cfg, cfg.SSLMode)
 	if err != nil {
 		return err
 	}

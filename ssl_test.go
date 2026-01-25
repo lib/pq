@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/lib/pq/internal/pqtest"
+	"github.com/lib/pq/internal/proto"
 )
 
 func openSSLConn(t *testing.T, conninfo ...string) (*sql.DB, error) {
@@ -39,35 +40,70 @@ func startSSLTest(t *testing.T, user string) {
 }
 
 func TestSSLMode(t *testing.T) {
+	f := pqtest.NewFake(t, func(f pqtest.Fake, cn net.Conn) {
+		f.Startup(cn, nil)
+		for {
+			code, _, ok := f.ReadMsg(cn)
+			if !ok {
+				return
+			}
+			switch code {
+			case proto.Query:
+				f.WriteMsg(cn, proto.EmptyQueryResponse, "")
+				f.WriteMsg(cn, proto.ReadyForQuery, "I")
+			case proto.Terminate:
+				cn.Close()
+				return
+			}
+		}
+	})
+
 	tests := []struct {
 		connect string
-		wantErr bool
+		wantErr string
 	}{
 		// sslmode=require: require SSL, but don't verify certificate.
-		{"sslmode=require user=pqgossl", false},
+		{"sslmode=require user=pqgossl", ""},
+		{"sslmode=require " + f.DSN(), "pq: SSL is not enabled on the server"},
 
 		// sslmode=verify-ca: verify that the certificate was signed by a trusted CA
-		{"host=postgres sslmode=verify-ca user=pqgossl", true},
-		{"host=postgres sslmode=verify-ca user=pqgossl sslrootcert=''", true},
-
-		{"sslrootcert=testdata/init/root.crt sslmode=verify-ca user=pqgossl host=127.0.0.1", false},
-		{"sslrootcert=testdata/init/root.crt sslmode=verify-ca user=pqgossl host=postgres-invalid", false},
-		{"sslrootcert=testdata/init/root.crt sslmode=verify-ca user=pqgossl host=postgres", false},
+		{"host=postgres sslmode=verify-ca user=pqgossl", "invalid-cert"},
+		{"host=postgres sslmode=verify-ca user=pqgossl sslrootcert=''", "invalid-cert"},
+		{"sslrootcert=testdata/init/root.crt sslmode=verify-ca user=pqgossl host=127.0.0.1", ""},
+		{"sslrootcert=testdata/init/root.crt sslmode=verify-ca user=pqgossl host=postgres-invalid", ""},
+		{"sslrootcert=testdata/init/root.crt sslmode=verify-ca user=pqgossl host=postgres", ""},
 
 		// sslmode=verify-full: verify that the certification was signed by a trusted CA and the host matches
-		{"sslmode=verify-full user=pqgossl host=postgres", true},
-		{"sslrootcert=testdata/init/root.crt sslmode=verify-full user=pqgossl host=127.0.0.1", true},
-		{"sslrootcert=testdata/init/root.crt sslmode=verify-full user=pqgossl host=postgres-invalid", true},
-
-		{"sslrootcert=testdata/init/root.crt sslmode=verify-full user=pqgossl host=postgres", false},
+		{"sslmode=verify-full user=pqgossl host=postgres", "invalid-cert"},
+		{"sslrootcert=testdata/init/root.crt sslmode=verify-full user=pqgossl host=127.0.0.1", "invalid-cert"},
+		{"sslrootcert=testdata/init/root.crt sslmode=verify-full user=pqgossl host=postgres-invalid", "invalid-cert"},
+		{"sslrootcert=testdata/init/root.crt sslmode=verify-full user=pqgossl host=postgres", ""},
 
 		// With root cert
-		{"sslrootcert=testdata/init/bogus_root.crt host=postgres sslmode=require user=pqgossl", true},
+		{"sslrootcert=testdata/init/bogus_root.crt host=postgres sslmode=require user=pqgossl", "invalid-cert"},
+		{"sslrootcert=testdata/init/non_existent.crt host=127.0.0.1 sslmode=require user=pqgossl", ""},
+		{"sslrootcert=testdata/init/root.crt host=127.0.0.1 sslmode=require user=pqgossl", ""},
+		{"sslrootcert=testdata/init/root.crt host=postgres sslmode=require user=pqgossl", ""},
+		{"sslrootcert=testdata/init/root.crt host=postgres-invalid sslmode=require user=pqgossl", ""},
 
-		{"sslrootcert=testdata/init/non_existent.crt host=127.0.0.1 sslmode=require user=pqgossl", false},
-		{"sslrootcert=testdata/init/root.crt host=127.0.0.1 sslmode=require user=pqgossl", false},
-		{"sslrootcert=testdata/init/root.crt host=postgres sslmode=require user=pqgossl", false},
-		{"sslrootcert=testdata/init/root.crt host=postgres-invalid sslmode=require user=pqgossl", false},
+		// sslmode=prefer
+		{"sslmode=prefer user=pqgossl", ""},
+		{"sslmode=prefer", ""},
+		{"sslmode=prefer user=pqgossl " + f.DSN(), ""}, // Doesn't support SSL, so try again without.
+
+		// sslmode=allow
+		{"sslmode=allow user=pqgossl", ""}, // Requires SSL, so will try again
+		{"sslmode=allow", ""},              // Doesn't need SSL, should just work.
+		{"sslmode=allow " + f.DSN(), ""},   // Idem
+
+		// sslmode=disable
+		{"sslmode=disable user=pqgossl", "no encryption"},
+
+		// sslnegotiation=direct should fail if ssl isn't required, like libpq:
+		// psql: error: weak sslmode "allow" may not be used with sslnegotiation=direct (use "require", "verify-ca", or "verify-full")
+		{"sslmode=disable sslnegotiation=direct", "weak sslmode"},
+		{"sslmode=allow sslnegotiation=direct", "weak sslmode"},
+		{"sslmode=prefer sslnegotiation=direct", "weak sslmode"},
 	}
 
 	startSSLTest(t, "pqgossl")
@@ -76,13 +112,27 @@ func TestSSLMode(t *testing.T) {
 		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
+
+			if tt.wantErr == "no encryption" && pqtest.Pgbouncer() {
+				// PostgreSQL repsonds with:
+				//   pq: pg_hba.conf rejects connection for host "172.18.0.1", user "pqgossl", database "pqgo", no encryption (28000)
+				//
+				// But pgbouncer has a different message and code:
+				//   pq: login rejected (08P01)
+				tt.wantErr = "login rejected"
+			}
+
 			_, err := openSSLConn(t, tt.connect)
-			if tt.wantErr {
+			t.Log(tt.connect)
+			switch {
+			case tt.wantErr == "" && err != nil:
+				t.Fatalf("\nfailed for %q\n%s", tt.connect, err)
+			case tt.wantErr == "invalid-cert":
 				if !pqtest.InvalidCertificate(err) {
 					t.Fatalf("wrong error type %T: %[1]s", err)
 				}
-			} else if err != nil {
-				t.Errorf("\nfailed for %q\n%s", tt.connect, err)
+			case !pqtest.ErrorContains(err, tt.wantErr):
+				t.Fatalf("wrong error\nwant: %s\nhave: %s", tt.wantErr, err)
 			}
 		})
 	}
