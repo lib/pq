@@ -49,7 +49,10 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
   ignore ENOTDIR errors, and use APPDATA on Windows ([#1214]).
 
 - Fix `sslmode=verify-ca` verifying the hostname anyway when connecting to a DNS
-  name (rather than IP) ([#1226])
+  name (rather than IP) ([#1226]).
+
+- Correctly detect pre-protocol errors such as the server not being able to fork
+  or running out of memory ([#1248]).
 
 - Fix build with wasm ([#1184]), appengine ([#745]), and Plan 9 ([#1133]).
 
@@ -117,6 +120,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 [#1240]: https://github.com/lib/pq/pull/1240
 [#1243]: https://github.com/lib/pq/pull/1243
 [#1246]: https://github.com/lib/pq/pull/1246
+[#1248]: https://github.com/lib/pq/pull/1248
 
 
 v1.10.9 (2023-04-26)
