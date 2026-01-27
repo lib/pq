@@ -1029,6 +1029,24 @@ func (cn *conn) saveMessage(typ proto.ResponseCode, buf *readBuf) error {
 	return nil
 }
 
+// maxErrorLength matches libpq's MAX_ERRLEN for detecting pre-protocol errors.
+const maxErrorLength = 30000
+
+// readPreProtocolError reads a pre-protocol plain text error message.
+// When PostgreSQL cannot start a backend (e.g., an external process limit),
+// it sends plain text like "Ecould not fork new process for connection: ..."
+// The 'E' looks like an ErrorResponse type, but the rest is plain text.
+func readPreProtocolError(buf *bufio.Reader, header []byte) error {
+	// Start with the 4 "length" bytes which are actually message text
+	msg := string(header[1:])
+
+	// Read remaining text until null terminator
+	rest, _ := buf.ReadString('\x00')
+	msg += strings.TrimSuffix(rest, "\x00")
+
+	return fmt.Errorf("server error: %s", msg)
+}
+
 // recvMessage receives any message from the backend, or returns an error if
 // a problem occurred while reading the message.
 func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
@@ -1050,6 +1068,17 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 	// read the type and length of the message that follows
 	t := x[0]
 	n := int(binary.BigEndian.Uint32(x[1:])) - 4
+
+	// Detect pre-protocol errors, matching libpq's behavior (fe-connect.c).
+	// When PostgreSQL cannot start a backend (e.g., an external process limit),
+	// it sends plain text like "Ecould not fork new process...". The 'E' gets
+	// parsed as an ErrorResponse type, but the "length" is actually text.
+	// libpq checks: if ErrorResponse && (msgLength < 8 || msgLength > 30000),
+	// here we check < 4 since n represents bytes remaining to be read after length
+	if t == 'E' && (n < 4 || n > maxErrorLength) {
+		return 0, readPreProtocolError(cn.buf, x)
+	}
+
 	var y []byte
 	if n <= len(cn.scratch) {
 		y = cn.scratch[:n]

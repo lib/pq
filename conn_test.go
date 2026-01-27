@@ -2165,3 +2165,51 @@ func TestUint64(t *testing.T) {
 		}
 	}
 }
+
+func TestPreProtocolError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		msg     string
+		wantErr string
+	}{
+		{
+			name:    "could not fork",
+			msg:     "could not fork new process for connection: Resource temporarily unavailable\n",
+			wantErr: "server error: could not fork new process for connection: Resource temporarily unavailable",
+		},
+		{
+			name:    "too many connections",
+			msg:     "sorry, too many clients already\n",
+			wantErr: "server error: sorry, too many clients already",
+		},
+		{
+			name:    "out of memory",
+			msg:     "out of memory\n",
+			wantErr: "server error: out of memory",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := pqtest.NewFake(t, func(f pqtest.Fake, cn net.Conn) {
+				f.ReadStartup(cn)
+				// Send pre-protocol error: 'E' followed by plain text
+				// This simulates what PostgreSQL sends when it can't fork
+				cn.Write(append([]byte{'E'}, tt.msg...))
+				cn.Close()
+			})
+			defer f.Close()
+
+			db := pqtest.MustDB(t, f.DSN())
+			err := db.Ping()
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
+			}
+		})
+	}
+}
