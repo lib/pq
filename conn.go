@@ -1047,9 +1047,21 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 		return 0, err
 	}
 
-	// read the type and length of the message that follows
-	t := x[0]
+	// Read the type and length of the message that follows.
+	t := proto.ResponseCode(x[0])
 	n := int(binary.BigEndian.Uint32(x[1:])) - 4
+
+	// When PostgreSQL cannot start a backend (e.g., an external process limit),
+	// it sends plain text like "Ecould not fork new process [..]", which
+	// doesn't use the standard encoding for the Error message.
+	//
+	// libpq checks "if ErrorResponse && (msgLength < 8 || msgLength > MAX_ERRLEN)",
+	// but check < 4 since n represents bytes remaining to be read after length.
+	if t == proto.ErrorResponse && (n < 4 || n > proto.MaxErrlen) {
+		msg, _ := cn.buf.ReadString('\x00')
+		return 0, fmt.Errorf("pq: server error: %s%s", string(x[1:]), strings.TrimSuffix(msg, "\x00"))
+	}
+
 	var y []byte
 	if n <= len(cn.scratch) {
 		y = cn.scratch[:n]
@@ -1062,10 +1074,9 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 	}
 	*r = y
 	if debugProto {
-		fmt.Fprintf(os.Stderr, "SERVER ← %-20s %5d  %q\n",
-			proto.ResponseCode(t), n, y)
+		fmt.Fprintf(os.Stderr, "SERVER ← %-20s %5d  %q\n", t, n, y)
 	}
-	return proto.ResponseCode(t), nil
+	return t, nil
 }
 
 // recv receives a message from the backend, returning an error if an error
