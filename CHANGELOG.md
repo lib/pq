@@ -1,15 +1,11 @@
-unreleased
-----------
+v1.11.0 (2025-01-28)
+--------------------
 This version of pq requires Go 1.21 or newer.
 
 pq now supports only maintained PostgreSQL releases, which is PostgreSQL 14 and
 newer. Previously PostgreSQL 8.4 and newer were supported.
 
 ### Features
-
-- Add support for NamedValueChecker interface ([#1125], [#1238]).
-
-- Support [`sslnegotiation`] to use SSL without negotiation ([#1180]).
 
 - The `pq.Error.Error()` text  includes the position of the error (if reported
   by PostgreSQL) and SQLSTATE code ([#1219], [#1224]):
@@ -28,8 +24,6 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
            12 | );
                 ^
 
-- Allow using a custom `tls.Config`, for example for encrypted keys ([#1228]).
-
 - Add `Config`, `NewConfig()`, and `NewConnectorConfig()` to supply connection
   details in a more structured way ([#1240]).
 
@@ -40,8 +34,15 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 - Support `target_session_attrs` connection parameter ([#1246]).
 
+- Support [`sslnegotiation`] to use SSL without negotiation ([#1180]).
+
+- Allow using a custom `tls.Config`, for example for encrypted keys ([#1228]).
+
 - Add `PQGO_DEBUG=1` print the communication with PostgreSQL to stderr, to aid
   in debugging, testing, and bug reports ([#1223]).
+
+- Add support for NamedValueChecker interface ([#1125], [#1238]).
+
 
 ### Fixes
 
