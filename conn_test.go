@@ -2168,61 +2168,32 @@ func TestUint64(t *testing.T) {
 	}
 }
 
-func TestByteaPointer(t *testing.T) {
-	db := pqtest.MustDB(t)
-
-	pqtest.Exec(t, db, `create temp table tbl (b bytea)`)
-
-	// Test *[]byte is correctly stored as bytea, not as an integer array.
-	// This was a bug in CheckNamedValue where *[]byte would be dereferenced
-	// and then incorrectly converted to a PostgreSQL array like {0,1,2}.
-	data := []byte{0x00, 0x01, 0x02, 0xff}
-	pqtest.Exec(t, db, `insert into tbl values ($1)`, &data)
-
-	rows, err := db.Query("select b from tbl")
-	if err != nil {
-		t.Fatal(err)
+func TestBytea(t *testing.T) {
+	tests := []struct {
+		in   any
+		want string
+	}{
+		{[]byte{0x00, 0x01, 0x02, 0xff},
+			`[]map[string][]uint8{map[string][]uint8{"b":[]uint8{0x0, 0x1, 0x2, 0xff}}}`},
+		{[]byte(nil),
+			`[]map[string][]uint8{map[string][]uint8{"b":[]uint8(nil)}}`},
+		{json.RawMessage(`{"key":"value"}`),
+			`[]map[string][]uint8{map[string][]uint8{"b":[]uint8{0x7b, 0x22, 0x6b, 0x65, 0x79, 0x22, 0x3a, 0x22, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x7d}}}`},
+		{pqtest.Ptr(pqtest.Ptr([]byte{0x00, 0x01, 0x02, 0xff})),
+			`[]map[string][]uint8{map[string][]uint8{"b":[]uint8{0x0, 0x1, 0x2, 0xff}}}`},
 	}
-	defer rows.Close()
 
-	if rows.Next() {
-		var b []byte
-		err := rows.Scan(&b)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if !bytes.Equal(b, data) {
-			t.Fatalf("mismatch\nhave: %v\nwant: %v", b, data)
-		}
-	}
-}
-
-func TestByteaPointerNil(t *testing.T) {
-	db := pqtest.MustDB(t)
-
-	pqtest.Exec(t, db, `create temp table tbl (b bytea)`)
-
-	// Test nil *[]byte is correctly stored as NULL.
-	var data *[]byte
-	pqtest.Exec(t, db, `insert into tbl values ($1)`, data)
-
-	rows, err := db.Query("select b from tbl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-
-	if rows.Next() {
-		var b []byte
-		err := rows.Scan(&b)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if b != nil {
-			t.Fatalf("expected nil, got %v", b)
-		}
+	for _, tt := range tests {
+		tt := tt
+		t.Run("", func(t *testing.T) {
+			db := pqtest.MustDB(t)
+			pqtest.Exec(t, db, `create temp table tbl (b bytea)`)
+			pqtest.Exec(t, db, `insert into tbl values ($1)`, &tt.in)
+			rows := pqtest.Query[[]byte](t, db, `select b from tbl`)
+			if have := fmt.Sprintf("%#v", rows); have != tt.want {
+				t.Fatalf("\nhave: %s\nwant: %s", have, tt.want)
+			}
+		})
 	}
 }
 
