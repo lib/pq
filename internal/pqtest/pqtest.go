@@ -51,6 +51,13 @@ func InvalidCertificate(err error) bool {
 	return false
 }
 
+// Ptr gets a pointer to any value.
+//
+// TODO: replace with new(..) once pq requires Go 1.26.
+func Ptr[T any](t T) *T {
+	return &t
+}
+
 var envOnce sync.Once
 
 func DSN(conninfo string) string {

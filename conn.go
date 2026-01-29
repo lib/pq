@@ -825,14 +825,18 @@ func (cn *conn) CheckNamedValue(nv *driver.NamedValue) error {
 		return driver.ErrSkip
 	}
 
-	// Ignoring []byte / []uint8.
-	if _, ok := nv.Value.([]uint8); ok {
+	v := reflect.ValueOf(nv.Value)
+	if !v.IsValid() {
 		return driver.ErrSkip
 	}
+	t := v.Type()
+	for t.Kind() == reflect.Ptr {
+		t, v = t.Elem(), v.Elem()
+	}
 
-	v := reflect.ValueOf(nv.Value)
-	if v.Kind() == reflect.Ptr {
-		v = v.Elem()
+	// Ignore []byte and related types: *[]byte, json.RawMessage, etc.
+	if t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.Uint8 {
+		return driver.ErrSkip
 	}
 
 	switch v.Kind() {
