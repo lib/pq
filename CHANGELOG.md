@@ -1,3 +1,15 @@
+v1.11.1 (2025-01-29)
+--------------------
+This fixes two regressions present in the v1.11.0 release:
+
+- Fix build on 32bit systems, Windows, and Plan 9 ([#1253]).
+
+- Named []byte types and pointers to []byte (e.g. `*[]byte`, `json.RawMessage`)
+  would be treated as an array instead of bytea ([#1252]).
+
+[#1252]: https://github.com/lib/pq/pull/1252
+[#1253]: https://github.com/lib/pq/pull/1253
+
 v1.11.0 (2025-01-28)
 --------------------
 This version of pq requires Go 1.21 or newer.
