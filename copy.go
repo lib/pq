@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 
 	"github.com/lib/pq/internal/proto"
@@ -159,7 +158,7 @@ awaitCopyInResponse:
 }
 
 func (ci *copyin) flush(buf []byte) error {
-	if len(buf)-1 > math.MaxUint32 {
+	if len(buf)-1 > proto.MaxUint32 {
 		return errors.New("pq: too many columns")
 	}
 	// set message length (without message identifier)

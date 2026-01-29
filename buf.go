@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/lib/pq/internal/proto"
 	"github.com/lib/pq/oid"
@@ -83,7 +82,7 @@ func (b *writeBuf) bytes(v []byte) {
 
 func (b *writeBuf) wrap() []byte {
 	p := b.buf[b.pos:]
-	if len(p) > math.MaxUint32 {
+	if len(p) > proto.MaxUint32 {
 		panic(fmt.Errorf("pq: message too large (%d > math.MaxUint32)", len(p)))
 	}
 	binary.BigEndian.PutUint32(p, uint32(len(p)))
@@ -92,7 +91,7 @@ func (b *writeBuf) wrap() []byte {
 
 func (b *writeBuf) next(c proto.RequestCode) {
 	p := b.buf[b.pos:]
-	if len(p) > math.MaxUint32 {
+	if len(p) > proto.MaxUint32 {
 		panic(fmt.Errorf("pq: message too large (%d > math.MaxUint32)", len(p)))
 	}
 	binary.BigEndian.PutUint32(p, uint32(len(p)))
