@@ -1,9 +1,11 @@
 package pq
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -2162,6 +2164,95 @@ func TestUint64(t *testing.T) {
 
 		if i != math.MaxUint64 {
 			t.Fatalf("\nwant: %d\nhave: %d", uint64(math.MaxUint64), i)
+		}
+	}
+}
+
+func TestByteaPointer(t *testing.T) {
+	db := pqtest.MustDB(t)
+
+	pqtest.Exec(t, db, `create temp table tbl (b bytea)`)
+
+	// Test *[]byte is correctly stored as bytea, not as an integer array.
+	// This was a bug in CheckNamedValue where *[]byte would be dereferenced
+	// and then incorrectly converted to a PostgreSQL array like {0,1,2}.
+	data := []byte{0x00, 0x01, 0x02, 0xff}
+	pqtest.Exec(t, db, `insert into tbl values ($1)`, &data)
+
+	rows, err := db.Query("select b from tbl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		var b []byte
+		err := rows.Scan(&b)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !bytes.Equal(b, data) {
+			t.Fatalf("mismatch\nhave: %v\nwant: %v", b, data)
+		}
+	}
+}
+
+func TestByteaPointerNil(t *testing.T) {
+	db := pqtest.MustDB(t)
+
+	pqtest.Exec(t, db, `create temp table tbl (b bytea)`)
+
+	// Test nil *[]byte is correctly stored as NULL.
+	var data *[]byte
+	pqtest.Exec(t, db, `insert into tbl values ($1)`, data)
+
+	rows, err := db.Query("select b from tbl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		var b []byte
+		err := rows.Scan(&b)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if b != nil {
+			t.Fatalf("expected nil, got %v", b)
+		}
+	}
+}
+
+func TestJSONRawMessage(t *testing.T) {
+	db := pqtest.MustDB(t)
+
+	pqtest.Exec(t, db, `create temp table tbl (j json)`)
+
+	// Test json.RawMessage (a named []byte type) is correctly stored as JSON,
+	// not converted to a PostgreSQL array. This was a bug in CheckNamedValue
+	// where named byte slice types would hit the reflect.Slice case and get
+	// incorrectly converted to a PostgreSQL array.
+	data := json.RawMessage(`{"key":"value"}`)
+	pqtest.Exec(t, db, `insert into tbl values ($1)`, data)
+
+	rows, err := db.Query("select j from tbl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		var j json.RawMessage
+		err := rows.Scan(&j)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !bytes.Equal(j, data) {
+			t.Fatalf("json mismatch\nhave: %s\nwant: %s", j, data)
 		}
 	}
 }
