@@ -151,8 +151,8 @@ func (cn *conn) cancel(ctx context.Context) error {
 
 	w := cn2.writeBuf(0)
 	w.int32(proto.CancelRequestCode)
-	w.int32(cn.processID)
-	w.int32(cn.secretKey)
+	w.int32(cn.pid)
+	w.bytes(cn.secretKey)
 	if err := cn2.sendStartupPacket(w); err != nil {
 		return err
 	}

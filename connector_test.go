@@ -100,7 +100,7 @@ func TestNewConnector(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := fmt.Sprintf(
-			`map[client_encoding:UTF8 connect_timeout:20 datestyle:ISO, MDY dbname:pqgo host:localhost port:%d search_path:foo sslmode:disable sslsni:yes user:pqgo]`,
+			`map[client_encoding:UTF8 connect_timeout:20 datestyle:ISO, MDY dbname:pqgo host:localhost max_protocol_version:3.0 min_protocol_version:3.0 port:%d search_path:foo sslmode:disable sslsni:yes user:pqgo]`,
 			cfg.Port)
 		if have := fmt.Sprintf("%v", c.cfg.tomap()); have != want {
 			t.Errorf("\nhave: %s\nwant: %s", have, want)
@@ -439,6 +439,19 @@ func TestNewConfig(t *testing.T) {
 		{"host=a,b,c hostaddr=1.1.1.1,2.2.2.2", nil, "", "could not match 3 host names to 2 hostaddr values"},
 		{"host=a hostaddr=1.1.1.1,2.2.2.2", nil, "", "could not match 1 host names to 2 hostaddr values"},
 		{"", []string{"PGHOST=a,,b", "PGHOSTADDR=1.1.1.1,,2.2.2.2", "PGPORT=3,,4"}, "host=a,localhost,b hostaddr=1.1.1.1,,2.2.2.2 port=3,5432,4", ""},
+
+		// Protocol version
+		{"min_protocol_version=3.0", nil, "min_protocol_version=3.0", ""},
+		{"max_protocol_version=3.2", nil, "max_protocol_version=3.2", ""},
+		{"min_protocol_version=3.2 max_protocol_version=3.2", nil, "max_protocol_version=3.2 min_protocol_version=3.2", ""},
+		{"min_protocol_version=latest max_protocol_version=latest", nil, "max_protocol_version=latest min_protocol_version=latest", ""},
+		{"min_protocol_version=3.0 max_protocol_version=latest", nil, "max_protocol_version=latest min_protocol_version=3.0", ""},
+		{"", []string{"PGMINPROTOCOLVERSION=3.0", "PGMAXPROTOCOLVERSION=3.2"}, "max_protocol_version=3.2 min_protocol_version=3.0", ""},
+		{"min_protocol_version=bogus", nil, "", `pq: wrong value for "min_protocol_version": "bogus" is not supported`},
+		{"max_protocol_version=bogus", nil, "", `pq: wrong value for "max_protocol_version": "bogus" is not supported`},
+		{"", []string{"PGMINPROTOCOLVERSION=bogus"}, "", `pq: wrong value for $PGMINPROTOCOLVERSION: "bogus" is not supported`},
+		{"", []string{"PGMAXPROTOCOLVERSION=bogus"}, "", `pq: wrong value for $PGMAXPROTOCOLVERSION: "bogus" is not supported`},
+		{"min_protocol_version=3.2 max_protocol_version=3.0", nil, "", `min_protocol_version "3.2" cannot be greater than max_protocol_version "3.0"`},
 	}
 
 	t.Parallel()
@@ -508,7 +521,7 @@ func TestConnectMulti(t *testing.T) {
 		connectedTo [3]bool
 		accept      = func(n int) func(pqtest.Fake, net.Conn) {
 			return func(f pqtest.Fake, cn net.Conn) {
-				clientParams, ok := f.ReadStartup(cn)
+				_, clientParams, ok := f.ReadStartup(cn)
 				if !ok {
 					return
 				}
@@ -743,6 +756,101 @@ func TestConnectionTargetSessionAttrs(t *testing.T) {
 			err := db.Ping()
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Errorf("\nhave: %v\nwant: %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestProtocolVersion(t *testing.T) {
+	var (
+		key30 = []byte{1, 2, 3, 4}
+		key32 = make([]byte, 32)
+	)
+	for i := 0; i < 32; i++ {
+		key32[i] = byte(i)
+	}
+	accept := func(version float32) (*[]byte, func(f pqtest.Fake, cn net.Conn)) {
+		var kd []byte
+		return &kd, func(f pqtest.Fake, cn net.Conn) {
+			v, _, ok := f.ReadStartup(cn)
+			if !ok {
+				return
+			}
+			use := v
+			if v > version {
+				use = version
+				f.WriteNegotiateProtocolVersion(cn, int(version*10-30), nil)
+			}
+
+			f.WriteMsg(cn, proto.AuthenticationRequest, "\x00\x00\x00\x00")
+			if use >= 3.2 {
+				kd = key32
+			} else {
+				kd = key30
+			}
+			f.WriteBackendKeyData(cn, 666, kd)
+			f.WriteMsg(cn, proto.ReadyForQuery, "I")
+			for {
+				code, _, ok := f.ReadMsg(cn)
+				if !ok {
+					return
+				}
+				switch code {
+				case proto.Query:
+					f.WriteMsg(cn, proto.EmptyQueryResponse, "")
+					f.WriteMsg(cn, proto.ReadyForQuery, "I")
+				case proto.Terminate:
+					cn.Close()
+					return
+				}
+			}
+		}
+	}
+
+	tests := []struct {
+		serverVersion float32
+		min, max      string
+		wantKey       []byte
+		wantErr       string
+	}{
+		{3.2, "", "", key30, ""},
+		{3.2, "3.0", "3.0", key30, ""},
+		{3.2, "3.2", "3.2", key32, ""},
+		{3.2, "3.0", "latest", key32, ""},
+		{3.2, "latest", "latest", key32, ""},
+
+		{3.0, "3.0", "3.2", key30, ""},
+		{3.0, "3.2", "3.2", nil, `pq: protocol version mismatch: min_protocol_version=3.2; server supports up to 3.0`},
+
+		{3.2, "3.9", "3.0", nil, `"3.9" is not supported`},
+		{3.2, "3.0", "3.9", nil, `"3.9" is not supported`},
+		{3.2, "3.2", "3.0", nil, `min_protocol_version "3.2" cannot be greater than max_protocol_version "3.0"`},
+		{3.2, "latest", "3.0", nil, `min_protocol_version "latest" cannot be greater than max_protocol_version "3.0"`},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run("", func(t *testing.T) {
+			t.Parallel()
+			have, a := accept(tt.serverVersion)
+			f := pqtest.NewFake(t, a)
+			defer f.Close()
+
+			var extra []string
+			if tt.min != "" {
+				extra = append(extra, "min_protocol_version="+tt.min)
+			}
+			if tt.max != "" {
+				extra = append(extra, "max_protocol_version="+tt.max)
+			}
+
+			db := pqtest.MustDB(t, f.DSN()+" "+strings.Join(extra, " "))
+			err := db.Ping()
+			if !pqtest.ErrorContains(err, tt.wantErr) {
+				t.Fatalf("wrong error\nhave: %v\nwant: %v", err, tt.wantErr)
+			}
+			if tt.wantErr == "" && !reflect.DeepEqual(*have, tt.wantKey) {
+				t.Fatalf("wrong keydata\nhave: %v\nwant: %v", *have, tt.wantKey)
 			}
 		})
 	}
