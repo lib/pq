@@ -10,7 +10,7 @@ import (
 // Constants from pqcomm.h
 const (
 	ProtocolVersion30 = (3 << 16) | 0 //lint:ignore SA4016 x
-	ProtocolVersion32 = (3 << 16) | 2 // PostgreSQL ≥18; not yet supported.
+	ProtocolVersion32 = (3 << 16) | 2 // PostgreSQL ≥18.
 	CancelRequestCode = (1234 << 16) | 5678
 	NegotiateSSLCode  = (1234 << 16) | 5679
 	NegotiateGSSCode  = (1234 << 16) | 5680

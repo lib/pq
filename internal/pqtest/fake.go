@@ -91,7 +91,7 @@ func (f Fake) accept(fun func(Fake, net.Conn)) {
 // Startup reads the startup message from the server with [f.ReadStartup] and
 // sends [proto.AuthenticationRequest] and [proto.ReadyForQuery].
 func (f Fake) Startup(cn net.Conn, params map[string]string) {
-	if _, ok := f.ReadStartup(cn); !ok {
+	if _, _, ok := f.ReadStartup(cn); !ok {
 		return
 	}
 	// Technically we don't *need* to send the AuthRequest, but the psql CLI
@@ -104,7 +104,7 @@ func (f Fake) Startup(cn net.Conn, params map[string]string) {
 }
 
 // ReadStartup reads the startup message.
-func (f Fake) ReadStartup(cn net.Conn) (map[string]string, bool) {
+func (f Fake) ReadStartup(cn net.Conn) (float32, map[string]string, bool) {
 	_, msg, ok := f.read(cn, true)
 	var (
 		params = make(map[string]string)
@@ -113,7 +113,7 @@ func (f Fake) ReadStartup(cn net.Conn) (map[string]string, bool) {
 	for i := 0; i < len(m); i += 2 {
 		params[m[i]] = m[i+1]
 	}
-	return params, ok
+	return float32(msg[1]) + float32(msg[3])/10, params, ok
 }
 
 // WriteStartup writes startup parameters.
@@ -137,7 +137,9 @@ func (f Fake) read(cn net.Conn, startup bool) (proto.RequestCode, []byte, bool) 
 	typ := make([]byte, sz)
 	_, err := cn.Read(typ)
 	if err != nil {
-		if errors.Is(err, io.EOF) {
+		// No need to error if connection got closed, which is most likely
+		// intentional.
+		if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "connection reset by peer") {
 			return 0, nil, false
 		}
 		f.t.Errorf("reading: %s", err)
@@ -245,4 +247,25 @@ func (f Fake) SimpleQuery(cn net.Conn, tag string, values ...any) {
 	f.WriteMsg(cn, proto.DataRow, string(b))
 
 	f.WriteMsg(cn, proto.CommandComplete, tag+"\x00")
+}
+
+// WriteBackendKeyData sends a BackendKeyData message with the given process ID
+// and secret key (variable length).
+func (f Fake) WriteBackendKeyData(cn net.Conn, pid int, secretKey []byte) {
+	b := make([]byte, 4+len(secretKey))
+	binary.BigEndian.PutUint32(b[0:4], uint32(pid))
+	copy(b[4:], secretKey)
+	f.WriteMsg(cn, proto.BackendKeyData, string(b))
+}
+
+// WriteNegotiateProtocolVersion sends a NegotiateProtocolVersion message.
+func (f Fake) WriteNegotiateProtocolVersion(cn net.Conn, newestMinor int, options []string) {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint32(b[0:4], uint32(newestMinor))
+	binary.BigEndian.PutUint32(b[4:8], uint32(len(options)))
+	for _, o := range options {
+		b = append(b, o...)
+		b = append(b, 0)
+	}
+	f.WriteMsg(cn, proto.NegotiateProtocolVersion, string(b))
 }

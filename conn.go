@@ -174,11 +174,12 @@ type conn struct {
 	// (ErrBadConn) or getForNext().
 	err syncErr
 
-	processID, secretKey int                 // Cancellation key data for use with CancelRequest messages.
-	inCopy               bool                // If true this connection is in the middle of a COPY
-	noticeHandler        func(*Error)        // If not nil, notices will be synchronously sent here
-	notificationHandler  func(*Notification) // If not nil, notifications will be synchronously sent here
-	gss                  GSS                 // GSSAPI context
+	secretKey           []byte              // Cancellation key for CancelRequest messages.
+	pid                 int                 // Cancellation PID.
+	inCopy              bool                // If true this connection is in the middle of a COPY
+	noticeHandler       func(*Error)        // If not nil, notices will be synchronously sent here
+	notificationHandler func(*Notification) // If not nil, notifications will be synchronously sent here
+	gss                 GSS                 // GSSAPI context
 }
 
 type syncErr struct {
@@ -1186,7 +1187,10 @@ func (cn *conn) ssl(cfg Config) error {
 
 func (cn *conn) startup(cfg Config) error {
 	w := cn.writeBuf(0)
-	w.int32(proto.ProtocolVersion30)
+	// Send maximum protocol version in startup; if the server doesn't support
+	// this version it responds with NegotiateProtocolVersion and the maximum
+	// version it supports (and will use).
+	w.int32(cfg.MaxProtocolVersion.proto())
 
 	if cfg.User != "" {
 		w.string("user")
@@ -1226,13 +1230,24 @@ func (cn *conn) startup(cfg Config) error {
 		}
 		switch t {
 		case proto.BackendKeyData:
-			cn.processBackendKeyData(r)
+			cn.pid = r.int32()
+			if len(*r) > 256 {
+				return fmt.Errorf("pq: cancellation key longer than 256 bytes: %d bytes", len(*r))
+			}
+			cn.secretKey = make([]byte, len(*r))
+			copy(cn.secretKey, *r)
 		case proto.ParameterStatus:
 			cn.processParameterStatus(r)
 		case proto.AuthenticationRequest:
 			err := cn.auth(r, cfg)
 			if err != nil {
 				return err
+			}
+		case proto.NegotiateProtocolVersion:
+			newestMinor := r.int32()
+			serverVersion := proto.ProtocolVersion30&0xFFFF0000 | newestMinor
+			if serverVersion < cfg.MinProtocolVersion.proto() {
+				return fmt.Errorf("pq: protocol version mismatch: min_protocol_version=%s; server supports up to 3.%d", cfg.MinProtocolVersion, newestMinor)
 			}
 		case proto.ReadyForQuery:
 			cn.processReadyForQuery(r)
@@ -1564,11 +1579,6 @@ func (cn *conn) readReadyForQuery() error {
 		cn.err.set(driver.ErrBadConn)
 		return fmt.Errorf("pq: unexpected message %q; expected ReadyForQuery", t)
 	}
-}
-
-func (cn *conn) processBackendKeyData(r *readBuf) {
-	cn.processID = r.int32()
-	cn.secretKey = r.int32()
 }
 
 func (cn *conn) readParseResponse() error {

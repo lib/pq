@@ -1,3 +1,10 @@
+unreleased
+----------
+- Support protocol 3.2, and the `min_protocol_version` and
+  `max_protocol_version` DSN parameters ([#1258]).
+
+[#1258]: https://github.com/lib/pq/pull/1258
+
 v1.11.2 (2025-02-10)
 --------------------
 This fixes two regressions:

@@ -19,6 +19,7 @@ import (
 	"unicode"
 
 	"github.com/lib/pq/internal/pqutil"
+	"github.com/lib/pq/internal/proto"
 )
 
 type (
@@ -33,6 +34,10 @@ type (
 
 	// LoadBalanceHosts is a load_balance_hosts setting.
 	LoadBalanceHosts string
+
+	// ProtocolVersion is a min_protocol_version or max_protocol_version
+	// setting.
+	ProtocolVersion string
 )
 
 // Values for [SSLMode] that pq supports.
@@ -110,6 +115,23 @@ const (
 
 var loadBalanceHosts = []LoadBalanceHosts{LoadBalanceHostsDisable, LoadBalanceHostsRandom}
 
+// Values for [ProtocolVersion] that pq supports.
+const (
+	// ProtocolVersion30 is the default protocol version, supported in
+	// PostgreSQL 3.0 and newer.
+	ProtocolVersion30 = ProtocolVersion("3.0")
+
+	// ProtocolVersion32 uses a longer secret key length for query cancellation,
+	// supported in PostgreSQL 18 and newer.
+	ProtocolVersion32 = ProtocolVersion("3.2")
+
+	// ProtocolVersionLatest is the latest protocol version that pq supports
+	// (which may not be supported by the server).
+	ProtocolVersionLatest = ProtocolVersion("latest")
+)
+
+var protocolVersions = []ProtocolVersion{ProtocolVersion30, ProtocolVersion32, ProtocolVersionLatest}
+
 // Connector represents a fixed configuration for the pq driver with a given
 // dsn. Connector satisfies the [database/sql/driver.Connector] interface and
 // can be used to create any number of DB Conn's via [sql.OpenDB].
@@ -147,6 +169,15 @@ func (c *Connector) Dialer(dialer Dialer) { c.dialer = dialer }
 
 // Driver returns the underlying driver of this Connector.
 func (c *Connector) Driver() driver.Driver { return &Driver{} }
+
+func (p ProtocolVersion) proto() int {
+	switch p {
+	default:
+		return proto.ProtocolVersion30
+	case ProtocolVersion32, ProtocolVersionLatest:
+		return proto.ProtocolVersion32
+	}
+}
 
 // Config holds options pq supports when connecting to PostgreSQL.
 //
@@ -303,6 +334,14 @@ type Config struct {
 	// to the same server.
 	LoadBalanceHosts LoadBalanceHosts `postgres:"load_balance_hosts" env:"PGLOADBALANCEHOSTS"`
 
+	// Minimum acceptable PostgreSQL protocol version. If the server does not
+	// support at least this version, the connection will fail. Defaults to
+	// "3.0".
+	MinProtocolVersion ProtocolVersion `postgres:"min_protocol_version" env:"PGMINPROTOCOLVERSION"`
+
+	// Maximum PostgreSQL protocol version to request from the server. Defaults to "3.0".
+	MaxProtocolVersion ProtocolVersion `postgres:"max_protocol_version" env:"PGMAXPROTOCOLVERSION"`
+
 	// Runtime parameters: any unrecognized parameter in the DSN will be added
 	// to this and sent to PostgreSQL during startup.
 	Runtime map[string]string `postgres:"-" env:"-"`
@@ -413,7 +452,13 @@ func (cfg Config) hosts() []Config {
 }
 
 func newConfig(dsn string, env []string) (Config, error) {
-	cfg := Config{Host: "localhost", Port: 5432, SSLSNI: true}
+	cfg := Config{
+		Host:               "localhost",
+		Port:               5432,
+		SSLSNI:             true,
+		MinProtocolVersion: "3.0",
+		MaxProtocolVersion: "3.0",
+	}
 	if err := cfg.fromEnv(env); err != nil {
 		return Config{}, err
 	}
@@ -487,6 +532,11 @@ func newConfig(dsn string, env []string) (Config, error) {
 		cfg.SSLMode = SSLModeDisable
 	}
 
+	if cfg.MinProtocolVersion > cfg.MaxProtocolVersion {
+		return Config{}, fmt.Errorf("pq: min_protocol_version %q cannot be greater than max_protocol_version %q",
+			cfg.MinProtocolVersion, cfg.MaxProtocolVersion)
+	}
+
 	return cfg, nil
 }
 
@@ -514,7 +564,7 @@ func (cfg *Config) fromEnv(env []string) error {
 		case "PGREQUIREAUTH", "PGCHANNELBINDING", "PGSERVICE", "PGSERVICEFILE", "PGREALM",
 			"PGSSLCERTMODE", "PGSSLCOMPRESSION", "PGREQUIRESSL", "PGSSLCRL", "PGREQUIREPEER",
 			"PGSYSCONFDIR", "PGLOCALEDIR", "PGSSLCRLDIR", "PGSSLMINPROTOCOLVERSION", "PGSSLMAXPROTOCOLVERSION",
-			"PGGSSENCMODE", "PGGSSDELEGATION", "PGMINPROTOCOLVERSION", "PGMAXPROTOCOLVERSION", "PGGSSLIB":
+			"PGGSSENCMODE", "PGGSSDELEGATION", "PGGSSLIB":
 			return fmt.Errorf("pq: environment variable $%s is not supported", k)
 		case "PGKRBSRVNAME":
 			if newGss == nil {
@@ -654,6 +704,8 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 			sslnegotiation     = (tag == "postgres" && k == "sslnegotiation") || (tag == "env" && k == "PGSSLNEGOTIATION")
 			targetsessionattrs = (tag == "postgres" && k == "target_session_attrs") || (tag == "env" && k == "PGTARGETSESSIONATTRS")
 			loadbalancehosts   = (tag == "postgres" && k == "load_balance_hosts") || (tag == "env" && k == "PGLOADBALANCEHOSTS")
+			minprotocolversion = (tag == "postgres" && k == "min_protocol_version") || (tag == "env" && k == "PGMINPROTOCOLVERSION")
+			maxprotocolversion = (tag == "postgres" && k == "max_protocol_version") || (tag == "env" && k == "PGMAXPROTOCOLVERSION")
 		)
 		if k == "" || k == "-" {
 			continue
@@ -705,6 +757,9 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 				}
 				if loadbalancehosts && !slices.Contains(loadBalanceHosts, LoadBalanceHosts(v)) {
 					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(loadBalanceHosts))
+				}
+				if (minprotocolversion || maxprotocolversion) && !slices.Contains(protocolVersions, ProtocolVersion(v)) {
+					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(protocolVersions))
 				}
 				if host {
 					vv := strings.Split(v, ",")
@@ -833,7 +888,7 @@ func (cfg Config) string() string {
 		switch k {
 		case "datestyle", "client_encoding":
 			continue
-		case "host", "port", "user", "sslsni":
+		case "host", "port", "user", "sslsni", "min_protocol_version", "max_protocol_version":
 			if !cfg.isset(k) {
 				continue
 			}
