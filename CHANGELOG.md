@@ -1,3 +1,17 @@
+v1.11.2 (2025-02-10)
+--------------------
+This fixes two regressions:
+
+- Don't send startup parameters if there is no value, improving compatibility
+  with Supavisor ([#1260]).
+
+- Don't send `dbname` as a startup parameter if `database=[..]` is used in the
+  connection string. It's recommended to use dbname=, as database= is not a
+  libpq option, and only worked by accident previously. ([#1261])
+
+[#1260]: https://github.com/lib/pq/pull/1260
+[#1261]: https://github.com/lib/pq/pull/1261
+
 v1.11.1 (2025-01-29)
 --------------------
 This fixes two regressions present in the v1.11.0 release:
