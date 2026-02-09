@@ -1188,20 +1188,27 @@ func (cn *conn) startup(cfg Config) error {
 	w := cn.writeBuf(0)
 	w.int32(proto.ProtocolVersion30)
 
-	w.string("user")
-	w.string(cfg.User)
-	w.string("database")
-	w.string(cfg.Database)
+	if cfg.User != "" {
+		w.string("user")
+		w.string(cfg.User)
+	}
+	if cfg.Database != "" {
+		w.string("database")
+		w.string(cfg.Database)
+	}
 	// w.string("replication") // Sent by libpq, but we don't support that.
-	w.string("options")
-	w.string(cfg.Options)
+	if cfg.Options != "" {
+		w.string("options")
+		w.string(cfg.Options)
+	}
 	if cfg.ApplicationName != "" {
 		w.string("application_name")
 		w.string(cfg.ApplicationName)
 	}
-	w.string("client_encoding")
-	w.string(cfg.ClientEncoding)
-
+	if cfg.ClientEncoding != "" {
+		w.string("client_encoding")
+		w.string(cfg.ClientEncoding)
+	}
 	for k, v := range cfg.Runtime {
 		w.string(k)
 		w.string(v)
