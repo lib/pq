@@ -758,14 +758,12 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 
 	// Set run-time; we delete map keys as they're set in the struct.
 	if tag == "postgres" {
-		// Make sure database= sets dbname=; in startup() we send database for
-		// dbname, and if we have both set it's inconsistent as the loop order
-		// is a map.
+		// Make sure database= sets dbname=, as that previously worked (kind of
+		// by accident).
+		// TODO(v2): remove
 		if d, ok := o["database"]; ok {
+			cfg.Database = d
 			delete(o, "database")
-			if o["dbname"] == "" {
-				o["dbname"] = d
-			}
 		}
 		cfg.Runtime = o
 	}
