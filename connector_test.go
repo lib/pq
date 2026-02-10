@@ -113,8 +113,29 @@ func TestNewConnector(t *testing.T) {
 		defer db.Close()
 		useConn(t, db)
 	})
+
+	t.Run("database=", func(t *testing.T) {
+		want1, want2 := `pq: database "err" does not exist (3D000)`,
+			`pq: database "two" does not exist (3D000)`
+		if pqtest.Pgbouncer() {
+			want1, want2 = `pq: no such database: err (08P01)`, `pq: no such database: two (08P01)`
+		}
+
+		// Make sure database= consistently take precedence over dbname=
+		for i := 0; i < 10; i++ {
+			err := pqtest.MustDB(t, "database=err").Ping()
+			if err == nil || err.Error() != want1 {
+				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, want1)
+			}
+			err = pqtest.MustDB(t, "dbname=one database=two").Ping()
+			if err == nil || err.Error() != want2 {
+				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, want2)
+			}
+		}
+	})
 }
 
+// TODO: this can be merged with TestNewConfig, I think?
 func TestParseOpts(t *testing.T) {
 	tests := []struct {
 		in      string
@@ -130,6 +151,7 @@ func TestParseOpts(t *testing.T) {
 		{"dbname=データベース password=パスワード", map[string]string{"dbname": "データベース", "password": "パスワード"}, ""},
 		{"dbname=hello user=''", map[string]string{"dbname": "hello", "user": ""}, ""},
 		{"user='' dbname=hello", map[string]string{"dbname": "hello", "user": ""}, ""},
+
 		// The last option value is an empty string if there's no non-whitespace after its =
 		{"dbname=hello user=   ", map[string]string{"dbname": "hello", "user": ""}, ""},
 
@@ -229,6 +251,8 @@ func TestRuntimeParameters(t *testing.T) {
 		})
 	}
 }
+
+// TODO: this can be merged with TestNewConfig, I think?
 func TestParseEnviron(t *testing.T) {
 	tests := []struct {
 		in   []string
