@@ -3,6 +3,7 @@ package pq
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"testing"
@@ -126,7 +127,10 @@ func TestParseTsErrors(t *testing.T) {
 // Now test that sending the value into the database and parsing it back
 // returns the same time.Time value.
 func TestEncodeAndParseTs(t *testing.T) {
-	t.Parallel()
+	// Transaction mode connection pooling breaks parallel tests.
+	if !pqtest.SupavisorTransactionMode() {
+		t.Parallel()
+	}
 	db := pqtest.MustDB(t, "timezone='Etc/UTC'")
 
 	for i, tt := range timeTests {
@@ -181,7 +185,10 @@ func TestFormatTs(t *testing.T) {
 }
 
 func TestFormatTsBackend(t *testing.T) {
-	t.Parallel()
+	// Transaction mode connection pooling breaks parallel tests.
+	if !pqtest.SupavisorTransactionMode() {
+		t.Parallel()
+	}
 	db := pqtest.MustDB(t)
 
 	var str string
@@ -344,6 +351,12 @@ func TestTimestampWithTimeZone(t *testing.T) {
 }
 
 func TestTimestampWithOutTimezone(t *testing.T) {
+	// "It is important to note that although the direct connections and
+	// Supavisor in session mode support prepared statements, Supavisor in
+	// transaction mode does not."
+	// https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	t.Parallel()
 	db := pqtest.MustDB(t)
 
@@ -525,7 +538,10 @@ func TestStringWithNul(t *testing.T) {
 }
 
 func TestByteSliceToText(t *testing.T) {
-	t.Parallel()
+	// Transaction mode connection pooling breaks parallel tests.
+	if !pqtest.SupavisorTransactionMode() {
+		t.Parallel()
+	}
 	db := pqtest.MustDB(t)
 
 	b := []byte("hello world")
@@ -543,7 +559,10 @@ func TestByteSliceToText(t *testing.T) {
 }
 
 func TestStringToBytea(t *testing.T) {
-	t.Parallel()
+	// Transaction mode connection pooling breaks parallel tests.
+	if !pqtest.SupavisorTransactionMode() {
+		t.Parallel()
+	}
 	db := pqtest.MustDB(t)
 
 	b := "hello world"
@@ -561,7 +580,10 @@ func TestStringToBytea(t *testing.T) {
 }
 
 func TestTextByteSliceToUUID(t *testing.T) {
-	t.Parallel()
+	// Transaction mode connection pooling breaks parallel tests.
+	if !pqtest.SupavisorTransactionMode() {
+		t.Parallel()
+	}
 	db := pqtest.MustDB(t)
 
 	b := []byte("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
@@ -588,7 +610,11 @@ func TestTextByteSliceToUUID(t *testing.T) {
 }
 
 func TestBinaryByteSlicetoUUID(t *testing.T) {
-	t.Parallel()
+	// Transaction mode connection pooling breaks parallel tests.
+	if !pqtest.SupavisorTransactionMode() {
+		t.Parallel()
+	}
+
 	db := pqtest.MustDB(t)
 
 	b := []byte{'\xa0', '\xee', '\xbc', '\x99',
@@ -609,17 +635,22 @@ func TestBinaryByteSlicetoUUID(t *testing.T) {
 			t.Fatalf("expected %v but got %v", b, result)
 		}
 	} else {
-		pqErr := err.(*Error)
-		if pqErr == nil {
-			t.Errorf("Expected to get error")
-		} else if pqErr.Code != "22021" {
-			t.Fatalf("Expected to get invalid byte sequence for encoding error (22021), got %s", pqErr.Code)
+		var pqErr *Error
+		if errors.As(err, &pqErr) {
+			if pqErr.Code != "22021" {
+				t.Fatalf("Expected to get invalid byte sequence for encoding error (22021), got %s", pqErr.Code)
+			}
+		} else {
+			t.Errorf("Expected to get pq.Error, got %v", err)
 		}
 	}
 }
 
 func TestStringToUUID(t *testing.T) {
-	t.Parallel()
+	// Transaction mode connection pooling breaks parallel tests.
+	if !pqtest.SupavisorTransactionMode() {
+		t.Parallel()
+	}
 	db := pqtest.MustDB(t)
 
 	s := "a0eebc99-9c0b-4ef8-bb00-6bb9bd380a11"
@@ -637,6 +668,12 @@ func TestStringToUUID(t *testing.T) {
 }
 
 func TestTextByteSliceToInt(t *testing.T) {
+	// "It is important to note that although the direct connections and
+	// Supavisor in session mode support prepared statements, Supavisor in
+	// transaction mode does not."
+	// https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	t.Parallel()
 	db := pqtest.MustDB(t)
 
@@ -664,7 +701,11 @@ func TestTextByteSliceToInt(t *testing.T) {
 }
 
 func TestBinaryByteSliceToInt(t *testing.T) {
-	t.Parallel()
+	// Transaction mode connection pooling breaks parallel tests.
+	if !pqtest.SupavisorTransactionMode() {
+		t.Parallel()
+	}
+
 	db := pqtest.MustDB(t)
 
 	expected := 12345678
@@ -681,11 +722,13 @@ func TestBinaryByteSliceToInt(t *testing.T) {
 			t.Fatalf("expected %v but got %v", expected, result)
 		}
 	} else {
-		pqErr := err.(*Error)
-		if pqErr == nil {
-			t.Errorf("Expected to get error")
-		} else if pqErr.Code != "22021" {
-			t.Fatalf("Expected to get invalid byte sequence for encoding error (22021), got %s", pqErr.Code)
+		var pqErr *Error
+		if errors.As(err, &pqErr) {
+			if pqErr.Code != "22021" {
+				t.Fatalf("Expected to get invalid byte sequence for encoding error (22021), got %s", pqErr.Code)
+			}
+		} else {
+			t.Errorf("Expected to get pq.Error, got %v", err)
 		}
 	}
 }

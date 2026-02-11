@@ -24,7 +24,11 @@ import (
 )
 
 func TestReconnect(t *testing.T) {
-	t.Parallel()
+	// Cannot run this test in parallel when using transaction-mode
+	// connection pooling.
+	if !pqtest.SupavisorTransactionMode() {
+		t.Parallel()
+	}
 	db1 := pqtest.MustDB(t)
 	tx, err := db1.Begin()
 	if err != nil {
@@ -156,6 +160,10 @@ func TestPgpass(t *testing.T) {
 }
 
 func TestExecNilSlice(t *testing.T) {
+	// This test won't work with transaction mode connection pooling
+	// without a transaction.
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	db := pqtest.MustDB(t)
 
 	_, err := db.Exec("create temp table x (b1 text, b2 text, b3 text)")
@@ -203,6 +211,10 @@ func TestExecNilSlice(t *testing.T) {
 }
 
 func TestExec(t *testing.T) {
+	// This test won't work with transaction mode connection pooling
+	// without a transaction.
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	db := pqtest.MustDB(t)
 
 	_, err := db.Exec("CREATE TEMP TABLE temp (a int)")
@@ -244,6 +256,12 @@ func TestExec(t *testing.T) {
 }
 
 func TestStatment(t *testing.T) {
+	// "It is important to note that although the direct connections and
+	// Supavisor in session mode support prepared statements, Supavisor in
+	// transaction mode does not."
+	// https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	db := pqtest.MustDB(t)
 
 	st, err := db.Prepare("SELECT 1")
@@ -326,6 +344,12 @@ func TestParameterCountMismatch(t *testing.T) {
 
 // Test that EmptyQueryResponses are handled correctly.
 func TestEmptyQuery(t *testing.T) {
+	// "It is important to note that although the direct connections and
+	// Supavisor in session mode support prepared statements, Supavisor in
+	// transaction mode does not."
+	// https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	db := pqtest.MustDB(t)
 
 	res, err := db.Exec("")
@@ -342,6 +366,7 @@ func TestEmptyQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 	cols, err := rows.Columns()
 	if err != nil {
 		t.Fatal(err)
@@ -374,6 +399,7 @@ func TestEmptyQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 	cols, err = rows.Columns()
 	if err != nil {
 		t.Fatal(err)
@@ -391,12 +417,19 @@ func TestEmptyQuery(t *testing.T) {
 
 // Test that rows.Columns() is correct even if there are no result rows.
 func TestEmptyResultSetColumns(t *testing.T) {
+	// "It is important to note that although the direct connections and
+	// Supavisor in session mode support prepared statements, Supavisor in
+	// transaction mode does not."
+	// https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	db := pqtest.MustDB(t)
 
 	rows, err := db.Query("SELECT 1 AS a, text 'bar' AS bar WHERE FALSE")
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 	cols, err := rows.Columns()
 	if err != nil {
 		t.Fatal(err)
@@ -422,6 +455,7 @@ func TestEmptyResultSetColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 	cols, err = rows.Columns()
 	if err != nil {
 		t.Fatal(err)
@@ -522,6 +556,12 @@ func TestEncodeDecode(t *testing.T) {
 }
 
 func TestNoData(t *testing.T) {
+	// "It is important to note that although the direct connections and
+	// Supavisor in session mode support prepared statements, Supavisor in
+	// transaction mode does not."
+	// https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	db := pqtest.MustDB(t)
 
 	st, err := db.Prepare("SELECT 1 WHERE true = false")
@@ -580,8 +620,14 @@ func TestErrorDuringStartup(t *testing.T) {
 	if !ok {
 		t.Fatalf("wrong error type %T: %[1]s", err)
 	}
-	if e.Code.Name() != "invalid_authorization_specification" && e.Code.Name() != "invalid_password" {
-		t.Fatalf("wrong error code %q: %s", e.Code.Name(), err)
+	if pqtest.Supavisor() {
+		if e.Code.Name() != "internal_error" || !strings.Contains(err.Error(), "Tenant or user not found") {
+			t.Fatalf("wrong error code %q: %s", e.Code.Name(), err)
+		}
+	} else {
+		if e.Code.Name() != "invalid_authorization_specification" && e.Code.Name() != "invalid_password" {
+			t.Fatalf("wrong error code %q: %s", e.Code.Name(), err)
+		}
 	}
 }
 
@@ -794,6 +840,10 @@ func TestErrorOnQueryRowSimpleQuery(t *testing.T) {
 
 // Test the QueryRow bug workarounds in stmt.exec() and simpleQuery()
 func TestQueryRowBugWorkaround(t *testing.T) {
+	// This test won't work with transaction mode connection pooling
+	// without a transaction.
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	db := pqtest.MustDB(t)
 
 	// stmt.exec()
@@ -867,6 +917,7 @@ func TestQueryRowBugWorkaround(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query failed: %s", err)
 	}
+	defer rows.Close()
 	if !rows.Next() {
 		t.Fatalf("expected at least one result row; got %s", rows.Err())
 	}
@@ -940,6 +991,10 @@ func TestSimpleQueryWithoutResponse(t *testing.T) {
 }
 
 func TestBindError(t *testing.T) {
+	// This test won't work with transaction mode connection pooling
+	// without a transaction.
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	t.Parallel()
 	db := pqtest.MustDB(t)
 
@@ -948,8 +1003,9 @@ func TestBindError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = db.Query("select * from test where i=$1", "hhh")
+	rows, err := db.Query("select * from test where i=$1", "hhh")
 	if err == nil {
+		rows.Close()
 		t.Fatal("expected an error")
 	}
 
@@ -981,6 +1037,10 @@ func TestParseErrorInExtendedQuery(t *testing.T) {
 
 // TestReturning tests that an INSERT query using the RETURNING clause returns a row.
 func TestReturning(t *testing.T) {
+	// This test won't work with transaction mode connection pooling
+	// without a transaction.
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	t.Parallel()
 	db := pqtest.MustDB(t)
 
@@ -994,6 +1054,7 @@ func TestReturning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 	if !rows.Next() {
 		t.Fatal("no rows")
 	}
@@ -1016,6 +1077,10 @@ func TestReturning(t *testing.T) {
 }
 
 func TestIssue186(t *testing.T) {
+	// This test won't work with transaction mode connection pooling
+	// without a transaction.
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	t.Parallel()
 	db := pqtest.MustDB(t)
 
@@ -1060,6 +1125,12 @@ func TestIssue186(t *testing.T) {
 }
 
 func TestIssue196(t *testing.T) {
+	// "It is important to note that although the direct connections and
+	// Supavisor in session mode support prepared statements, Supavisor in
+	// transaction mode does not."
+	// https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	t.Parallel()
 	db := pqtest.MustDB(t)
 
@@ -1220,6 +1291,7 @@ func TestNullAfterNonNull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer r.Close()
 
 	var n sql.NullInt64
 
@@ -1282,6 +1354,10 @@ func Test64BitErrorChecking(t *testing.T) {
 }
 
 func TestCommit(t *testing.T) {
+	// This test won't work with transaction mode connection pooling
+	// without a transaction.
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	db := pqtest.MustDB(t)
 
 	_, err := db.Exec("CREATE TEMP TABLE temp (a int)")
@@ -1333,6 +1409,10 @@ func TestErrorClass(t *testing.T) {
 }
 
 func TestRowsResultTag(t *testing.T) {
+	// This test won't work with transaction mode connection pooling
+	// without a transaction.
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	type ResultTag interface {
 		Result() driver.Result
 		Tag() string
@@ -1418,6 +1498,7 @@ func TestMultipleResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 	type set struct {
 		cols     []string
 		rowCount int
@@ -1485,12 +1566,13 @@ func TestCopyInStmtAffectedRows(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
 
-	_, err := db.Exec("CREATE TEMP TABLE temp (a int)")
+	txn, err := db.BeginTx(context.TODO(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer txn.Rollback()
 
-	txn, err := db.BeginTx(context.TODO(), nil)
+	_, err = txn.Exec("CREATE TEMP TABLE temp (a int)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1499,6 +1581,7 @@ func TestCopyInStmtAffectedRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer copyStmt.Close()
 
 	res, err := copyStmt.Exec()
 	if err != nil {
@@ -1510,6 +1593,16 @@ func TestCopyInStmtAffectedRows(t *testing.T) {
 }
 
 func TestConnPrepareContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
+
+	// "It is important to note that although the direct connections and
+	// Supavisor in session mode support prepared statements, Supavisor in
+	// transaction mode does not."
+	// https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	t.Parallel()
 
 	tests := []struct {
@@ -1544,6 +1637,7 @@ func TestConnPrepareContext(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			db := pqtest.MustDB(t)
 
@@ -1563,6 +1657,16 @@ func TestConnPrepareContext(t *testing.T) {
 }
 
 func TestStmtQueryContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
+
+	// "It is important to note that although the direct connections and
+	// Supavisor in session mode support prepared statements, Supavisor in
+	// transaction mode does not."
+	// https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	if !pqtest.Pgpool() {
 		t.Parallel()
 	}
@@ -1599,6 +1703,7 @@ func TestStmtQueryContext(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			db := pqtest.MustDB(t)
 
@@ -1610,7 +1715,11 @@ func TestStmtQueryContext(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = stmt.QueryContext(ctx)
+			defer stmt.Close()
+			rows, err := stmt.QueryContext(ctx)
+			if rows != nil {
+				defer rows.Close()
+			}
 			pgErr := (*Error)(nil)
 			switch {
 			case (err != nil) != tt.cancelExpected:
@@ -1623,6 +1732,16 @@ func TestStmtQueryContext(t *testing.T) {
 }
 
 func TestStmtExecContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
+
+	// "It is important to note that although the direct connections and
+	// Supavisor in session mode support prepared statements, Supavisor in
+	// transaction mode does not."
+	// https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	if !pqtest.Pgpool() {
 		t.Parallel()
 	}
@@ -1659,6 +1778,7 @@ func TestStmtExecContext(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			db := pqtest.MustDB(t)
 
@@ -1670,6 +1790,7 @@ func TestStmtExecContext(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer stmt.Close()
 			_, err = stmt.ExecContext(ctx)
 			pgErr := (*Error)(nil)
 			switch {
@@ -1999,6 +2120,12 @@ func TestTxOptions(t *testing.T) {
 }
 
 func TestPing(t *testing.T) {
+	// "It is important to note that although the direct connections and
+	// Supavisor in session mode support prepared statements, Supavisor in
+	// transaction mode does not."
+	// https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	t.Parallel()
 	// TODO: hangs forever?
 	pqtest.SkipPgpool(t)
@@ -2020,6 +2147,7 @@ func TestPing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer conn.Close()
 
 	// start a transaction and read backend pid of our connection
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{
@@ -2029,6 +2157,7 @@ func TestPing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx.Rollback()
 
 	rows, err := tx.Query("SELECT pg_backend_pid()")
 	if err != nil {
@@ -2099,6 +2228,7 @@ func TestAuth(t *testing.T) {
 
 	t.Parallel()
 	for _, tt := range tests {
+		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Run("unsupported auth", func(t *testing.T) {
 				err := (&conn{}).auth(&tt.buf, Config{})
@@ -2112,6 +2242,7 @@ func TestAuth(t *testing.T) {
 	t.Run("end to end", func(t *testing.T) {
 		pqtest.SkipPgbouncer(t) // TODO: need to properly set up auth
 		pqtest.SkipPgpool(t)    // TODO: need to properly set up auth
+		pqtest.SkipSupavisor(t) // TODO: need to properly set up auth
 
 		tests := []struct {
 			conn, wantErr string
@@ -2132,6 +2263,7 @@ func TestAuth(t *testing.T) {
 		}
 
 		for _, tt := range tests {
+			tt := tt
 			t.Run(tt.conn, func(t *testing.T) {
 				db := pqtest.MustDB(t, tt.conn)
 
@@ -2145,6 +2277,10 @@ func TestAuth(t *testing.T) {
 }
 
 func TestUint64(t *testing.T) {
+	// This test won't work with transaction mode connection pooling
+	// without a transaction.
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	db := pqtest.MustDB(t)
 
 	pqtest.Exec(t, db, `create temp table tbl (n numeric)`)
@@ -2154,6 +2290,7 @@ func TestUint64(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 
 	if rows.Next() {
 		var i uint64
@@ -2169,6 +2306,10 @@ func TestUint64(t *testing.T) {
 }
 
 func TestBytea(t *testing.T) {
+	// This test won't work with transaction mode connection pooling
+	// without a transaction.
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	tests := []struct {
 		in   any
 		want string
@@ -2198,6 +2339,10 @@ func TestBytea(t *testing.T) {
 }
 
 func TestJSONRawMessage(t *testing.T) {
+	// This test won't work with transaction mode connection pooling
+	// without a transaction.
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	db := pqtest.MustDB(t)
 
 	pqtest.Exec(t, db, `create temp table tbl (j json)`)

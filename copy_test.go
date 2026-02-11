@@ -66,6 +66,12 @@ func TestCopyInSchemaStmt(t *testing.T) {
 }
 
 func TestCopyInMultipleValues(t *testing.T) {
+	// "It is important to note that although the direct connections and
+	// Supavisor in session mode support prepared statements, Supavisor in
+	// transaction mode does not."
+	// https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	tests := []struct {
 		cols []string
 	}{
@@ -122,7 +128,10 @@ func TestCopyInMultipleValues(t *testing.T) {
 }
 
 func TestCopyInRaiseStmtTrigger(t *testing.T) {
-	t.Parallel()
+	// Transaction mode connection pooling breaks parallel tests using COPY.
+	if !pqtest.SupavisorTransactionMode() {
+		t.Parallel()
+	}
 	db := pqtest.MustDB(t)
 
 	txn, err := db.Begin()
@@ -192,7 +201,10 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 }
 
 func TestCopyInTypes(t *testing.T) {
-	t.Parallel()
+	// Transaction mode connection pooling breaks parallel tests using COPY.
+	if !pqtest.SupavisorTransactionMode() {
+		t.Parallel()
+	}
 	db := pqtest.MustDB(t)
 
 	txn, err := db.Begin()
@@ -251,7 +263,10 @@ func TestCopyInTypes(t *testing.T) {
 }
 
 func TestCopyInWrongType(t *testing.T) {
-	t.Parallel()
+	// Transaction mode connection pooling breaks parallel tests using COPY.
+	if !pqtest.SupavisorTransactionMode() {
+		t.Parallel()
+	}
 	db := pqtest.MustDB(t)
 
 	txn, err := db.Begin()
@@ -324,7 +339,10 @@ func TestCopyInBinaryError(t *testing.T) {
 }
 
 func TestCopyFromError(t *testing.T) {
-	t.Parallel()
+	// Transaction mode connection pooling breaks parallel tests using COPY.
+	if !pqtest.SupavisorTransactionMode() {
+		t.Parallel()
+	}
 	db := pqtest.MustDB(t)
 
 	txn, err := db.Begin()
@@ -374,6 +392,10 @@ func TestCopySyntaxError(t *testing.T) {
 
 // Tests for connection errors in copyin.resploop()
 func TestCopyRespLoopConnectionError(t *testing.T) {
+	// This test won't work with transaction mode connection pooling
+	// without a transaction.
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	t.Parallel()
 	db := pqtest.MustDB(t)
 

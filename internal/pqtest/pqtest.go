@@ -13,6 +13,10 @@ import (
 func Pgbouncer() bool { return os.Getenv("PGPORT") == "6432" }
 func Pgpool() bool    { return os.Getenv("PGPORT") == "7432" }
 
+func SupavisorSessionMode() bool     { return os.Getenv("PGPORT") == "5452" }
+func SupavisorTransactionMode() bool { return os.Getenv("PGPORT") == "6543" }
+func Supavisor() bool                { return SupavisorSessionMode() || SupavisorTransactionMode() }
+
 func SkipPgbouncer(t testing.TB) {
 	t.Helper()
 	if Pgbouncer() {
@@ -24,6 +28,27 @@ func SkipPgpool(t testing.TB) {
 	t.Helper()
 	if Pgpool() {
 		t.Skip("skipped for pgpool (PGPORT=7432)")
+	}
+}
+
+func SkipSupavisorSessionMode(t testing.TB) {
+	t.Helper()
+	if SupavisorSessionMode() {
+		t.Skip("skipped for supavisor session mode (PGPORT=5452)")
+	}
+}
+
+func SkipSupavisorTransactionMode(t testing.TB) {
+	t.Helper()
+	if SupavisorTransactionMode() {
+		t.Skip("skipped for supavisor transaction mode (PGPORT=6543)")
+	}
+}
+
+func SkipSupavisor(t testing.TB) {
+	t.Helper()
+	if Supavisor() {
+		t.Skip("skipped for supavisor (PGPORT=5452,6543)")
 	}
 }
 

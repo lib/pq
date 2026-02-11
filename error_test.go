@@ -275,6 +275,7 @@ func TestNetworkError(t *testing.T) {
 	}
 	c.Dialer(failDialer{})
 	db := sql.OpenDB(c)
+	defer db.Close()
 	db.SetMaxIdleConns(1)
 	db.SetMaxOpenConns(1)
 	if err := db.Ping(); err != nil {
