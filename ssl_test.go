@@ -30,6 +30,9 @@ func startSSLTest(t *testing.T, user string) {
 		wantErr = "protocol_violation"
 	} else if pqtest.Pgpool() {
 		wantErr = "internal_error"
+	} else if pqtest.Supavisor() {
+		// TODO: "Either external_id or sni_hostname must be provided" {:single, "pqgosslcert", nil}
+		wantErr = "internal_error"
 	}
 	_, err := openSSLConn(t, "sslmode=disable user="+user)
 	pqErr := pqError(t, err)
@@ -39,6 +42,9 @@ func startSSLTest(t *testing.T, user string) {
 }
 
 func TestSSLMode(t *testing.T) {
+	// TODO: need additional config to test SSL w/ Supavisor
+	pqtest.SkipSupavisor(t)
+
 	tests := []struct {
 		connect string
 		wantErr bool
@@ -92,6 +98,7 @@ func TestSSLMode(t *testing.T) {
 func TestSSLClientCertificates(t *testing.T) {
 	pqtest.SkipPgpool(t)    // TODO: can't get it to work.
 	pqtest.SkipPgbouncer(t) // TODO: can't get it to work.
+	pqtest.SkipSupavisor(t) // TODO: need to set SSL up in Supavisor.
 
 	startSSLTest(t, "pqgosslcert")
 
@@ -147,6 +154,9 @@ func TestSSLClientCertificates(t *testing.T) {
 
 // Check that clint sends SNI data when sslsni is not disabled
 func TestSSLSNI(t *testing.T) {
+	// TODO: need additional config to test SSL w/ Supavisor
+	pqtest.SkipSupavisor(t)
+
 	startSSLTest(t, "pqgosslcert")
 
 	tests := []struct {

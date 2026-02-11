@@ -4,17 +4,28 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
-	"fmt"
-	"log"
 	"os"
+	"testing"
 
 	"github.com/lib/pq"
+	"github.com/lib/pq/internal/pqtest"
 )
 
-func ExampleNewConnector() {
-	c, err := pq.NewConnector("host=postgres dbname=pqgo")
+func getTestDSN(t *testing.T) string {
+	t.Helper()
+	var dsn string
+	if pqtest.Supavisor() {
+		dsn = "host=localhost dbname=pqgo sslmode=disable"
+	} else {
+		dsn = "host=postgres dbname=pqgo"
+	}
+	return dsn
+}
+
+func TestExampleNewConnector(t *testing.T) {
+	c, err := pq.NewConnector(getTestDSN(t))
 	if err != nil {
-		log.Fatalf("could not create connector: %v", err)
+		t.Fatalf("could not create connector: %v", err)
 	}
 
 	db := sql.OpenDB(c)
@@ -23,16 +34,16 @@ func ExampleNewConnector() {
 	// Use the DB
 	tx, err := db.Begin()
 	if err != nil {
-		log.Fatalf("could not start transaction: %v", err)
+		t.Fatalf("could not start transaction: %v", err)
 	}
 	tx.Rollback()
 	// Output:
 }
 
-func ExampleNewConfig() {
-	cfg, err := pq.NewConfig("host=postgres dbname=pqgo")
+func TestExampleNewConfig(t *testing.T) {
+	cfg, err := pq.NewConfig(getTestDSN(t))
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 	if cfg.Host == "localhost" {
 		cfg.Host = "127.0.0.1"
@@ -40,7 +51,7 @@ func ExampleNewConfig() {
 
 	c, err := pq.NewConnectorConfig(cfg)
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 
 	db := sql.OpenDB(c)
@@ -49,23 +60,23 @@ func ExampleNewConfig() {
 	// Use the DB
 	tx, err := db.Begin()
 	if err != nil {
-		log.Fatalf("could not start transaction: %v", err)
+		t.Fatalf("could not start transaction: %v", err)
 	}
 	tx.Rollback()
 	// Output:
 }
 
-func ExampleConnectorWithNoticeHandler() {
+func TestExampleConnectorWithNoticeHandler(t *testing.T) {
 	// Base connector to wrap
 	dsn := ""
 	base, err := pq.NewConnector(dsn)
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 
 	// Wrap the connector to simply print out the message
 	connector := pq.ConnectorWithNoticeHandler(base, func(notice *pq.Error) {
-		fmt.Println("Notice sent: " + notice.Message)
+		t.Logf("Notice sent: %s", notice.Message)
 	})
 	db := sql.OpenDB(connector)
 	defer db.Close()
@@ -73,16 +84,19 @@ func ExampleConnectorWithNoticeHandler() {
 	// Raise a notice
 	sql := "DO language plpgsql $$ BEGIN RAISE NOTICE 'test notice'; END $$"
 	if _, err := db.Exec(sql); err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 	// Output:
 	// Notice sent: test notice
 }
 
-func ExampleRegisterTLSConfig() {
+func TestExampleRegisterTLSConfig(t *testing.T) {
+	// TODO: implement SSL support in Supavisor config
+	pqtest.SkipSupavisor(t)
+
 	pem, err := os.ReadFile("testdata/init/root.crt")
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 
 	root := x509.NewCertPool()
@@ -90,7 +104,7 @@ func ExampleRegisterTLSConfig() {
 
 	certs, err := tls.LoadX509KeyPair("testdata/init/postgresql.crt", "testdata/init/postgresql.key")
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 
 	pq.RegisterTLSConfig("mytls", &tls.Config{
@@ -101,35 +115,43 @@ func ExampleRegisterTLSConfig() {
 
 	db, err := sql.Open("postgres", "host=postgres dbname=pqgo sslmode=pqgo-mytls")
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
+	defer db.Close()
 
 	err = db.Ping()
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 	// Output:
 }
 
-func ExampleCopyIn() {
+func TestExampleCopyIn(t *testing.T) {
+	// This test won't work with transaction mode connection pooling
+	// without a transaction.
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	// Connect and create table.
-	db, err := sql.Open("postgres", "")
+	db, err := sql.Open("postgres", getTestDSN(t))
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
+	defer db.Close()
+
 	_, err = db.Exec(`create temp table users (name text, age int)`)
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 
 	// Need to start transaction and prepare a statement.
 	tx, err := db.Begin()
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
+	defer tx.Rollback()
 	stmt, err := tx.Prepare(pq.CopyIn("users", "name", "age"))
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 
 	// Insert rows.
@@ -143,26 +165,35 @@ func ExampleCopyIn() {
 	for _, user := range users {
 		_, err = stmt.Exec(user.Name, int64(user.Age))
 		if err != nil {
-			log.Fatal(err)
+			t.Fatal(err)
 		}
 	}
 
 	// Finalize copy and statement, and commit transaction.
 	if _, err := stmt.Exec(); err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 	if err := stmt.Close(); err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 
 	// Query rows to verify.
 	rows, err := db.Query(`select * from users order by name`)
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
+	defer rows.Close()
+	tests := []struct {
+		name string
+		age  int
+	}{
+		{"Donald Duck", 36},
+		{"Scrooge McDuck", 86},
+	}
+	i := 0
 	for rows.Next() {
 		var (
 			name string
@@ -170,9 +201,16 @@ func ExampleCopyIn() {
 		)
 		err := rows.Scan(&name, &age)
 		if err != nil {
-			log.Fatal(err)
+			t.Fatal(err)
 		}
-		fmt.Println(name, age)
+		t.Logf("%s %d", name, age)
+		if have, want := name, tests[i].name; have != want {
+			t.Errorf("\nhave: %s\nwant: %s", have, want)
+		}
+		if have, want := age, tests[i].age; have != want {
+			t.Errorf("\nhave: %d\nwant: %d", have, want)
+		}
+		i = i + 1
 	}
 
 	// Output:

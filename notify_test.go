@@ -74,12 +74,20 @@ func newTestListenerConn(t *testing.T) (*ListenerConn, <-chan *Notification) {
 }
 
 func TestNewListenerConn(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, _ := newTestListenerConn(t)
 
 	defer l.Close()
 }
 
 func TestListenerConnListen(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, channel := newTestListenerConn(t)
 
 	defer l.Close()
@@ -103,6 +111,10 @@ func TestListenerConnListen(t *testing.T) {
 }
 
 func TestListenerConnUnlisten(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, channel := newTestListenerConn(t)
 
 	defer l.Close()
@@ -141,6 +153,10 @@ func TestListenerConnUnlisten(t *testing.T) {
 }
 
 func TestListenerConnUnlistenAll(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, channel := newTestListenerConn(t)
 
 	defer l.Close()
@@ -179,6 +195,10 @@ func TestListenerConnUnlistenAll(t *testing.T) {
 }
 
 func TestListenerConnClose(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, _ := newTestListenerConn(t)
 	defer l.Close()
 
@@ -193,6 +213,10 @@ func TestListenerConnClose(t *testing.T) {
 }
 
 func TestListernerConnPing(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, _ := newTestListenerConn(t)
 	defer l.Close()
 	err := l.Ping()
@@ -211,6 +235,10 @@ func TestListernerConnPing(t *testing.T) {
 
 // Test for deadlock where a query fails while another one is queued
 func TestListenerConnExecDeadlock(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, _ := newTestListenerConn(t)
 	defer l.Close()
 
@@ -239,6 +267,10 @@ func TestListenerConnExecDeadlock(t *testing.T) {
 
 // Test for ListenerConn being closed while a slow query is executing
 func TestListenerConnCloseWhileQueryIsExecuting(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, _ := newTestListenerConn(t)
 	defer l.Close()
 
@@ -270,6 +302,10 @@ func TestListenerConnCloseWhileQueryIsExecuting(t *testing.T) {
 }
 
 func TestListenerNotifyExtra(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	db := pqtest.MustDB(t)
 
 	l, channel := newTestListenerConn(t)
@@ -311,6 +347,10 @@ func newTestListener(t *testing.T) (*Listener, <-chan ListenerEventType) {
 }
 
 func TestListenerListen(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, _ := newTestListener(t)
 	defer l.Close()
 
@@ -333,6 +373,10 @@ func TestListenerListen(t *testing.T) {
 }
 
 func TestListenerUnlisten(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, _ := newTestListener(t)
 	defer l.Close()
 
@@ -370,6 +414,10 @@ func TestListenerUnlisten(t *testing.T) {
 }
 
 func TestListenerUnlistenAll(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, _ := newTestListener(t)
 	defer l.Close()
 
@@ -407,6 +455,10 @@ func TestListenerUnlistenAll(t *testing.T) {
 }
 
 func TestListenerFailedQuery(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, eventch := newTestListener(t)
 	defer l.Close()
 
@@ -454,6 +506,10 @@ func TestListenerFailedQuery(t *testing.T) {
 }
 
 func TestListenerReconnect(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, eventch := newTestListenerTimeout(t, 20*time.Millisecond, time.Hour)
 	defer l.Close()
 
@@ -485,6 +541,10 @@ func TestListenerReconnect(t *testing.T) {
 		}
 	} else if pqtest.Pgpool() {
 		if !pqtest.ErrorContains(err, "unable to forward message to frontend") {
+			t.Fatalf("unexpected error %T: %[1]s", err)
+		}
+	} else if pqtest.Supavisor() {
+		if !pqtest.ErrorContains(err, "{:shutdown, :db_termination}") {
 			t.Fatalf("unexpected error %T: %[1]s", err)
 		}
 	} else {
@@ -520,6 +580,10 @@ func TestListenerReconnect(t *testing.T) {
 }
 
 func TestListenerClose(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, _ := newTestListenerTimeout(t, 20*time.Millisecond, time.Hour)
 	defer l.Close()
 
@@ -534,6 +598,10 @@ func TestListenerClose(t *testing.T) {
 }
 
 func TestListenerPing(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	l, _ := newTestListenerTimeout(t, 20*time.Millisecond, time.Hour)
 	defer l.Close()
 
@@ -554,6 +622,10 @@ func TestListenerPing(t *testing.T) {
 }
 
 func TestConnectorWithNotificationHandler_Simple(t *testing.T) {
+	// listen/notify currently broken in Supavisor
+	// https://github.com/supabase/supavisor/issues/85
+	pqtest.SkipSupavisor(t)
+
 	b, err := NewConnector("")
 	if err != nil {
 		t.Fatal(err)

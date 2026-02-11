@@ -99,9 +99,16 @@ func TestNewConnector(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := fmt.Sprintf(
-			`map[client_encoding:UTF8 connect_timeout:20 datestyle:ISO, MDY dbname:pqgo host:localhost port:%d search_path:foo sslmode:disable sslsni:yes user:pqgo]`,
-			cfg.Port)
+		var want string
+		if pqtest.Supavisor() {
+			want = fmt.Sprintf(
+				`map[client_encoding:UTF8 connect_timeout:20 datestyle:ISO, MDY dbname:pqgo host:localhost password:unused port:%d search_path:foo sslmode:disable sslsni:yes user:pqgo.dev_tenant]`,
+				cfg.Port)
+		} else {
+			want = fmt.Sprintf(
+				`map[client_encoding:UTF8 connect_timeout:20 datestyle:ISO, MDY dbname:pqgo host:localhost port:%d search_path:foo sslmode:disable sslsni:yes user:pqgo]`,
+				cfg.Port)
+		}
 		if have := fmt.Sprintf("%v", c.cfg.tomap()); have != want {
 			t.Errorf("\nhave: %s\nwant: %s", have, want)
 		}
@@ -115,6 +122,10 @@ func TestNewConnector(t *testing.T) {
 	})
 
 	t.Run("database=", func(t *testing.T) {
+		// Supavisor really doesn't like trying to connect to a database
+		// other than the one the tenant has access to.
+		pqtest.SkipSupavisor(t)
+
 		want1, want2 := `pq: database "err" does not exist (3D000)`,
 			`pq: database "two" does not exist (3D000)`
 		if pqtest.Pgbouncer() {
@@ -191,6 +202,10 @@ func TestParseOpts(t *testing.T) {
 }
 
 func TestRuntimeParameters(t *testing.T) {
+	// Skipped on Supavisor as the only parameter it uses is `user`:
+	// https://github.com/supabase/supavisor/blob/6b77121fc697b419e8203bac1c52a69910bb80f3/lib/supavisor/protocol/server.ex#L470-L474
+	pqtest.SkipSupavisor(t)
+
 	tests := []struct {
 		conninfo      string
 		param         string
@@ -329,6 +344,7 @@ func TestParseURL(t *testing.T) {
 
 	t.Parallel()
 	for _, tt := range tests {
+		tt := tt
 		t.Run("", func(t *testing.T) {
 			have, err := ParseURL(tt.in)
 			if !pqtest.ErrorContains(err, tt.wantErr) {

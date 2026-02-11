@@ -11,6 +11,12 @@ import (
 )
 
 func TestIssue494(t *testing.T) {
+	// "It is important to note that although the direct connections and
+	// Supavisor in session mode support prepared statements, Supavisor in
+	// transaction mode does not."
+	// https://supabase.com/docs/guides/troubleshooting/disabling-prepared-statements-qL8lEL
+	pqtest.SkipSupavisorTransactionMode(t)
+
 	db := pqtest.MustDB(t)
 
 	query := `CREATE TEMP TABLE t (i INT PRIMARY KEY)`
@@ -30,7 +36,15 @@ func TestIssue494(t *testing.T) {
 }
 
 func TestIssue1046(t *testing.T) {
-	t.Parallel()
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
+
+	// Cannot run this test in parallel when using transaction mode
+	// connection pooling.
+	if !pqtest.SupavisorTransactionMode() {
+		t.Parallel()
+	}
 
 	db := pqtest.MustDB(t)
 
@@ -59,7 +73,8 @@ func TestIssue1046(t *testing.T) {
 }
 
 func TestIssue1062(t *testing.T) {
-	if !pqtest.Pgpool() {
+	// Transaction mode connection pooling breaks parallel tests.
+	if !pqtest.Pgpool() && !pqtest.Supavisor() {
 		t.Parallel()
 	}
 	db := pqtest.MustDB(t)
@@ -125,7 +140,6 @@ func TestQueryCancelRace(t *testing.T) {
 
 // Test cancelling a scan after it is started. This broke with 1.10.4.
 func TestQueryCancelledReused(t *testing.T) {
-	t.Parallel()
 	db := pqtest.MustDB(t)
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -20,6 +20,88 @@ services:
       'PGPOOL_PARAMS_PORT':              '7432'
       'PGPOOL_PARAMS_BACKEND_HOSTNAME0': 'pg18'
 
+  supavisor-db:
+    profiles:   ["supavisor"]
+    image:      postgres:15
+    shm_size:   128mb
+    environment:
+      POSTGRES_DB:       pqgo
+      POSTGRES_USER:     pqgo
+      POSTGRES_PASSWORD: unused
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "pqgo"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 5s
+
+  supavisor:
+    profiles: ["supavisor"]
+    depends_on:
+      supavisor-db:
+        condition: service_healthy
+    image: supabase/supavisor:2.7.4
+    command: sh -c '/app/bin/migrate && /app/bin/server'
+    environment:
+      PORT: 4000
+      PROXY_PORT_SESSION: 5452
+      PROXY_PORT_TRANSACTION: 6543
+      CLUSTER_POSTGRES: "true"
+      DATABASE_URL: "ecto://pqgo:unused@supavisor-db:5432/pqgo"
+      SECRET_KEY_BASE: "12345678901234567890121234567890123456789012345678903212345678901234567890123456789032123456789012345678901234567890323456789032"
+      VAULT_ENC_KEY: "12345678901234567890123456789032"
+      API_JWT_SECRET: "dev"
+      METRICS_JWT_SECRET: "dev"
+      REGION: "local"
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DB_POOL_SIZE: 50
+    ports:
+      - '127.0.0.1:4000:4000'
+      - '127.0.0.1:5452:5452'
+      - '127.0.0.1:6543:6543'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 5s
+
+  supavisor-create-tenant:
+    profiles: ["supavisor"]
+    depends_on:
+      supavisor:
+        condition: service_healthy
+    image: supabase/supavisor:2.7.4
+    command: |-
+      sh -c '
+        curl -sX PUT \
+          "http://supavisor:4000/api/tenants/dev_tenant" \
+          --header "Accept: */*" \
+          --header "User-Agent: Thunder Client (https://www.thunderclient.com)" \
+          --header "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNjQ1MTkyODI0LCJleHAiOjE5NjA3Njg4MjR9.M9jrxyvPLkUxWgOYSf5dNdJ8v_eRrq810ShFRT8N-6M" \
+          --header "Content-Type: application/json" \
+          --data-raw '\''{
+            "tenant": {
+              "db_host": "supavisor-db",
+              "db_port": 5432,
+              "db_database": "pqgo",
+              "ip_version": "auto",
+              "enforce_ssl": false,
+              "require_user": false,
+              "auth_query": "SELECT rolname, rolpassword FROM pg_authid WHERE rolname=$1;",
+              "users": [
+                {
+                  "db_user": "pqgo",
+                  "db_password": "unused",
+                  "pool_size": 20,
+                  "mode_type": "transaction",
+                  "is_manager": true
+                }
+              ]
+            }
+          }'\''
+      '
+
   pg18:
     image:      'postgres:18'
     ports:      ['127.0.0.1:5432:5432']
