@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -641,7 +642,7 @@ func TestTextByteSliceToInt(t *testing.T) {
 	db := pqtest.MustDB(t)
 
 	expected := 12345678
-	b := []byte(fmt.Sprintf("%d", expected))
+	b := fmt.Appendf(nil, "%d", expected)
 	row := db.QueryRow("SELECT $1::int", b)
 
 	var result int
@@ -879,21 +880,21 @@ func TestFormatAndParseTimestamp(t *testing.T) {
 }
 
 func BenchmarkAppendEscapedText(b *testing.B) {
-	longString := ""
+	var longString strings.Builder
 	for i := 0; i < 100; i++ {
-		longString += "123456789\n"
+		longString.WriteString("123456789\n")
 	}
 	for i := 0; i < b.N; i++ {
-		appendEscapedText(nil, longString)
+		appendEscapedText(nil, longString.String())
 	}
 }
 
 func BenchmarkAppendEscapedTextNoEscape(b *testing.B) {
-	longString := ""
+	var longString strings.Builder
 	for i := 0; i < 100; i++ {
-		longString += "1234567890"
+		longString.WriteString("1234567890")
 	}
 	for i := 0; i < b.N; i++ {
-		appendEscapedText(nil, longString)
+		appendEscapedText(nil, longString.String())
 	}
 }

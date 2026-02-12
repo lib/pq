@@ -831,7 +831,7 @@ func (cn *conn) CheckNamedValue(nv *driver.NamedValue) error {
 		return driver.ErrSkip
 	}
 	t := v.Type()
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t, v = t.Elem(), v.Elem()
 	}
 
