@@ -388,7 +388,7 @@ FoundType:
 func (a GenericArray) Scan(src any) error {
 	dpv := reflect.ValueOf(a.A)
 	switch {
-	case dpv.Kind() != reflect.Ptr:
+	case dpv.Kind() != reflect.Pointer:
 		return fmt.Errorf("pq: destination %T is not a pointer to array or slice", a.A)
 	case dpv.IsNil():
 		return fmt.Errorf("pq: destination %T is nil", a.A)

@@ -564,10 +564,7 @@ func posToLine(pos int, lines []string) (line, col int) {
 		line++
 		ll := utf8.RuneCountInString(lines[i]) + 1 // +1 for the removed newline
 		if read+ll >= pos {
-			col = pos - read
-			if col < 1 { // Should never happen, but just in case.
-				col = 1
-			}
+			col = max(pos-read, 1) // Should be lower than 1, but just in case.
 			break
 		}
 		read += ll
