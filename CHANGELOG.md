@@ -5,7 +5,7 @@ unreleased
 
 [#1258]: https://github.com/lib/pq/pull/1258
 
-v1.11.2 (2025-02-10)
+v1.11.2 (2026-02-10)
 --------------------
 This fixes two regressions:
 
@@ -19,7 +19,7 @@ This fixes two regressions:
 [#1260]: https://github.com/lib/pq/pull/1260
 [#1261]: https://github.com/lib/pq/pull/1261
 
-v1.11.1 (2025-01-29)
+v1.11.1 (2026-01-29)
 --------------------
 This fixes two regressions present in the v1.11.0 release:
 
@@ -31,7 +31,7 @@ This fixes two regressions present in the v1.11.0 release:
 [#1252]: https://github.com/lib/pq/pull/1252
 [#1253]: https://github.com/lib/pq/pull/1253
 
-v1.11.0 (2025-01-28)
+v1.11.0 (2026-01-28)
 --------------------
 This version of pq requires Go 1.21 or newer.
 
