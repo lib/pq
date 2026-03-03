@@ -28,10 +28,23 @@ func TestSSLKeyPermissions(t *testing.T) {
 		stat    syscall.Stat_t
 		wantErr string
 	}{
+		// user-owned: at most 0600
 		{syscall.Stat_t{Mode: 0600, Uid: currentUID, Gid: currentGID}, ""},
+		{syscall.Stat_t{Mode: 0400, Uid: currentUID, Gid: currentGID}, ""},
+		{syscall.Stat_t{Mode: 0000, Uid: currentUID, Gid: currentGID}, ""},
+
+		// root-owned: at most 0640
 		{syscall.Stat_t{Mode: 0640, Uid: 0, Gid: currentGID}, ""},
+		{syscall.Stat_t{Mode: 0600, Uid: 0, Gid: currentGID}, ""},
+		{syscall.Stat_t{Mode: 0400, Uid: 0, Gid: currentGID}, ""},
+		{syscall.Stat_t{Mode: 0000, Uid: 0, Gid: currentGID}, ""},
+
+		// excessive permissions
+		{syscall.Stat_t{Mode: 0644, Uid: currentUID, Gid: currentGID}, "private key has world access"},
+		{syscall.Stat_t{Mode: 0700, Uid: currentUID, Gid: currentGID}, "private key has world access"},
 		{syscall.Stat_t{Mode: 0666, Uid: currentUID, Gid: currentGID}, "private key has world access"},
 		{syscall.Stat_t{Mode: 0666, Uid: 0, Gid: currentGID}, "private key has world access"},
+		{syscall.Stat_t{Mode: 0660, Uid: 0, Gid: currentGID}, "private key has world access"},
 	}
 
 	for _, tt := range tests {
