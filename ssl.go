@@ -222,7 +222,15 @@ func sslClientCertificates(tlsConf *tls.Config, cfg Config) error {
 		return err
 	}
 
-	tlsConf.Certificates = []tls.Certificate{cert}
+	// Use GetClientCertificate instead of setting Certificates directly.
+	// When Certificates is set, Go's TLS client only sends the cert if the
+	// server's CertificateRequest includes a CA that issued it. When the
+	// client cert was signed by an intermediate CA but the server only
+	// advertises the root CA, Go skips sending the cert entirely.
+	// GetClientCertificate bypasses this filtering.
+	tlsConf.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+		return &cert, nil
+	}
 	return nil
 }
 
