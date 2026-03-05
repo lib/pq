@@ -3,143 +3,17 @@ package pq
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	_ "crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"database/sql"
 	"encoding/pem"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"os"
 	"testing"
 	"time"
-
-	"github.com/lib/pq/internal/pqtest"
 )
-
-type certChain struct {
-	rootPEM         []byte
-	intermediatePEM []byte
-	serverTLSCert   tls.Certificate
-	clientCertPEM   []byte
-	clientKeyPEM    []byte
-}
-
-// generateIntermediateCAChain creates:
-//   - root CA
-//   - intermediate CA (signed by root)
-//   - server cert (signed by intermediate)
-//   - client cert (signed by intermediate)
-func generateIntermediateCAChain(t *testing.T) certChain {
-	t.Helper()
-
-	now := time.Now()
-
-	// Root CA
-	rootKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rootTemplate := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "Test Root CA"},
-		NotBefore:             now,
-		NotAfter:              now.Add(time.Hour),
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-		BasicConstraintsValid: true,
-		IsCA:                  true,
-	}
-	rootCertDER, err := x509.CreateCertificate(rand.Reader, rootTemplate, rootTemplate, &rootKey.PublicKey, rootKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rootCert, err := x509.ParseCertificate(rootCertDER)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Intermediate CA signed by root
-	interKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	interTemplate := &x509.Certificate{
-		SerialNumber:          big.NewInt(2),
-		Subject:               pkix.Name{CommonName: "Test Intermediate CA"},
-		NotBefore:             now,
-		NotAfter:              now.Add(time.Hour),
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-		BasicConstraintsValid: true,
-		IsCA:                  true,
-	}
-	interCertDER, err := x509.CreateCertificate(rand.Reader, interTemplate, rootCert, &interKey.PublicKey, rootKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	interCert, err := x509.ParseCertificate(interCertDER)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Server cert signed by intermediate
-	serverKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	serverTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(3),
-		Subject:      pkix.Name{CommonName: "localhost"},
-		DNSNames:     []string{"localhost"},
-		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
-		NotBefore:    now,
-		NotAfter:     now.Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	}
-	serverCertDER, err := x509.CreateCertificate(rand.Reader, serverTemplate, interCert, &serverKey.PublicKey, interKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Client cert signed by intermediate
-	clientKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	clientTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(4),
-		Subject:      pkix.Name{CommonName: "testclient"},
-		NotBefore:    now,
-		NotAfter:     now.Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-	}
-	clientCertDER, err := x509.CreateCertificate(rand.Reader, clientTemplate, interCert, &clientKey.PublicKey, interKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	clientKeyDER, err := x509.MarshalECPrivateKey(clientKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return certChain{
-		rootPEM:         pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: rootCertDER}),
-		intermediatePEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: interCertDER}),
-		serverTLSCert: tls.Certificate{
-			Certificate: [][]byte{serverCertDER, interCertDER},
-			PrivateKey:  serverKey,
-		},
-		clientCertPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: clientCertDER}),
-		clientKeyPEM:  pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: clientKeyDER}),
-	}
-}
 
 type mockSSLServerOpts struct {
 	serverCert tls.Certificate
@@ -307,20 +181,46 @@ func pingMockServer(t *testing.T, dsn string, port string, errCh chan error) err
 	return clientErr
 }
 
+// loadServerCert loads a TLS server certificate, optionally including the
+// intermediate CA cert in the chain.
+func loadServerCert(t *testing.T, certFile, keyFile, intermediateFile string) tls.Certificate {
+	t.Helper()
+
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intermediateFile != "" {
+		interPEM, err := os.ReadFile(intermediateFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		block, _ := pem.Decode(interPEM)
+		if block != nil && block.Type == "CERTIFICATE" {
+			cert.Certificate = append(cert.Certificate, block.Bytes)
+		}
+	}
+	return cert
+}
+
 // TestSSLIntermediateCA tests various intermediate CA scenarios for both
 // server certificate verification (verify-ca, verify-full) and client
 // certificate authentication.
 func TestSSLIntermediateCA(t *testing.T) {
-	chain := generateIntermediateCAChain(t)
+	const (
+		rootCert   = "testdata/init/root.crt"
+		bundleCert = "testdata/init/root+intermediate.crt"
+		interCert  = "testdata/init/intermediate.crt"
+		serverCert = "testdata/init/server_intermediate.crt"
+		serverKey  = "testdata/init/server_intermediate.key"
+		clientCert = "testdata/init/client_intermediate.crt"
+		clientKey  = "testdata/init/client_intermediate.key"
+	)
 
+	// Server cert with full chain [leaf, intermediate]
+	serverFullChain := loadServerCert(t, serverCert, serverKey, interCert)
 	// Server cert with only the leaf (no intermediate in chain)
-	serverCertLeafOnly := tls.Certificate{
-		Certificate: [][]byte{chain.serverTLSCert.Certificate[0]},
-		PrivateKey:  chain.serverTLSCert.PrivateKey,
-	}
-
-	rootCertFile := pqtest.TempFile(t, "root.crt", string(chain.rootPEM))
-	bundleCertFile := pqtest.TempFile(t, "bundle.crt", string(chain.rootPEM)+string(chain.intermediatePEM))
+	serverLeafOnly := loadServerCert(t, serverCert, serverKey, "")
 
 	t.Run("server cert verification", func(t *testing.T) {
 		tests := []struct {
@@ -334,43 +234,43 @@ func TestSSLIntermediateCA(t *testing.T) {
 			{
 				name:       "verify-ca full chain root only",
 				sslmode:    "verify-ca",
-				rootcert:   rootCertFile,
-				serverCert: chain.serverTLSCert,
+				rootcert:   rootCert,
+				serverCert: serverFullChain,
 			},
 			{
 				name:       "verify-full full chain root only",
 				sslmode:    "verify-full",
-				rootcert:   rootCertFile,
-				serverCert: chain.serverTLSCert,
+				rootcert:   rootCert,
+				serverCert: serverFullChain,
 			},
 
 			// Server sends only leaf, sslrootcert has root+intermediate bundle.
 			{
 				name:       "verify-ca leaf only bundle rootcert",
 				sslmode:    "verify-ca",
-				rootcert:   bundleCertFile,
-				serverCert: serverCertLeafOnly,
+				rootcert:   bundleCert,
+				serverCert: serverLeafOnly,
 			},
 			{
 				name:       "verify-full leaf only bundle rootcert",
 				sslmode:    "verify-full",
-				rootcert:   bundleCertFile,
-				serverCert: serverCertLeafOnly,
+				rootcert:   bundleCert,
+				serverCert: serverLeafOnly,
 			},
 
 			// Server sends only leaf, sslrootcert has root only — can't build chain.
 			{
 				name:       "verify-ca leaf only root only fails",
 				sslmode:    "verify-ca",
-				rootcert:   rootCertFile,
-				serverCert: serverCertLeafOnly,
+				rootcert:   rootCert,
+				serverCert: serverLeafOnly,
 				wantErr:    true,
 			},
 			{
 				name:       "verify-full leaf only root only fails",
 				sslmode:    "verify-full",
-				rootcert:   rootCertFile,
-				serverCert: serverCertLeafOnly,
+				rootcert:   rootCert,
+				serverCert: serverLeafOnly,
 				wantErr:    true,
 			},
 		}
@@ -397,25 +297,27 @@ func TestSSLIntermediateCA(t *testing.T) {
 	t.Run("client cert with intermediate CA", func(t *testing.T) {
 		// Server's CA trust store has only the root CA. It needs the client to
 		// send the intermediate cert in its TLS certificate chain.
+		rootPEM, err := os.ReadFile(rootCert)
+		if err != nil {
+			t.Fatal(err)
+		}
 		serverCAs := x509.NewCertPool()
-		serverCAs.AppendCertsFromPEM(chain.rootPEM)
+		serverCAs.AppendCertsFromPEM(rootPEM)
 
-		clientCertFile := pqtest.TempFile(t, "client.crt", string(chain.clientCertPEM))
-		clientKeyFile := pqtest.TempFile(t, "client.key", string(chain.clientKeyPEM))
-		if err := os.Chmod(clientKeyFile, 0600); err != nil {
+		if err := os.Chmod(clientKey, 0600); err != nil {
 			t.Fatal(err)
 		}
 
 		port, errCh := mockPostgresSSLServer(t, mockSSLServerOpts{
-			serverCert: chain.serverTLSCert,
+			serverCert: serverFullChain,
 			clientCAs:  serverCAs,
 		})
 
 		dsn := fmt.Sprintf(
 			"host=127.0.0.1 port=%s sslmode=verify-ca sslrootcert=%s sslcert=%s sslkey=%s user=test dbname=test connect_timeout=5",
-			port, bundleCertFile, clientCertFile, clientKeyFile)
+			port, bundleCert, clientCert, clientKey)
 
-		err := pingMockServer(t, dsn, port, errCh)
+		err = pingMockServer(t, dsn, port, errCh)
 		if err != nil {
 			t.Fatalf("client cert with intermediate CA failed: %s", err)
 		}
