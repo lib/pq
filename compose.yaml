@@ -3,7 +3,7 @@ name: 'pqgo'
 services:
   pgbouncer:
     profiles: ['pgbouncer']
-    image:    'cleanstart/pgbouncer:1.24'
+    image:    'cleanstart/pgbouncer:latest'
     ports:    ['127.0.0.1:6432:6432']
     command:  ['/init/pgbouncer.ini']
     volumes:  ['./testdata/init:/init']
