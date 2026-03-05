@@ -1,8 +1,10 @@
 package pq
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
@@ -122,6 +124,7 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 	if err != nil {
 		return nil, err
 	}
+	sslAppendIntermediates(tlsConf, cfg)
 
 	// Accept renegotiation requests initiated by the backend.
 	//
@@ -221,6 +224,46 @@ func sslClientCertificates(tlsConf *tls.Config, cfg Config) error {
 
 	tlsConf.Certificates = []tls.Certificate{cert}
 	return nil
+}
+
+// sslAppendIntermediates appends intermediate CA certificates from sslrootcert
+// to the client certificate chain. This is needed so the server can verify the
+// client cert when it was signed by an intermediate CA — without this, the TLS
+// handshake only sends the leaf client cert.
+func sslAppendIntermediates(tlsConf *tls.Config, cfg Config) {
+	if len(tlsConf.Certificates) == 0 || cfg.SSLRootCert == "" {
+		return
+	}
+
+	var pemData []byte
+	if cfg.SSLInline {
+		pemData = []byte(cfg.SSLRootCert)
+	} else {
+		var err error
+		pemData, err = os.ReadFile(cfg.SSLRootCert)
+		if err != nil {
+			return
+		}
+	}
+
+	for {
+		var block *pem.Block
+		block, pemData = pem.Decode(pemData)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			continue
+		}
+		// Skip self-signed root CAs; only append intermediates.
+		if cert.IsCA && !bytes.Equal(cert.RawIssuer, cert.RawSubject) {
+			tlsConf.Certificates[0].Certificate = append(tlsConf.Certificates[0].Certificate, block.Bytes)
+		}
+	}
 }
 
 // sslCertificateAuthority adds the RootCA specified in the "sslrootcert" setting.
