@@ -1,7 +1,7 @@
 name: 'test'
 on:
   pull_request:
-    paths: ['**.go', 'go.mod', '.github/workflows/*']
+    paths: ['**.go', 'go.mod', '.github/workflows/*', 'compose.yaml']
   push:
     branches: ['main', 'master']
 
