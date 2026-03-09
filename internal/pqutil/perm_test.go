@@ -28,10 +28,28 @@ func TestSSLKeyPermissions(t *testing.T) {
 		stat    syscall.Stat_t
 		wantErr string
 	}{
-		{syscall.Stat_t{Mode: 0600, Uid: currentUID, Gid: currentGID}, ""},
-		{syscall.Stat_t{Mode: 0640, Uid: 0, Gid: currentGID}, ""},
-		{syscall.Stat_t{Mode: 0666, Uid: currentUID, Gid: currentGID}, "private key has world access"},
-		{syscall.Stat_t{Mode: 0666, Uid: 0, Gid: currentGID}, "private key has world access"},
+		// user-owned: at most 0o600
+		{syscall.Stat_t{Mode: 0o600, Uid: currentUID, Gid: currentGID}, ""},
+		{syscall.Stat_t{Mode: 0o400, Uid: currentUID, Gid: currentGID}, ""},
+		{syscall.Stat_t{Mode: 0o000, Uid: currentUID, Gid: currentGID}, ""},
+
+		{syscall.Stat_t{Mode: 0o700, Uid: currentUID, Gid: currentGID}, "private key has world access"},
+		{syscall.Stat_t{Mode: 0o640, Uid: currentUID, Gid: currentGID}, "private key has world access"},
+		{syscall.Stat_t{Mode: 0o660, Uid: currentUID, Gid: currentGID}, "private key has world access"},
+		{syscall.Stat_t{Mode: 0o604, Uid: currentUID, Gid: currentGID}, "private key has world access"},
+		{syscall.Stat_t{Mode: 0o606, Uid: currentUID, Gid: currentGID}, "private key has world access"},
+
+		// root-owned: at most 0o640
+		{syscall.Stat_t{Mode: 0o600, Uid: 0, Gid: currentGID}, ""},
+		{syscall.Stat_t{Mode: 0o400, Uid: 0, Gid: currentGID}, ""},
+		{syscall.Stat_t{Mode: 0o040, Uid: 0, Gid: currentGID}, ""},
+		{syscall.Stat_t{Mode: 0o640, Uid: 0, Gid: currentGID}, ""},
+		{syscall.Stat_t{Mode: 0o000, Uid: 0, Gid: currentGID}, ""},
+
+		{syscall.Stat_t{Mode: 0o060, Uid: 0, Gid: currentGID}, "private key has world access"},
+		{syscall.Stat_t{Mode: 0o006, Uid: 0, Gid: currentGID}, "private key has world access"},
+		{syscall.Stat_t{Mode: 0o004, Uid: 0, Gid: currentGID}, "private key has world access"},
+		{syscall.Stat_t{Mode: 0o666, Uid: 0, Gid: currentGID}, "private key has world access"},
 	}
 
 	for _, tt := range tests {

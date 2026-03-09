@@ -35,9 +35,9 @@ func SSLKeyPermissions(sslkey string) error {
 func checkPermissions(fi os.FileInfo) error {
 	// The maximum permissions that a private key file owned by a regular user
 	// is allowed to have. This translates to u=rw. Regardless of if we're
-	// running as root or not, 0600 is acceptable, so we return if we match the
-	// regular user permission mask.
-	if fi.Mode().Perm()&os.FileMode(0777)^0600 == 0 {
+	// running as root or not, 0600 is acceptable, so we return if no bits
+	// beyond the regular user permission mask are set.
+	if fi.Mode().Perm()&^os.FileMode(0o600) == 0 {
 		return nil
 	}
 
@@ -54,7 +54,7 @@ func checkPermissions(fi os.FileInfo) error {
 	if sys.Uid == 0 {
 		// The maximum permissions that a private key file owned by root is
 		// allowed to have. This translates to u=rw,g=r.
-		if fi.Mode().Perm()&os.FileMode(0777)^0640 != 0 {
+		if fi.Mode().Perm()&^os.FileMode(0o640) != 0 {
 			return ErrSSLKeyHasWorldPermissions
 		}
 		return nil
