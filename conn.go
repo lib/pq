@@ -261,6 +261,9 @@ restartAll:
 	)
 	for _, cfg := range c.cfg.hosts() {
 		mode := cfg.SSLMode
+		if mode == "" {
+			mode = SSLModePrefer
+		}
 	restartHost:
 		if debugProto {
 			fmt.Fprintln(os.Stderr, "CONNECT ", cfg.string())

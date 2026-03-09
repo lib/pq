@@ -253,7 +253,7 @@ func TestRetryError(t *testing.T) {
 }
 
 func TestNetworkError(t *testing.T) {
-	c, err := NewConnector("")
+	c, err := NewConnector("sslmode=disable")
 	if err != nil {
 		t.Fatal(err)
 	}

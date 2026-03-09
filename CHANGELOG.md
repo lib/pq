@@ -1,6 +1,21 @@
 unreleased
 ----------
 
+- As announced in the release notes for v1.12.0, this release changes the
+  default `sslmode` from `require` to `prefer`, which is the default used by
+  libpq and the rest of the PostgreSQL ecosystem ([#1271]).
+
+- pq now requires Go 1.23.
+
+### Features
+
+### Fixes
+
+- Add Redshift-specific OID mappings ([#1291], [#1317]).
+
+[#1291]: https://github.com/lib/pq/pull/1291
+[#1317]: https://github.com/lib/pq/pull/1317
+
 
 v1.12.3 (2026-04-03)
 --------------------
