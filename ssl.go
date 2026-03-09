@@ -82,7 +82,7 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 	case mode == SSLModeDisable || mode == SSLModeAllow:
 		return nil, nil
 
-	case mode == "" || mode == SSLModeRequire || mode == SSLModePrefer:
+	case mode == SSLModeRequire || mode == SSLModePrefer:
 		// Skip TLS's own verification since it requires full verification.
 		tlsConf.InsecureSkipVerify = true
 

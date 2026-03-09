@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"testing"
 	"time"
 
@@ -59,6 +58,10 @@ func TestSSLMode(t *testing.T) {
 		connect string
 		wantErr string
 	}{
+		// Default (prefer) should work both with and without ssl.
+		{"user=pqgossl", ""},
+		{f.DSN(), ""},
+
 		// sslmode=require: require SSL, but don't verify certificate.
 		{"sslmode=require user=pqgossl", ""},
 		{"sslmode=require " + f.DSN(), "pq: SSL is not enabled on the server"},
@@ -404,12 +407,7 @@ func TestSSLDefaults(t *testing.T) {
 func TestSSLRootCA(t *testing.T) {
 	startSSLTest(t, "pqgossl")
 
-	// TODO: can remove this once https://github.com/lib/pq/pull/1271 is merged.
-	os.Unsetenv("PGSSLMODE")
-	t.Cleanup(func() {
-		os.Setenv("PGSSLMODE", "disable")
-		testSystemRoots = nil
-	})
+	t.Cleanup(func() { testSystemRoots = nil })
 	testSystemRoots = x509.NewCertPool()
 	if !testSystemRoots.AppendCertsFromPEM(pqtest.Read(t, "testdata/init/root.crt")) {
 		t.Fatal()
