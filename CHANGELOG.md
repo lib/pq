@@ -1,7 +1,11 @@
 unreleased
 ----------
 
-### Deprecated features
+### Changes in default behaviour
+
+- This release changes the default `sslmode` from `require` to `prefer`, which
+  is the default used by libpq and the rest of the PostgreSQL ecosystem. See
+  [#1271] for some background.
 
 - `CopyIn()` and `CopyInToSchema()` have been marked as deprecated. These are
   simple query builders and not needed for `COPY [..] FROM STDIN` support (which
@@ -12,6 +16,7 @@ unreleased
 
       // Replacement
       tx.Prepare(`copy temp (num, text, blob, nothing) from stdin`)
+
 
 ### Features
 
@@ -41,11 +46,15 @@ unreleased
 [#1265]: https://github.com/lib/pq/pull/1265
 [#1267]: https://github.com/lib/pq/pull/1267
 [#1270]: https://github.com/lib/pq/pull/1270
+<<<<<<< HEAD
 [#1272]: https://github.com/lib/pq/pull/1272
 [#1277]: https://github.com/lib/pq/pull/1277
 [#1278]: https://github.com/lib/pq/pull/1278
 [#1280]: https://github.com/lib/pq/pull/1280
 [#1281]: https://github.com/lib/pq/pull/1281
+=======
+[#1271]: https://github.com/lib/pq/pull/1271
+>>>>>>> bf2ab28 (Change default sslmode from "require" to "prefer")
 
 v1.11.2 (2026-02-10)
 --------------------
