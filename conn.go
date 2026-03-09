@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lib/pq/internal/pgpass"
@@ -37,6 +38,7 @@ var (
 	ErrSSLKeyUnknownOwnership    = pqutil.ErrSSLKeyUnknownOwnership
 	ErrSSLKeyHasWorldPermissions = pqutil.ErrSSLKeyHasWorldPermissions
 
+	errQueryInProgress = errors.New("pq: there is already a query being processed on this connection")
 	errUnexpectedReady = errors.New("unexpected ReadyForQuery")
 	errNoRowsAffected  = errors.New("no RowsAffected available after the empty statement")
 	errNoLastInsertID  = errors.New("no LastInsertId available after the empty statement")
@@ -169,14 +171,14 @@ type conn struct {
 	saveMessageType   proto.ResponseCode
 	saveMessageBuffer []byte
 
-	// If an error is set, this connection is bad and all public-facing
+	// If an error is set this connection is bad and all public-facing
 	// functions should return the appropriate error by calling get()
 	// (ErrBadConn) or getForNext().
 	err syncErr
 
 	secretKey           []byte              // Cancellation key for CancelRequest messages.
 	pid                 int                 // Cancellation PID.
-	inCopy              bool                // If true this connection is in the middle of a COPY
+	inProgress          atomic.Bool         // This connection is in the middle of a processing a request.
 	noticeHandler       func(*Error)        // If not nil, notices will be synchronously sent here
 	notificationHandler func(*Notification) // If not nil, notifications will be synchronously sent here
 	gss                 GSS                 // GSSAPI context
@@ -800,7 +802,7 @@ func (cn *conn) Prepare(q string) (driver.Stmt, error) {
 	if pqsql.StartsWithCopy(q) {
 		s, err := cn.prepareCopyIn(q)
 		if err == nil {
-			cn.inCopy = true
+			cn.inProgress.Store(true)
 		}
 		return s, cn.handleError(err, q)
 	}
@@ -882,8 +884,8 @@ func (cn *conn) query(query string, args []driver.NamedValue) (*rows, error) {
 	if err := cn.err.get(); err != nil {
 		return nil, err
 	}
-	if cn.inCopy {
-		return nil, errCopyInProgress
+	if !cn.inProgress.CompareAndSwap(false, true) {
+		return nil, errQueryInProgress
 	}
 
 	// Check to see if we can use the "simpleQuery" interface, which is
@@ -936,6 +938,9 @@ func (cn *conn) query(query string, args []driver.NamedValue) (*rows, error) {
 func (cn *conn) Exec(query string, args []driver.Value) (driver.Result, error) {
 	if err := cn.err.get(); err != nil {
 		return nil, err
+	}
+	if !cn.inProgress.CompareAndSwap(false, true) {
+		return nil, errQueryInProgress
 	}
 
 	// Check to see if we can use the "simpleExec" interface, which is *much*
@@ -1010,8 +1015,7 @@ func (cn *conn) send(m *writeBuf) error {
 func (cn *conn) sendStartupPacket(m *writeBuf) error {
 	if debugProto {
 		w := m.wrap()
-		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n",
-			"Startup", int(binary.BigEndian.Uint32(w[1:5]))-4, w[5:])
+		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n", "Startup", int(binary.BigEndian.Uint32(w[1:5]))-4, w[5:])
 	}
 	_, err := cn.c.Write((m.wrap())[1:])
 	return err
@@ -1021,7 +1025,7 @@ func (cn *conn) sendStartupPacket(m *writeBuf) error {
 // should have no payload. This method does not use the scratch buffer.
 func (cn *conn) sendSimpleMessage(typ proto.RequestCode) error {
 	if debugProto {
-		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n", proto.RequestCode(typ), 0, []byte{})
+		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n", typ, 0, []byte{})
 	}
 	_, err := cn.c.Write([]byte{byte(typ), '\x00', '\x00', '\x00', '\x04'})
 	return err
@@ -1064,6 +1068,10 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 	t := proto.ResponseCode(x[0])
 	n := int(binary.BigEndian.Uint32(x[1:])) - 4
 
+	if proto.ResponseCode(t) == proto.ReadyForQuery {
+		cn.inProgress.Store(false)
+	}
+
 	// When PostgreSQL cannot start a backend (e.g., an external process limit),
 	// it sends plain text like "Ecould not fork new process [..]", which
 	// doesn't use the standard encoding for the Error message.
@@ -1087,7 +1095,7 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 	}
 	*r = y
 	if debugProto {
-		fmt.Fprintf(os.Stderr, "SERVER ← %-20s %5d  %q\n", proto.ResponseCode(t), n, y)
+		fmt.Fprintf(os.Stderr, "SERVER ← %-20s %5d  %q\n", t, n, y)
 	}
 	return t, nil
 }

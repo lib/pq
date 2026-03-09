@@ -12,9 +12,13 @@ unreleased
 
 - Fix SSL key permission check to allow modes stricter than 0600/0640#1265 ([#1265]).
 
+- Clearer error when starting a new query while pq is still processing another
+  query ([#1272]).
+
 [#1258]: https://github.com/lib/pq/pull/1258
 [#1265]: https://github.com/lib/pq/pull/1265
 [#1270]: https://github.com/lib/pq/pull/1270
+[#1272]: https://github.com/lib/pq/pull/1272
 
 v1.11.2 (2026-02-10)
 --------------------
