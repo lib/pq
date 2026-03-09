@@ -1,8 +1,10 @@
 package pq
 
 import (
+	"errors"
 	"math"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/lib/pq/internal/pqtest"
@@ -288,4 +290,87 @@ func TestRowsClose(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestRowsConcurrentUse(t *testing.T) {
+	t.Parallel()
+
+	db := pqtest.MustDB(t, "")
+	defer db.Close()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			tx, err := db.Begin()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer tx.Rollback()
+
+			rows, err := tx.Query(`select unnest('{1,2,3}'::int[])`)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer rows.Close()
+
+			all := make([]int, 0, 3)
+			for rows.Next() {
+				var n int
+				err := rows.Scan(&n)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				all = append(all, n)
+
+				_, err = tx.Query("select 99")
+				if !errors.Is(err, errQueryInProgress) {
+					t.Errorf("wrong error for query: %v", err)
+				}
+				_, err = tx.Exec("select pg_sleep(0.01)")
+				if !errors.Is(err, errQueryInProgress) {
+					t.Errorf("wrong error for exec: %v", err)
+				}
+			}
+			if !reflect.DeepEqual(all, []int{1, 2, 3}) {
+				t.Error(all)
+			}
+
+			var n int
+			err = tx.QueryRow("select 42").Scan(&n)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if n != 42 {
+				t.Error(n)
+			}
+			_, err = tx.Exec("select pg_sleep(0.01)")
+			if err != nil {
+				t.Error(err)
+				return
+			}
+
+			// Calling Close() early rows
+			rows, err = tx.Query(`select unnest('{1,2,3}'::int[])`)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			rows.Close()
+			err = tx.QueryRow("select 43").Scan(&n)
+			if err != nil {
+				t.Error(err)
+			}
+			if n != 43 {
+				t.Error(n)
+			}
+		}()
+	}
+	wg.Wait()
 }
