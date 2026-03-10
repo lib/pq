@@ -20,6 +20,7 @@ import (
 
 	"github.com/lib/pq/internal/pgpass"
 	"github.com/lib/pq/internal/pqtest"
+	"github.com/lib/pq/internal/pqutil"
 	"github.com/lib/pq/internal/proto"
 )
 
@@ -102,6 +103,11 @@ func TestOpen(t *testing.T) {
 }
 
 func TestPgpass(t *testing.T) {
+	// Note: can't be run in parallel
+	warnbuf := new(bytes.Buffer)
+	pqutil.WarnFD = warnbuf
+	defer func() { pqutil.WarnFD = os.Stderr }()
+
 	assertPassword := func(want string, extra map[string]string) {
 		o := map[string]string{
 			"host":            "localhost",
@@ -136,6 +142,10 @@ func TestPgpass(t *testing.T) {
 
 	// wrong permissions for the pgpass file means it should be ignored
 	assertPassword("", map[string]string{"host": "example.com", "passfile": file, "user": "foo"})
+	if h := "has group or world access"; !strings.Contains(warnbuf.String(), h) {
+		t.Errorf("unexpected warning\nhave: %s\nwant: %s", warnbuf, h)
+	}
+	warnbuf.Reset()
 
 	if err := os.Chmod(file, 0600); err != nil { // Fix the permissions
 		t.Fatal(err)
@@ -153,6 +163,9 @@ func TestPgpass(t *testing.T) {
 	os.Setenv("PGPASSFILE", "/tmp")
 	defer os.Unsetenv("PGPASSFILE")
 	assertPassword("pass_A", map[string]string{"host": "server", "passfile": file, "dbname": "some_db", "user": "some_user"})
+	if warnbuf.String() != "" {
+		t.Errorf("warnbuf not empty: %s", warnbuf)
+	}
 }
 
 func TestExecNilSlice(t *testing.T) {
