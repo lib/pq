@@ -15,8 +15,12 @@ unreleased
 - Clearer error when starting a new query while pq is still processing another
   query ([#1272]).
 
+- Send intermediate CAs with client certificates, so they can be signed by an
+  intermediate CA ([#1267]).
+
 [#1258]: https://github.com/lib/pq/pull/1258
 [#1265]: https://github.com/lib/pq/pull/1265
+[#1267]: https://github.com/lib/pq/pull/1267
 [#1270]: https://github.com/lib/pq/pull/1270
 [#1272]: https://github.com/lib/pq/pull/1272
 

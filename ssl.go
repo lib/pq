@@ -1,14 +1,17 @@
 package pq
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -85,7 +88,9 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 		// applications that need certificate validation should always use
 		// verify-ca or verify-full.
 		if cfg.SSLRootCert != "" {
-			if _, err := os.Stat(cfg.SSLRootCert); err == nil {
+			if cfg.SSLInline {
+				verifyCaOnly = true
+			} else if _, err := os.Stat(cfg.SSLRootCert); err == nil {
 				verifyCaOnly = true
 			} else {
 				cfg.SSLRootCert = ""
@@ -118,10 +123,11 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 	if err != nil {
 		return nil, err
 	}
-	err = sslCertificateAuthority(tlsConf, cfg)
+	rootPem, err := sslCertificateAuthority(tlsConf, cfg)
 	if err != nil {
 		return nil, err
 	}
+	sslAppendIntermediates(tlsConf, cfg, rootPem)
 
 	// Accept renegotiation requests initiated by the backend.
 	//
@@ -164,7 +170,15 @@ func sslClientCertificates(tlsConf *tls.Config, cfg Config) error {
 		if err != nil {
 			return err
 		}
-		tlsConf.Certificates = []tls.Certificate{cert}
+		// Use GetClientCertificate instead of the Certificates field. When
+		// Certificates is set, Go's TLS client only sends the cert if the
+		// server's CertificateRequest includes a CA that issued it. When the
+		// client cert was signed by an intermediate CA but the server only
+		// advertises the root CA, Go skips sending the cert entirely.
+		// GetClientCertificate bypasses this filtering.
+		tlsConf.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			return &cert, nil
+		}
 		return nil
 	}
 
@@ -219,33 +233,86 @@ func sslClientCertificates(tlsConf *tls.Config, cfg Config) error {
 		return err
 	}
 
-	tlsConf.Certificates = []tls.Certificate{cert}
+	// Using GetClientCertificate instead of Certificates field as per comment
+	// above.
+	tlsConf.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+		return &cert, nil
+	}
 	return nil
 }
 
 // sslCertificateAuthority adds the RootCA specified in the "sslrootcert" setting.
-func sslCertificateAuthority(tlsConf *tls.Config, cfg Config) error {
+func sslCertificateAuthority(tlsConf *tls.Config, cfg Config) ([]byte, error) {
 	// In libpq, the root certificate is only loaded if the setting is not blank.
 	//
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L950-L951
-	if sslrootcert := cfg.SSLRootCert; len(sslrootcert) > 0 {
-		tlsConf.RootCAs = x509.NewCertPool()
+	if cfg.SSLRootCert == "" {
+		return nil, nil
+	}
 
-		var cert []byte
-		if cfg.SSLInline {
-			cert = []byte(sslrootcert)
-		} else {
-			var err error
-			cert, err = os.ReadFile(sslrootcert)
-			if err != nil {
-				return err
-			}
-		}
+	tlsConf.RootCAs = x509.NewCertPool()
 
-		if !tlsConf.RootCAs.AppendCertsFromPEM(cert) {
-			return errors.New("pq: couldn't parse pem in sslrootcert")
+	var cert []byte
+	if cfg.SSLInline {
+		cert = []byte(cfg.SSLRootCert)
+	} else {
+		var err error
+		cert, err = os.ReadFile(cfg.SSLRootCert)
+		if err != nil {
+			return nil, err
 		}
 	}
 
-	return nil
+	if !tlsConf.RootCAs.AppendCertsFromPEM(cert) {
+		return nil, errors.New("pq: couldn't parse pem in sslrootcert")
+	}
+	return cert, nil
+}
+
+// sslAppendIntermediates appends intermediate CA certificates from sslrootcert
+// to the client certificate chain. This is needed so the server can verify the
+// client cert when it was signed by an intermediate CA — without this, the TLS
+// handshake only sends the leaf client cert.
+func sslAppendIntermediates(tlsConf *tls.Config, cfg Config, rootPem []byte) {
+	if cfg.SSLRootCert == "" || tlsConf.GetClientCertificate == nil || len(rootPem) == 0 {
+		return
+	}
+
+	var (
+		pemData       = slices.Clone(rootPem)
+		intermediates [][]byte
+	)
+	for {
+		var block *pem.Block
+		block, pemData = pem.Decode(pemData)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			continue
+		}
+		// Skip self-signed root CAs; only append intermediates.
+		if cert.IsCA && !bytes.Equal(cert.RawIssuer, cert.RawSubject) {
+			intermediates = append(intermediates, block.Bytes)
+		}
+	}
+	if len(intermediates) == 0 {
+		return
+	}
+
+	// Wrap the existing GetClientCertificate to append intermediate certs to
+	// the certificate chain returned during the TLS handshake.
+	origGetCert := tlsConf.GetClientCertificate
+	tlsConf.GetClientCertificate = func(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+		cert, err := origGetCert(info)
+		if err != nil {
+			return cert, err
+		}
+		cert.Certificate = append(cert.Certificate, intermediates...)
+		return cert, nil
+	}
 }
