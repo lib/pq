@@ -44,15 +44,11 @@ func ForceBinaryParameters() bool {
 
 // InvalidCertificate reports if this error is an "invalid certificate" error.
 func InvalidCertificate(err error) bool {
-	if err == nil {
-		return false
-	}
 	switch err.(type) {
-	case x509.UnknownAuthorityError, x509.HostnameError,
-		x509.CertificateInvalidError, *tls.CertificateVerificationError:
+	case x509.UnknownAuthorityError, x509.HostnameError, *tls.CertificateVerificationError:
 		return true
 	}
-	return strings.Contains(err.Error(), "certificate is not standards compliant")
+	return false
 }
 
 // Ptr gets a pointer to any value.
