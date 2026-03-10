@@ -8,6 +8,22 @@ unreleased
 
 - Support `sslmode=prefer` and `sslmode=allow` ([#1270]).
 
+- Add a new `pqerror` package with PostgreSQL error codes ([#1275]).
+
+  For example, to test if an error is a UNIQUE constraint violation:
+
+      pqErr, ok := pq.AsType[*pq.Error](err)
+      if ok && pqErr.Code == pqerror.UniqueViolation {
+          log.Fatalf("email %q already exsts", email)
+      }
+
+  To make this a bit more convenient, it also adds a pqerror.As() function:
+
+      pqErr := pqerror.As(err, pqerror.UniqueViolation)
+      if pqErr != nil {
+          log.Fatalf("email %q already exsts", email)
+      }
+
 ### Fixes
 
 - Fix SSL key permission check to allow modes stricter than 0600/0640#1265 ([#1265]).
@@ -23,6 +39,7 @@ unreleased
 [#1267]: https://github.com/lib/pq/pull/1267
 [#1270]: https://github.com/lib/pq/pull/1270
 [#1272]: https://github.com/lib/pq/pull/1272
+[#1275]: https://github.com/lib/pq/pull/1275
 
 v1.11.2 (2026-02-10)
 --------------------
@@ -134,6 +151,8 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 
 - Handle ErrorResponse in readReadyForQuery and return proper error ([#1136]).
 
+- Detect COPY even if the query starts with whitespace or comments ([#1198]).
+
 - CopyIn() and CopyInSchema() now work if the list of columns is empty, in which
   case it will copy all columns ([#1239]).
 
@@ -159,6 +178,7 @@ newer. Previously PostgreSQL 8.4 and newer were supported.
 [#1180]: https://github.com/lib/pq/pull/1180
 [#1184]: https://github.com/lib/pq/pull/1184
 [#1188]: https://github.com/lib/pq/pull/1188
+[#1198]: https://github.com/lib/pq/pull/1198
 [#1211]: https://github.com/lib/pq/pull/1211
 [#1212]: https://github.com/lib/pq/pull/1212
 [#1214]: https://github.com/lib/pq/pull/1214
