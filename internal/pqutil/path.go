@@ -2,6 +2,7 @@ package pqutil
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -36,6 +37,8 @@ func Home() string {
 	return home
 }
 
+var WarnFD io.Writer = os.Stderr
+
 // Pgpass gets the filepath to the pgpass file to use, returning "" if a pgpass
 // file shouldn't be used.
 func Pgpass(passfile string) string {
@@ -55,7 +58,7 @@ func Pgpass(passfile string) string {
 			return ""
 		}
 		if fi.Mode().Perm()&(0x77) != 0 {
-			fmt.Fprintf(os.Stderr,
+			fmt.Fprintf(WarnFD,
 				"WARNING: password file %q has group or world access; permissions should be u=rw (0600) or less\n",
 				passfile)
 			return ""
