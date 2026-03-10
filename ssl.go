@@ -241,6 +241,34 @@ func sslClientCertificates(tlsConf *tls.Config, cfg Config) error {
 	return nil
 }
 
+// sslCertificateAuthority adds the RootCA specified in the "sslrootcert" setting.
+func sslCertificateAuthority(tlsConf *tls.Config, cfg Config) ([]byte, error) {
+	// In libpq, the root certificate is only loaded if the setting is not blank.
+	//
+	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L950-L951
+	if cfg.SSLRootCert == "" {
+		return nil, nil
+	}
+
+	tlsConf.RootCAs = x509.NewCertPool()
+
+	var cert []byte
+	if cfg.SSLInline {
+		cert = []byte(cfg.SSLRootCert)
+	} else {
+		var err error
+		cert, err = os.ReadFile(cfg.SSLRootCert)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if !tlsConf.RootCAs.AppendCertsFromPEM(cert) {
+		return nil, errors.New("pq: couldn't parse pem in sslrootcert")
+	}
+	return cert, nil
+}
+
 // sslAppendIntermediates appends intermediate CA certificates from sslrootcert
 // to the client certificate chain. This is needed so the server can verify the
 // client cert when it was signed by an intermediate CA — without this, the TLS
@@ -287,32 +315,4 @@ func sslAppendIntermediates(tlsConf *tls.Config, cfg Config, rootPem []byte) {
 		cert.Certificate = append(cert.Certificate, intermediates...)
 		return cert, nil
 	}
-}
-
-// sslCertificateAuthority adds the RootCA specified in the "sslrootcert" setting.
-func sslCertificateAuthority(tlsConf *tls.Config, cfg Config) ([]byte, error) {
-	// In libpq, the root certificate is only loaded if the setting is not blank.
-	//
-	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L950-L951
-	if cfg.SSLRootCert == "" {
-		return nil, nil
-	}
-
-	tlsConf.RootCAs = x509.NewCertPool()
-
-	var cert []byte
-	if cfg.SSLInline {
-		cert = []byte(cfg.SSLRootCert)
-	} else {
-		var err error
-		cert, err = os.ReadFile(cfg.SSLRootCert)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if !tlsConf.RootCAs.AppendCertsFromPEM(cert) {
-		return nil, errors.New("pq: couldn't parse pem in sslrootcert")
-	}
-	return cert, nil
 }
