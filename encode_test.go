@@ -201,86 +201,47 @@ func TestFormatTsBackend(t *testing.T) {
 	}
 }
 
-func TestTimeWithoutTimezone(t *testing.T) {
+func TestDecodeTime(t *testing.T) {
+	tests := []struct {
+		typ, in string
+		want    time.Time
+	}{
+		{"time", "11:59:59", time.Date(0, 1, 1, 11, 59, 59, 0, time.UTC)},
+		{"time", "24:00", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
+		{"time", "24:00:00", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
+		{"time", "24:00:00.0", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
+		{"time", "24:00:00.000000", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
+
+		{"timetz", "11:59:59+00:00", time.Date(0, 1, 1, 11, 59, 59, 0, time.UTC)},
+		{"timetz", "11:59:59+04:00", time.Date(0, 1, 1, 11, 59, 59, 0, time.FixedZone("+04", 4*60*60))},
+		{"timetz", "11:59:59+04:01:02", time.Date(0, 1, 1, 11, 59, 59, 0, time.FixedZone("+04:01:02", 4*60*60+1*60+2))},
+		{"timetz", "11:59:59-04:01:02", time.Date(0, 1, 1, 11, 59, 59, 0, time.FixedZone("-04:01:02", -(4*60*60+1*60+2)))},
+		{"timetz", "24:00+00", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
+		{"timetz", "24:00Z", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
+		{"timetz", "24:00-04:00", time.Date(0, 1, 2, 0, 0, 0, 0, time.FixedZone("-04", -4*60*60))},
+		{"timetz", "24:00:00+00", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
+		{"timetz", "24:00:00.0+00", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
+		{"timetz", "24:00:00.000000+00", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
+
+		{"timestamp", "2020-03-04 24:00:00", time.Date(2020, 3, 5, 0, 0, 0, 0, time.FixedZone("", 0))},
+		{"timestamptz", "2020-03-04 24:00:00+02", time.Date(2020, 3, 4, 22, 0, 0, 0, time.UTC)},
+		{"timestamptz", "2020-03-04 24:00:00-02", time.Date(2020, 3, 5, 2, 0, 0, 0, time.UTC)},
+	}
+
+	db := pqtest.MustDB(t)
 	t.Parallel()
-	db := pqtest.MustDB(t)
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			var have time.Time
+			err := db.QueryRow("select $1::"+tt.typ, tt.in).Scan(&have)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-
-	for _, tc := range []struct {
-		refTime      string
-		expectedTime time.Time
-	}{
-		{"11:59:59", time.Date(0, 1, 1, 11, 59, 59, 0, time.UTC)},
-		{"24:00", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
-		{"24:00:00", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
-		{"24:00:00.0", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
-		{"24:00:00.000000", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
-	} {
-		t.Run(
-			fmt.Sprintf("%s => %s", tc.refTime, tc.expectedTime.Format(time.RFC3339)),
-			func(t *testing.T) {
-				var gotTime time.Time
-				row := tx.QueryRow("select $1::time", tc.refTime)
-				err = row.Scan(&gotTime)
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				if !tc.expectedTime.Equal(gotTime) {
-					t.Errorf("timestamps not equal: %s != %s", tc.expectedTime, gotTime)
-				}
-			},
-		)
-	}
-}
-
-func TestTimeWithTimezone(t *testing.T) {
-	if !pqtest.Pgpool() {
-		t.Parallel()
-	}
-	db := pqtest.MustDB(t)
-
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-
-	for _, tc := range []struct {
-		refTime      string
-		expectedTime time.Time
-	}{
-		{"11:59:59+00:00", time.Date(0, 1, 1, 11, 59, 59, 0, time.UTC)},
-		{"11:59:59+04:00", time.Date(0, 1, 1, 11, 59, 59, 0, time.FixedZone("+04", 4*60*60))},
-		{"11:59:59+04:01:02", time.Date(0, 1, 1, 11, 59, 59, 0, time.FixedZone("+04:01:02", 4*60*60+1*60+2))},
-		{"11:59:59-04:01:02", time.Date(0, 1, 1, 11, 59, 59, 0, time.FixedZone("-04:01:02", -(4*60*60+1*60+2)))},
-		{"24:00+00", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
-		{"24:00Z", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
-		{"24:00-04:00", time.Date(0, 1, 2, 0, 0, 0, 0, time.FixedZone("-04", -4*60*60))},
-		{"24:00:00+00", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
-		{"24:00:00.0+00", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
-		{"24:00:00.000000+00", time.Date(0, 1, 2, 0, 0, 0, 0, time.UTC)},
-	} {
-		t.Run(
-			fmt.Sprintf("%s => %s", tc.refTime, tc.expectedTime.Format(time.RFC3339)),
-			func(t *testing.T) {
-				var gotTime time.Time
-				row := tx.QueryRow("select $1::timetz", tc.refTime)
-				err = row.Scan(&gotTime)
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				if !tc.expectedTime.Equal(gotTime) {
-					t.Errorf("timestamps not equal: %s != %s", tc.expectedTime, gotTime)
-				}
-			},
-		)
+			if !tt.want.Equal(have) {
+				t.Errorf("\nhave: %s\nwant: %s", have, tt.want)
+			}
+		})
 	}
 }
 
