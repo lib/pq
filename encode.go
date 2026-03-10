@@ -6,17 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math"
-	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/lib/pq/internal/pqtime"
 	"github.com/lib/pq/oid"
 )
-
-var time2400Regex = regexp.MustCompile(`^(24:00(?::00(?:\.0+)?)?)(?:[Z+-].*)?$`)
 
 func binaryEncode(x any) ([]byte, error) {
 	switch v := x.(type) {
@@ -120,9 +116,9 @@ func textDecode(ps *parameterStatus, s []byte, typ oid.Oid) (any, error) {
 	case oid.T_timestamp, oid.T_date:
 		return parseTS(nil, string(s))
 	case oid.T_time:
-		return parseTime("15:04:05", typ, s)
+		return parseTime(typ, s)
 	case oid.T_timetz:
-		return parseTime("15:04:05-07", typ, s)
+		return parseTime(typ, s)
 	case oid.T_bool:
 		return s[0] == 't', nil
 	case oid.T_int8, oid.T_int4, oid.T_int2:
@@ -206,34 +202,42 @@ func appendEscapedText(buf []byte, text string) []byte {
 	return result
 }
 
-func parseTime(f string, typ oid.Oid, s []byte) (time.Time, error) {
+func parseTime(typ oid.Oid, s []byte) (time.Time, error) {
 	str := string(s)
 
-	// Check for a minute and second offset in the timezone.
-	if typ == oid.T_timestamptz || typ == oid.T_timetz {
-		for i := 3; i <= 6; i += 3 {
-			if str[len(str)-i] == ':' {
-				f += ":00"
-				continue
-			}
-			break
+	f := "15:04:05"
+	if typ == oid.T_timetz {
+		f = "15:04:05-07"
+		// PostgreSQL just sends the hour if the minute and second is 0:
+		//   22:04:59+00
+		//   22:04:59+08
+		//   22:04:59+08:30
+		//   22:04:59+08:30:40
+		//   23:00:00.112321+02:12:13
+		// So add those to the format string.
+		c := strings.Count(str, ":")
+		if c > 3 {
+			f = "15:04:05-07:00:00"
+		} else if c > 2 {
+			f = "15:04:05-07:00"
 		}
 	}
 
-	// Special case for 24:00 time.
-	// Unfortunately, golang does not parse 24:00 as a proper time.
-	// In this case, we want to try "round to the next day", to differentiate.
-	// As such, we find if the 24:00 time matches at the beginning; if so,
-	// we default it back to 00:00 but add a day later.
+	// Go doesn't parse 24:00, so manually set that to midnight on Jan 2. 24:00
+	// is never with subseconds but may have a timezone:
+	//   24:00:00
+	//   24:00:00+08
+	//   24:00:00-08:01:01
 	var is2400Time bool
-	switch typ {
-	case oid.T_timetz, oid.T_time:
-		if matches := time2400Regex.FindStringSubmatch(str); matches != nil {
-			// Concatenate timezone information at the back.
-			str = "00:00:00" + str[len(matches[1]):]
-			is2400Time = true
+	if strings.HasPrefix(str, "24:00:00") {
+		is2400Time = true
+		if len(str) > 8 {
+			str = "00:00:00" + str[8:]
+		} else {
+			str = "00:00:00"
 		}
 	}
+
 	t, err := time.Parse(f, str)
 	if err != nil {
 		return time.Time{}, errors.New("pq: " + err.Error())
@@ -241,75 +245,13 @@ func parseTime(f string, typ oid.Oid, s []byte) (time.Time, error) {
 	if is2400Time {
 		t = t.Add(24 * time.Hour)
 	}
+	// TODO(v2): it uses UTC, which it shouldn't. But I'm afraid changing it now
+	// will break people's code.
+	//if typ == oid.T_time {
+	//	// Don't use UTC but time.FixedZone("", 0)
+	//	t = t.In(globalLocationCache.getLocation(0))
+	//}
 	return t, nil
-}
-
-var errInvalidTimestamp = errors.New("invalid timestamp")
-
-type timestampParser struct {
-	err error
-}
-
-func (p *timestampParser) expect(str string, char byte, pos int) {
-	if p.err != nil {
-		return
-	}
-	if pos+1 > len(str) {
-		p.err = errInvalidTimestamp
-		return
-	}
-	if c := str[pos]; c != char && p.err == nil {
-		p.err = fmt.Errorf("expected '%v' at position %v; got '%v'", char, pos, c)
-	}
-}
-
-func (p *timestampParser) mustAtoi(str string, begin int, end int) int {
-	if p.err != nil {
-		return 0
-	}
-	if begin < 0 || end < 0 || begin > end || end > len(str) {
-		p.err = errInvalidTimestamp
-		return 0
-	}
-	result, err := strconv.Atoi(str[begin:end])
-	if err != nil {
-		if p.err == nil {
-			p.err = fmt.Errorf("expected number; got '%v'", str)
-		}
-		return 0
-	}
-	return result
-}
-
-// The location cache caches the time zones typically used by the client.
-type locationCache struct {
-	cache map[int]*time.Location
-	lock  sync.Mutex
-}
-
-// All connections share the same list of timezones. Benchmarking shows that
-// about 5% speed could be gained by putting the cache in the connection and
-// losing the mutex, at the cost of a small amount of memory and a somewhat
-// significant increase in code complexity.
-var globalLocationCache = newLocationCache()
-
-func newLocationCache() *locationCache {
-	return &locationCache{cache: make(map[int]*time.Location)}
-}
-
-// Returns the cached timezone for the specified offset, creating and caching
-// it if necessary.
-func (c *locationCache) getLocation(offset int) *time.Location {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	location, ok := c.cache[offset]
-	if !ok {
-		location = time.FixedZone("", offset)
-		c.cache[offset] = location
-	}
-
-	return location
 }
 
 var (
@@ -360,10 +302,10 @@ func disableInfinityTS() {
 	infinityTSEnabled = false
 }
 
-// This is a time function specific to the Postgres default DateStyle
-// setting ("ISO, MDY"), the only one we currently support. This
-// accounts for the discrepancies between the parsing available with
-// time.Parse and the Postgres date formatting quirks.
+// This is a time function specific to the Postgres default DateStyle setting
+// ("ISO, MDY"), the only one we currently support. This accounts for the
+// discrepancies between the parsing available with time.Parse and the Postgres
+// date formatting quirks.
 func parseTS(currentLocation *time.Location, str string) (any, error) {
 	switch str {
 	case "-infinity":
@@ -386,115 +328,10 @@ func parseTS(currentLocation *time.Location, str string) (any, error) {
 
 // ParseTimestamp parses Postgres' text format. It returns a time.Time in
 // currentLocation iff that time's offset agrees with the offset sent from the
-// Postgres server. Otherwise, ParseTimestamp returns a time.Time with the
-// fixed offset offset provided by the Postgres server.
+// Postgres server. Otherwise, ParseTimestamp returns a time.Time with the fixed
+// offset offset provided by the Postgres server.
 func ParseTimestamp(currentLocation *time.Location, str string) (time.Time, error) {
-	p := timestampParser{}
-
-	monSep := strings.IndexRune(str, '-')
-	// this is Gregorian year, not ISO Year
-	// In Gregorian system, the year 1 BC is followed by AD 1
-	year := p.mustAtoi(str, 0, monSep)
-	daySep := monSep + 3
-	month := p.mustAtoi(str, monSep+1, daySep)
-	p.expect(str, '-', daySep)
-	timeSep := daySep + 3
-	day := p.mustAtoi(str, daySep+1, timeSep)
-
-	minLen := monSep + len("01-01") + 1
-
-	isBC := strings.HasSuffix(str, " BC")
-	if isBC {
-		minLen += 3
-	}
-
-	var hour, minute, second int
-	if len(str) > minLen {
-		p.expect(str, ' ', timeSep)
-		minSep := timeSep + 3
-		p.expect(str, ':', minSep)
-		hour = p.mustAtoi(str, timeSep+1, minSep)
-		secSep := minSep + 3
-		p.expect(str, ':', secSep)
-		minute = p.mustAtoi(str, minSep+1, secSep)
-		secEnd := secSep + 3
-		second = p.mustAtoi(str, secSep+1, secEnd)
-	}
-	remainderIdx := monSep + len("01-01 00:00:00") + 1
-	// Three optional (but ordered) sections follow: the
-	// fractional seconds, the time zone offset, and the BC
-	// designation. We set them up here and adjust the other
-	// offsets if the preceding sections exist.
-
-	nanoSec := 0
-	tzOff := 0
-
-	if remainderIdx < len(str) && str[remainderIdx] == '.' {
-		fracStart := remainderIdx + 1
-		fracOff := strings.IndexAny(str[fracStart:], "-+Z ")
-		if fracOff < 0 {
-			fracOff = len(str) - fracStart
-		}
-		fracSec := p.mustAtoi(str, fracStart, fracStart+fracOff)
-		nanoSec = fracSec * (1000000000 / int(math.Pow(10, float64(fracOff))))
-
-		remainderIdx += fracOff + 1
-	}
-	if tzStart := remainderIdx; tzStart < len(str) && (str[tzStart] == '-' || str[tzStart] == '+') {
-		// time zone separator is always '-' or '+' or 'Z' (UTC is +00)
-		var tzSign int
-		switch c := str[tzStart]; c {
-		case '-':
-			tzSign = -1
-		case '+':
-			tzSign = +1
-		default:
-			return time.Time{}, fmt.Errorf("expected '-' or '+' at position %v; got %v", tzStart, c)
-		}
-		tzHours := p.mustAtoi(str, tzStart+1, tzStart+3)
-		remainderIdx += 3
-		var tzMin, tzSec int
-		if remainderIdx < len(str) && str[remainderIdx] == ':' {
-			tzMin = p.mustAtoi(str, remainderIdx+1, remainderIdx+3)
-			remainderIdx += 3
-		}
-		if remainderIdx < len(str) && str[remainderIdx] == ':' {
-			tzSec = p.mustAtoi(str, remainderIdx+1, remainderIdx+3)
-			remainderIdx += 3
-		}
-		tzOff = tzSign * ((tzHours * 60 * 60) + (tzMin * 60) + tzSec)
-	} else if tzStart < len(str) && str[tzStart] == 'Z' {
-		// time zone Z separator indicates UTC is +00
-		remainderIdx += 1
-	}
-
-	var isoYear int
-
-	if isBC {
-		isoYear = 1 - year
-		remainderIdx += 3
-	} else {
-		isoYear = year
-	}
-	if remainderIdx < len(str) {
-		return time.Time{}, fmt.Errorf("expected end of input, got %v", str[remainderIdx:])
-	}
-	t := time.Date(isoYear, time.Month(month), day,
-		hour, minute, second, nanoSec,
-		globalLocationCache.getLocation(tzOff))
-
-	if currentLocation != nil {
-		// Set the location of the returned Time based on the session's
-		// TimeZone value, but only if the local time zone database agrees with
-		// the remote database on the offset.
-		lt := t.In(currentLocation)
-		_, newOff := lt.Zone()
-		if newOff == tzOff {
-			t = lt
-		}
-	}
-
-	return t, p.err
+	return pqtime.ParseTimestamp(currentLocation, str)
 }
 
 // formatTS formats t into a format postgres understands.
@@ -549,49 +386,49 @@ func FormatTimestamp(t time.Time) []byte {
 // Parse a bytea value received from the server.  Both "hex" and the legacy
 // "escape" format are supported.
 func parseBytea(s []byte) (result []byte, err error) {
+	// Hex format.
 	if len(s) >= 2 && bytes.Equal(s[:2], []byte("\\x")) {
-		// bytea_output = hex
 		s = s[2:] // trim off leading "\\x"
 		result = make([]byte, hex.DecodedLen(len(s)))
 		_, err := hex.Decode(result, s)
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		// bytea_output = escape
-		for len(s) > 0 {
-			if s[0] == '\\' {
-				// escaped '\\'
-				if len(s) >= 2 && s[1] == '\\' {
-					result = append(result, '\\')
-					s = s[2:]
-					continue
-				}
-
-				// '\\' followed by an octal number
-				if len(s) < 4 {
-					return nil, fmt.Errorf("invalid bytea sequence %v", s)
-				}
-				r, err := strconv.ParseUint(string(s[1:4]), 8, 8)
-				if err != nil {
-					return nil, fmt.Errorf("could not parse bytea value: %w", err)
-				}
-				result = append(result, byte(r))
-				s = s[4:]
-			} else {
-				// We hit an unescaped, raw byte.  Try to read in as many as
-				// possible in one go.
-				i := bytes.IndexByte(s, '\\')
-				if i == -1 {
-					result = append(result, s...)
-					break
-				}
-				result = append(result, s[:i]...)
-				s = s[i:]
-			}
-		}
+		return result, nil
 	}
 
+	// Escape format.
+	for len(s) > 0 {
+		if s[0] == '\\' {
+			// escaped '\\'
+			if len(s) >= 2 && s[1] == '\\' {
+				result = append(result, '\\')
+				s = s[2:]
+				continue
+			}
+
+			// '\\' followed by an octal number
+			if len(s) < 4 {
+				return nil, fmt.Errorf("invalid bytea sequence %v", s)
+			}
+			r, err := strconv.ParseUint(string(s[1:4]), 8, 8)
+			if err != nil {
+				return nil, fmt.Errorf("could not parse bytea value: %w", err)
+			}
+			result = append(result, byte(r))
+			s = s[4:]
+		} else {
+			// We hit an unescaped, raw byte.  Try to read in as many as
+			// possible in one go.
+			i := bytes.IndexByte(s, '\\')
+			if i == -1 {
+				result = append(result, s...)
+				break
+			}
+			result = append(result, s[:i]...)
+			s = s[i:]
+		}
+	}
 	return result, nil
 }
 
