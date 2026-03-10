@@ -140,7 +140,7 @@ func TestError(t *testing.T) {
 				t.Errorf("\nhave: %s\nwant: %s", err.Error(), tt.want)
 			}
 			tt.wantDetail = pqtest.NormalizeIndent(tt.wantDetail)
-			if pqErr.query != "" && pqErr.Position != "" {
+			if pqErr.Query != "" && pqErr.Position != "" {
 				tt.wantDetail += "\n"
 			}
 			if pqErr.ErrorWithDetail() != tt.wantDetail {
