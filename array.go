@@ -486,7 +486,7 @@ func (a GenericArray) Value() (driver.Value, error) {
 		}
 	case reflect.Array:
 	default:
-		return nil, fmt.Errorf("pq: Unable to convert %T to array", a.A)
+		return nil, fmt.Errorf("pq: unable to convert %T to array", a.A)
 	}
 
 	if n := rv.Len(); n > 0 {
