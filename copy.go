@@ -1,7 +1,6 @@
 package pq
 
 import (
-	"bytes"
 	"context"
 	"database/sql/driver"
 	"encoding/binary"
@@ -19,62 +18,24 @@ var (
 	errCopyNotSupportedOutsideTxn = errors.New("pq: COPY is only allowed inside a transaction")
 )
 
-// CopyIn creates a COPY FROM statement which can be prepared with Tx.Prepare().
-// The target table should be visible in search_path.
-//
-// It copies all columns if the list of columns is empty.
-func CopyIn(table string, columns ...string) string {
-	b := bytes.NewBufferString("COPY ")
-	BufferQuoteIdentifier(table, b)
-	makeStmt(b, columns...)
-	return b.String()
-}
-
-// CopyInSchema creates a COPY FROM statement which can be prepared with
-// Tx.Prepare().
-func CopyInSchema(schema, table string, columns ...string) string {
-	b := bytes.NewBufferString("COPY ")
-	BufferQuoteIdentifier(schema, b)
-	b.WriteRune('.')
-	BufferQuoteIdentifier(table, b)
-	makeStmt(b, columns...)
-	return b.String()
-}
-
-func makeStmt(b *bytes.Buffer, columns ...string) {
-	if len(columns) == 0 {
-		b.WriteString(" FROM STDIN")
-		return
-	}
-	b.WriteString(" (")
-	for i, col := range columns {
-		if i != 0 {
-			b.WriteString(", ")
-		}
-		BufferQuoteIdentifier(col, b)
-	}
-	b.WriteString(") FROM STDIN")
-}
-
 type copyin struct {
 	cn      *conn
 	buffer  []byte
 	rowData chan []byte
 	done    chan bool
-
-	closed bool
-
-	mu struct {
+	closed  bool
+	mu      struct {
 		sync.Mutex
 		err error
 		driver.Result
 	}
 }
 
-const ciBufferSize = 64 * 1024
-
-// flush buffer before the buffer is filled up and needs reallocation
-const ciBufferFlushSize = 63 * 1024
+const (
+	ciBufferSize = 64 * 1024
+	// flush buffer before the buffer is filled up and needs reallocation
+	ciBufferFlushSize = 63 * 1024
+)
 
 func (cn *conn) prepareCopyIn(q string) (_ driver.Stmt, resErr error) {
 	if !cn.isInTransaction() {

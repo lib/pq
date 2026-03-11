@@ -111,7 +111,7 @@ func ExampleRegisterTLSConfig() {
 	// Output:
 }
 
-func ExampleCopyIn() {
+func Example_copyFromStdin() {
 	// Connect and create table.
 	db, err := sql.Open("postgres", "")
 	if err != nil {
@@ -127,7 +127,7 @@ func ExampleCopyIn() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	stmt, err := tx.Prepare(pq.CopyIn("users", "name", "age"))
+	stmt, err := tx.Prepare(`copy users (name, age) from stdin`)
 	if err != nil {
 		log.Fatal(err)
 	}
