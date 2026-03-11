@@ -8,6 +8,8 @@ unreleased
 
 - Support `sslmode=prefer` and `sslmode=allow` ([#1270]).
 
+- Support `ssl_min_protocol_version` and `ssl_max_protocol_version` ([#1277]).
+
 ### Fixes
 
 - Fix SSL key permission check to allow modes stricter than 0600/0640#1265 ([#1265]).
@@ -23,6 +25,7 @@ unreleased
 [#1267]: https://github.com/lib/pq/pull/1267
 [#1270]: https://github.com/lib/pq/pull/1270
 [#1272]: https://github.com/lib/pq/pull/1272
+[#1277]: https://github.com/lib/pq/pull/1277
 
 v1.11.2 (2026-02-10)
 --------------------

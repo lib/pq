@@ -2,6 +2,7 @@ package pq
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql/driver"
 	"fmt"
 	"math/rand"
@@ -38,6 +39,10 @@ type (
 	// ProtocolVersion is a min_protocol_version or max_protocol_version
 	// setting.
 	ProtocolVersion string
+
+	// SSLProtocolVersion is a ssl_min_protocol_version or
+	// ssl_max_protocol_version setting.
+	SSLProtocolVersion string
 )
 
 // Values for [SSLMode] that pq supports.
@@ -137,6 +142,32 @@ const (
 )
 
 var protocolVersions = []ProtocolVersion{ProtocolVersion30, ProtocolVersion32, ProtocolVersionLatest}
+
+// Values for [SSLProtocolVersion] that pq supports.
+const (
+	SSLProtocolVersionTLS10 = SSLProtocolVersion("TLSv1.0")
+	SSLProtocolVersionTLS11 = SSLProtocolVersion("TLSv1.1")
+	SSLProtocolVersionTLS12 = SSLProtocolVersion("TLSv1.2")
+	SSLProtocolVersionTLS13 = SSLProtocolVersion("TLSv1.3")
+)
+
+var sslProtocolVersions = []SSLProtocolVersion{SSLProtocolVersionTLS10, SSLProtocolVersionTLS11,
+	SSLProtocolVersionTLS12, SSLProtocolVersionTLS13}
+
+func (s SSLProtocolVersion) tlsconf() uint16 {
+	switch s {
+	case SSLProtocolVersionTLS10:
+		return tls.VersionTLS10
+	case SSLProtocolVersionTLS11:
+		return tls.VersionTLS11
+	case SSLProtocolVersionTLS12:
+		return tls.VersionTLS12
+	case SSLProtocolVersionTLS13:
+		return tls.VersionTLS13
+	default:
+		return 0
+	}
+}
 
 // Connector represents a fixed configuration for the pq driver with a given
 // dsn. Connector satisfies the [database/sql/driver.Connector] interface and
@@ -283,6 +314,19 @@ type Config struct {
 	// By default SNI is on, any value which is not starting with "1" disables
 	// SNI.
 	SSLSNI bool `postgres:"sslsni" env:"PGSSLSNI"`
+
+	// Minimum SSL/TLS protocol version to allow for the connection.
+	//
+	// The default is determined by [tls.Config.MinVersion], which is TLSv1.2 at
+	// the time of writing.
+	SSLMinProtocolVersion SSLProtocolVersion `postgres:"ssl_min_protocol_version" env:"SSLPGMINPROTOCOLVERSION"`
+
+	// Maximum SSL/TLS protocol version to allow for the connection. If not set,
+	// this parameter is ignored and the connection will use the maximum bound
+	// defined by the backend, if set. Setting the maximum protocol version is
+	// mainly useful for testing or if some component has issues working with a
+	// newer protocol.
+	SSLMaxProtocolVersion SSLProtocolVersion `postgres:"ssl_max_protocol_version" env:"SSLPGMAXPROTOCOLVERSION"`
 
 	// Interpert sslcert and sslkey as PEM encoded data, rather than a path to a
 	// PEM file. This is a pq extension, not supported in libpq.
@@ -575,10 +619,10 @@ func (cfg *Config) fromEnv(env []string) error {
 			continue
 		}
 		switch k {
-		case "PGREQUIREAUTH", "PGCHANNELBINDING", "PGSERVICE", "PGSERVICEFILE", "PGREALM",
-			"PGSSLCERTMODE", "PGSSLCOMPRESSION", "PGREQUIRESSL", "PGSSLCRL", "PGREQUIREPEER",
-			"PGSYSCONFDIR", "PGLOCALEDIR", "PGSSLCRLDIR", "PGSSLMINPROTOCOLVERSION", "PGSSLMAXPROTOCOLVERSION",
-			"PGGSSENCMODE", "PGGSSDELEGATION", "PGGSSLIB":
+		case "PGREQUIRESSL", "PGSSLCOMPRESSION", // Deprecated.
+			"PGREALM", "PGGSSENCMODE", "PGGSSDELEGATION", "PGGSSLIB", // krb stuff
+			"PGREQUIREAUTH", "PGCHANNELBINDING", "PGSERVICE", "PGSERVICEFILE",
+			"PGSSLCERTMODE", "PGSSLCRL", "PGSSLCRLDIR", "PGREQUIREPEER":
 			return fmt.Errorf("pq: environment variable $%s is not supported", k)
 		case "PGKRBSRVNAME":
 			if newGss == nil {
@@ -707,19 +751,21 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 	)
 	for i := 0; i < types.NumField(); i++ {
 		var (
-			rt                 = types.Field(i)
-			rv                 = values.Field(i)
-			k                  = rt.Tag.Get(tag)
-			connectTimeout     = (tag == "postgres" && k == "connect_timeout") || (tag == "env" && k == "PGCONNECT_TIMEOUT")
-			host               = (tag == "postgres" && k == "host") || (tag == "env" && k == "PGHOST")
-			hostaddr           = (tag == "postgres" && k == "hostaddr") || (tag == "env" && k == "PGHOSTADDR")
-			port               = (tag == "postgres" && k == "port") || (tag == "env" && k == "PGPORT")
-			sslmode            = (tag == "postgres" && k == "sslmode") || (tag == "env" && k == "PGSSLMODE")
-			sslnegotiation     = (tag == "postgres" && k == "sslnegotiation") || (tag == "env" && k == "PGSSLNEGOTIATION")
-			targetsessionattrs = (tag == "postgres" && k == "target_session_attrs") || (tag == "env" && k == "PGTARGETSESSIONATTRS")
-			loadbalancehosts   = (tag == "postgres" && k == "load_balance_hosts") || (tag == "env" && k == "PGLOADBALANCEHOSTS")
-			minprotocolversion = (tag == "postgres" && k == "min_protocol_version") || (tag == "env" && k == "PGMINPROTOCOLVERSION")
-			maxprotocolversion = (tag == "postgres" && k == "max_protocol_version") || (tag == "env" && k == "PGMAXPROTOCOLVERSION")
+			rt                    = types.Field(i)
+			rv                    = values.Field(i)
+			k                     = rt.Tag.Get(tag)
+			connectTimeout        = (tag == "postgres" && k == "connect_timeout") || (tag == "env" && k == "PGCONNECT_TIMEOUT")
+			host                  = (tag == "postgres" && k == "host") || (tag == "env" && k == "PGHOST")
+			hostaddr              = (tag == "postgres" && k == "hostaddr") || (tag == "env" && k == "PGHOSTADDR")
+			port                  = (tag == "postgres" && k == "port") || (tag == "env" && k == "PGPORT")
+			sslmode               = (tag == "postgres" && k == "sslmode") || (tag == "env" && k == "PGSSLMODE")
+			sslnegotiation        = (tag == "postgres" && k == "sslnegotiation") || (tag == "env" && k == "PGSSLNEGOTIATION")
+			targetsessionattrs    = (tag == "postgres" && k == "target_session_attrs") || (tag == "env" && k == "PGTARGETSESSIONATTRS")
+			loadbalancehosts      = (tag == "postgres" && k == "load_balance_hosts") || (tag == "env" && k == "PGLOADBALANCEHOSTS")
+			minprotocolversion    = (tag == "postgres" && k == "min_protocol_version") || (tag == "env" && k == "PGMINPROTOCOLVERSION")
+			maxprotocolversion    = (tag == "postgres" && k == "max_protocol_version") || (tag == "env" && k == "PGMAXPROTOCOLVERSION")
+			sslminprotocolversion = (tag == "postgres" && k == "ssl_min_protocol_version") || (tag == "env" && k == "SSLPGMINPROTOCOLVERSION")
+			sslmaxprotocolversion = (tag == "postgres" && k == "ssl_max_protocol_version") || (tag == "env" && k == "SSLPGMAXPROTOCOLVERSION")
 		)
 		if k == "" || k == "-" {
 			continue
@@ -774,6 +820,9 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 				}
 				if (minprotocolversion || maxprotocolversion) && !slices.Contains(protocolVersions, ProtocolVersion(v)) {
 					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(protocolVersions))
+				}
+				if (sslminprotocolversion || sslmaxprotocolversion) && !slices.Contains(sslProtocolVersions, SSLProtocolVersion(v)) {
+					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(sslProtocolVersions))
 				}
 				if host {
 					vv := strings.Split(v, ",")

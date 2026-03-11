@@ -195,8 +195,8 @@ func TestSSLClientCertificates(t *testing.T) {
 }
 
 func TestSSLClientCertificateIntermediate(t *testing.T) {
-	pqtest.SkipPgpool(t)
-	pqtest.SkipPgbouncer(t)
+	pqtest.SkipPgpool(t)    // TODO: can't get it to work.
+	pqtest.SkipPgbouncer(t) // TODO: can't get it to work.
 
 	startSSLTest(t, "pqgosslcert")
 
@@ -341,6 +341,30 @@ func TestSSLSNI(t *testing.T) {
 				if name != tt.wantSNI {
 					t.Fatalf("have: %q\nwant: %q", name, tt.wantSNI)
 				}
+			}
+		})
+	}
+}
+
+func TestSSLVersion(t *testing.T) {
+	tests := []struct {
+		in, wantErr string
+	}{
+		// All the containers require 1.2
+		{"sslmode=require ssl_min_protocol_version=TLSv1.3", ``},
+		{"sslmode=require ssl_max_protocol_version=TLSv1.0", `tls: no supported versions`},
+		{"sslmode=pqgo-empty ssl_max_protocol_version=TLSv1.0", `tls: no supported versions`},
+	}
+
+	RegisterTLSConfig("empty", &tls.Config{})
+	startSSLTest(t, "pqgossl")
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			db := pqtest.MustDB(t, "user=pqgossl "+tt.in)
+			defer db.Close()
+			err := db.Ping()
+			if !pqtest.ErrorContains(err, tt.wantErr) {
+				t.Fatalf("wrong error: %v", err)
 			}
 		})
 	}
