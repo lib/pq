@@ -67,8 +67,10 @@ func getTLSConfigClone(key string) *tls.Config {
 // in case of sslmode=allow or prefer.
 func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 	var (
-		verifyCaOnly = false
+		// Don't set defaults here, because tlsConf may be overwritten if a
+		// custom one was registered. Set it after the sslmode switch.
 		tlsConf      = &tls.Config{}
+		verifyCaOnly = false
 	)
 	switch {
 	case mode == SSLModeDisable || mode == SSLModeAllow:
@@ -111,6 +113,9 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 	default:
 		panic("unreachable")
 	}
+
+	tlsConf.MinVersion = cfg.SSLMinProtocolVersion.tlsconf()
+	tlsConf.MaxVersion = cfg.SSLMaxProtocolVersion.tlsconf()
 
 	// RFC 6066 asks to not set SNI if the host is a literal IP address (IPv4 or
 	// IPv6). This check is coded already crypto.tls.hostnameInSNI, so just
