@@ -834,6 +834,14 @@ func toNamedValue(v []driver.Value) []driver.NamedValue {
 
 // CheckNamedValue implements [driver.NamedValueChecker].
 func (cn *conn) CheckNamedValue(nv *driver.NamedValue) error {
+	if cn.cfg.BinaryParameters {
+		if bin, ok := nv.Value.(interface{ BinaryValue() ([]byte, error) }); ok {
+			var err error
+			nv.Value, err = bin.BinaryValue()
+			return err
+		}
+	}
+
 	// Ignore Valuer, for backward compatibility with pq.Array().
 	if _, ok := nv.Value.(driver.Valuer); ok {
 		return driver.ErrSkip
@@ -1474,7 +1482,7 @@ func md5s(s string) string {
 
 func (cn *conn) sendBinaryParameters(b *writeBuf, args []driver.NamedValue) error {
 	// Do one pass over the parameters to see if we're going to send any of them
-	// over in binary.  If we are, create a paramFormats array at the same time.
+	// over in binary. If we are, create a paramFormats array at the same time.
 	var paramFormats []int
 	for i, x := range args {
 		_, ok := x.Value.([]byte)

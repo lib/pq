@@ -14,6 +14,8 @@ unreleased
 
 - Fix SSL key permission check to allow modes stricter than 0600/0640#1265 ([#1265]).
 
+- Fix Hstore to work with binary parameters ([#1278]).
+
 - Clearer error when starting a new query while pq is still processing another
   query ([#1272]).
 
@@ -26,6 +28,7 @@ unreleased
 [#1270]: https://github.com/lib/pq/pull/1270
 [#1272]: https://github.com/lib/pq/pull/1272
 [#1277]: https://github.com/lib/pq/pull/1277
+[#1278]: https://github.com/lib/pq/pull/1278
 
 v1.11.2 (2026-02-10)
 --------------------

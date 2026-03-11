@@ -2,6 +2,8 @@ package hstore
 
 import (
 	"database/sql"
+	"reflect"
+	"strings"
 	"testing"
 
 	_ "github.com/lib/pq"
@@ -9,120 +11,93 @@ import (
 )
 
 func TestHstore(t *testing.T) {
-	if pqtest.ForceBinaryParameters() {
-		t.Skip("Currently fails with PQTEST_BINARY_PARAMETERS=1") // TODO
-	}
+	tr := strings.NewReplacer("\t", "", "\n", "", `\n`, "\n", `\t`, "\t")
+	tests := []struct {
+		in   string
+		want Hstore
+	}{
+		{`null`, Hstore{}},
+		{`''`, Hstore{Map: map[string]sql.NullString{}}},
 
-	db := pqtest.MustDB(t)
-
-	// quietly create hstore if it doesn't exist
-	_, err := db.Exec("CREATE EXTENSION IF NOT EXISTS hstore")
-	if err != nil {
-		t.Skipf("Skipping hstore tests - hstore extension create failed: %s", err.Error())
-	}
-
-	hs := Hstore{}
-
-	// test for null-valued hstores
-	err = db.QueryRow("SELECT NULL::hstore").Scan(&hs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if hs.Map != nil {
-		t.Fatalf("expected null map")
-	}
-
-	err = db.QueryRow("SELECT $1::hstore", hs).Scan(&hs)
-	if err != nil {
-		t.Fatalf("re-query null map failed: %s", err.Error())
-	}
-	if hs.Map != nil {
-		t.Fatalf("expected null map")
-	}
-
-	// test for empty hstores
-	err = db.QueryRow("SELECT ''::hstore").Scan(&hs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if hs.Map == nil {
-		t.Fatalf("expected empty map, got null map")
-	}
-	if len(hs.Map) != 0 {
-		t.Fatalf("expected empty map, got len(map)=%d", len(hs.Map))
-	}
-
-	err = db.QueryRow("SELECT $1::hstore", hs).Scan(&hs)
-	if err != nil {
-		t.Fatalf("re-query empty map failed: %s", err.Error())
-	}
-
-	if hs.Map == nil {
-		t.Fatalf("expected empty map, got null map")
-	}
-	if len(hs.Map) != 0 {
-		t.Fatalf("expected empty map, got len(map)=%d", len(hs.Map))
-	}
-
-	// a few example maps to test out
-	hsOnePair := Hstore{
-		Map: map[string]sql.NullString{
+		{`'"key1"=>"value1"'`, Hstore{Map: map[string]sql.NullString{
 			"key1": {String: "value1", Valid: true},
-		},
-	}
-
-	hsThreePairs := Hstore{
-		Map: map[string]sql.NullString{
+		}}},
+		{`'"key1"=>"value1","key2"=>"value2","key3"=>"value3"'`, Hstore{Map: map[string]sql.NullString{
 			"key1": {String: "value1", Valid: true},
 			"key2": {String: "value2", Valid: true},
 			"key3": {String: "value3", Valid: true},
-		},
+		}}},
+		{
+			tr.Replace(`'
+				"embedded2"=>"\"value2\"=>x2",
+				"withnewlines"=>"\n\nvalue\t=>2",
+				"nullstring"=>"NULL",
+				"withbracket"=>"value>42",
+				"\"withquotes1\""=>"this \"should\" be fine",
+				"embedded1"=>"value1=>x1",
+				"<<all sorts of crazy>>"=>"this, \"should,\\\" also, => be fine",
+				"actuallynull"=>NULL,
+				"NULL"=>"NULL string key",
+				"withequal"=>"value=42",
+				"\"withquotes\"2\""=>"this \"should\\\" also be fine"
+			'`),
+			Hstore{Map: map[string]sql.NullString{
+				"nullstring":             {String: "NULL", Valid: true},
+				"actuallynull":           {String: "", Valid: false},
+				"NULL":                   {String: "NULL string key", Valid: true},
+				"withbracket":            {String: "value>42", Valid: true},
+				"withequal":              {String: "value=42", Valid: true},
+				`"withquotes1"`:          {String: `this "should" be fine`, Valid: true},
+				`"withquotes"2"`:         {String: `this "should\" also be fine`, Valid: true},
+				"embedded1":              {String: "value1=>x1", Valid: true},
+				"embedded2":              {String: `"value2"=>x2`, Valid: true},
+				"withnewlines":           {String: "\n\nvalue\t=>2", Valid: true},
+				"<<all sorts of crazy>>": {String: `this, "should,\" also, => be fine`, Valid: true},
+			}}},
 	}
 
-	hsSmorgasbord := Hstore{
-		Map: map[string]sql.NullString{
-			"nullstring":             {String: "NULL", Valid: true},
-			"actuallynull":           {String: "", Valid: false},
-			"NULL":                   {String: "NULL string key", Valid: true},
-			"withbracket":            {String: "value>42", Valid: true},
-			"withequal":              {String: "value=42", Valid: true},
-			`"withquotes1"`:          {String: `this "should" be fine`, Valid: true},
-			`"withquotes"2"`:         {String: `this "should\" also be fine`, Valid: true},
-			"embedded1":              {String: "value1=>x1", Valid: true},
-			"embedded2":              {String: `"value2"=>x2`, Valid: true},
-			"withnewlines":           {String: "\n\nvalue\t=>2", Valid: true},
-			"<<all sorts of crazy>>": {String: `this, "should,\" also, => be fine`, Valid: true},
-		},
+	t.Parallel()
+	db := pqtest.MustDB(t)
+	pqtest.Exec(t, db, `create extension if not exists hstore`)
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			have := pqtest.Query[Hstore](t, db, `select `+tt.in+`::hstore as hstore`)[0]["hstore"]
+			if !reflect.DeepEqual(have, tt.want) {
+				t.Fatalf("\nhave: %#v\nwant: %#v", have, tt.want)
+			}
+
+			have2 := pqtest.Query[Hstore](t, db, `select $1::hstore as hstore`, have)[0]["hstore"]
+			if !reflect.DeepEqual(have2, tt.want) {
+				t.Errorf("\nhave: %#v\nwant: %#v", have2, tt.want)
+			}
+		})
 	}
+}
 
-	// test encoding in query params, then decoding during Scan
-	testBidirectional := func(h Hstore) {
-		err = db.QueryRow("SELECT $1::hstore", h).Scan(&hs)
-		if err != nil {
-			t.Fatalf("re-query %d-pair map failed: %s", len(h.Map), err.Error())
-		}
-		if hs.Map == nil {
-			t.Fatalf("expected %d-pair map, got null map", len(h.Map))
-		}
-		if len(hs.Map) != len(h.Map) {
-			t.Fatalf("expected %d-pair map, got len(map)=%d", len(h.Map), len(hs.Map))
-		}
+func BenchmarkHstore(b *testing.B) {
+	h := Hstore{Map: map[string]sql.NullString{
+		"nullstring":             {String: "NULL", Valid: true},
+		"actuallynull":           {String: "", Valid: false},
+		"NULL":                   {String: "NULL string key", Valid: true},
+		"withbracket":            {String: "value>42", Valid: true},
+		"withequal":              {String: "value=42", Valid: true},
+		`"withquotes1"`:          {String: `this "should" be fine`, Valid: true},
+		`"withquotes"2"`:         {String: `this "should\" also be fine`, Valid: true},
+		"embedded1":              {String: "value1=>x1", Valid: true},
+		"embedded2":              {String: `"value2"=>x2`, Valid: true},
+		"withnewlines":           {String: "\n\nvalue\t=>2", Valid: true},
+		"<<all sorts of crazy>>": {String: `this, "should,\" also, => be fine`, Valid: true},
+	}}
 
-		for key, val := range hs.Map {
-			otherval, found := h.Map[key]
-			if !found {
-				t.Fatalf("  key '%v' not found in %d-pair map", key, len(h.Map))
-			}
-			if otherval.Valid != val.Valid {
-				t.Fatalf("  value %v <> %v in %d-pair map", otherval, val, len(h.Map))
-			}
-			if otherval.String != val.String {
-				t.Fatalf("  value '%v' <> '%v' in %d-pair map", otherval.String, val.String, len(h.Map))
-			}
-		}
-	}
+	b.Run("Value", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, _ = h.Value()
 
-	testBidirectional(hsOnePair)
-	testBidirectional(hsThreePairs)
-	testBidirectional(hsSmorgasbord)
+		}
+	})
+	b.Run("BinaryValue", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, _ = h.BinaryValue()
+		}
+	})
 }

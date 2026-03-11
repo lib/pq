@@ -1,33 +1,17 @@
 package hstore
 
 import (
+	"bytes"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/binary"
+	"math"
 	"strings"
 )
 
 // Hstore is a wrapper for transferring Hstore values back and forth easily.
 type Hstore struct {
 	Map map[string]sql.NullString
-}
-
-// Escapes and quotes hstore keys/values. s should be a sql.NullString or string
-func hQuote(s any) string {
-	var str string
-	switch v := s.(type) {
-	case sql.NullString:
-		if !v.Valid {
-			return "NULL"
-		}
-		str = v.String
-	case string:
-		str = v
-	default:
-		panic("not a string or sql.NullString")
-	}
-
-	str = strings.Replace(str, "\\", "\\\\", -1)
-	return `"` + strings.Replace(str, "\"", "\\\"", -1) + `"`
 }
 
 // Scan implements the Scanner interface.
@@ -102,16 +86,68 @@ func (h *Hstore) Scan(value any) error {
 	return nil
 }
 
+var hQuoteRepl = strings.NewReplacer("\\", "\\\\", "\"", "\\\"")
+
+// Escapes and quotes hstore keys/values. s should be a sql.NullString or string
+func hQuote(b *bytes.Buffer, s any) {
+	var str string
+	switch v := s.(type) {
+	case sql.NullString:
+		if !v.Valid {
+			b.WriteString("NULL")
+			return
+		}
+		str = v.String
+	case string:
+		str = v
+	default:
+		panic("not a string or sql.NullString")
+	}
+
+	b.WriteByte('"')
+	b.WriteString(hQuoteRepl.Replace(str))
+	b.WriteByte('"')
+}
+
 // Value implements the driver Valuer interface. Note if h.Map is nil, the
 // database column value will be set to NULL.
 func (h Hstore) Value() (driver.Value, error) {
 	if h.Map == nil {
 		return nil, nil
 	}
-	parts := []string{}
-	for key, val := range h.Map {
-		thispart := hQuote(key) + "=>" + hQuote(val)
-		parts = append(parts, thispart)
+	if len(h.Map) == 0 {
+		return []byte(""), nil
 	}
-	return []byte(strings.Join(parts, ",")), nil
+
+	b := new(bytes.Buffer)
+	b.Grow(len(h.Map) * 8)
+	for k, v := range h.Map {
+		if b.Len() > 0 {
+			b.WriteByte(',')
+		}
+		hQuote(b, k)
+		b.WriteString("=>")
+		hQuote(b, v)
+	}
+	return b.Bytes(), nil
+}
+
+func (h Hstore) BinaryValue() ([]byte, error) {
+	if h.Map == nil {
+		return nil, nil
+	}
+
+	b := make([]byte, 0, len(h.Map)*12)
+	b = binary.BigEndian.AppendUint32(b, uint32(len(h.Map)))
+	for k, v := range h.Map {
+		b = binary.BigEndian.AppendUint32(b, uint32(len(k)))
+		b = append(b, k...)
+		if v.Valid {
+			b = binary.BigEndian.AppendUint32(b, uint32(len(v.String)))
+			b = append(b, v.String...)
+		} else {
+			b = binary.BigEndian.AppendUint32(b, math.MaxUint32)
+		}
+	}
+	return b, nil
 }
