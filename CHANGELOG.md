@@ -1,6 +1,18 @@
 unreleased
 ----------
 
+### Deprecated features
+
+- `CopyIn()` and `CopyInToSchema()` have been marked as deprecated. These are
+  simple query builders and not needed for `COPY [..] FROM STDIN` support (which
+  is *not* deprecated).
+
+      // Old
+      tx.Prepare(CopyIn("temp", "num", "text", "blob", "nothing"))
+
+      // Replacement
+      tx.Prepare(`copy temp (num, text, blob, nothing) from stdin`)
+
 ### Features
 
 - Support protocol 3.2, and the `min_protocol_version` and

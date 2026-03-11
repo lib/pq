@@ -1494,34 +1494,6 @@ func TestMultipleEmptyResult(t *testing.T) {
 	}
 }
 
-func TestCopyInStmtAffectedRows(t *testing.T) {
-	t.Parallel()
-	db := pqtest.MustDB(t)
-
-	_, err := db.Exec("CREATE TEMP TABLE temp (a int)")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	txn, err := db.BeginTx(context.TODO(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	copyStmt, err := txn.Prepare(CopyIn("temp", "a"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	res, err := copyStmt.Exec()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	res.RowsAffected()
-	res.LastInsertId()
-}
-
 func TestConnPrepareContext(t *testing.T) {
 	t.Parallel()
 

@@ -78,17 +78,15 @@ pq may return errors of type [*pq.Error] which contain error details:
 
 # Bulk imports
 
-You can perform bulk imports by preparing a statement returned by [CopyIn] (or
-[CopyInSchema]) in an explicit transaction ([sql.Tx]). The returned statement
-handle can then be repeatedly "executed" to copy data into the target table.
-After all data has been processed you should call Exec() once with no arguments
-to flush all buffered data. Any call to Exec() might return an error which
-should be handled appropriately, but because of the internal buffering an error
-returned by Exec() might not be related to the data passed in the call that
-failed.
+You can perform bulk imports by preparing a "COPY [..] FROM STDIN" statement in
+a transaction ([sql.Tx]). The returned [sql.Stmt] handle can then be repeatedly
+"executed" to copy data into the target table. After all data has been processed
+you should call Exec() once with no arguments to flush all buffered data. Any
+call to Exec() might return an error which should be handled appropriately, but
+because of the internal buffering an error returned by Exec() might not be
+related to the data passed in the call that failed.
 
-CopyIn uses COPY FROM internally. It is not possible to COPY outside of an
-explicit transaction in pq.
+It is not possible to COPY outside of an explicit transaction in pq.
 
 # Notifications
 

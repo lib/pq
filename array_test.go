@@ -550,7 +550,7 @@ func TestArrayValueBackend(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(have, tt.want) {
-			t.Errorf("\nhave: %v\nwant %v", have, tt.want)
+			t.Errorf("\nhave: %v\nwant: %v", have, tt.want)
 		}
 	}
 }
