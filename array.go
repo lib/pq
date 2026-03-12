@@ -732,7 +732,7 @@ func appendArrayElement(b []byte, rv reflect.Value) ([]byte, string, error) {
 
 	var del = ","
 	var err error
-	var iv any = rv.Interface()
+	var iv = rv.Interface()
 
 	if ad, ok := iv.(ArrayDelimiter); ok {
 		del = ad.ArrayDelimiter()

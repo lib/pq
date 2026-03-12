@@ -70,6 +70,14 @@ const (
 var sslModes = []SSLMode{SSLModeDisable, SSLModeAllow, SSLModePrefer, SSLModeRequire,
 	SSLModeVerifyFull, SSLModeVerifyCA}
 
+func (s SSLMode) ssl() bool {
+	switch s {
+	case SSLModePrefer, SSLModeRequire, SSLModeVerifyCA, SSLModeVerifyFull:
+		return true
+	}
+	return false
+}
+
 // Values for [SSLNegotiation] that pq supports.
 const (
 	// Negotiate whether SSL should be used. This is the default.
@@ -302,13 +310,19 @@ type Config struct {
 	// When set to "direct" it will use SSL without negotiation (PostgreSQL ≥17 only).
 	SSLNegotiation SSLNegotiation `postgres:"sslnegotiation" env:"PGSSLNEGOTIATION"`
 
-	// Cert file location. The file must contain PEM encoded data.
+	// Path to client SSL certificate. The file must contain PEM encoded data.
+	//
+	// Defaults to ~/.postgresql/postgresql.crt
 	SSLCert string `postgres:"sslcert" env:"PGSSLCERT"`
 
-	// Key file location. The file must contain PEM encoded data.
+	// Path to secret key for sslcert. The file must contain PEM encoded data.
+	//
+	// Defaults to ~/.postgresql/postgresql.key
 	SSLKey string `postgres:"sslkey" env:"PGSSLKEY"`
 
-	// The location of the root certificate file. The file must contain PEM encoded data.
+	// Path to root certificate. The file must contain PEM encoded data.
+	//
+	// Defaults to ~/.postgresql/root.crt.
 	SSLRootCert string `postgres:"sslrootcert" env:"PGSSLROOTCERT"`
 
 	// By default SNI is on, any value which is not starting with "1" disables

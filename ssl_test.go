@@ -13,19 +13,17 @@ import (
 	"time"
 
 	"github.com/lib/pq/internal/pqtest"
+	"github.com/lib/pq/internal/pqutil"
 	"github.com/lib/pq/internal/proto"
 )
 
 func openSSLConn(t *testing.T, conninfo ...string) (*sql.DB, error) {
 	db := pqtest.MustDB(t, conninfo...)
-	// Do something with the connection to see whether it's working or not.
-	return db, db.Ping()
+	return db, db.Ping() // Do something with the connection to see if it's working
 }
 
 // Environment sanity check: should fail without SSL
 func startSSLTest(t *testing.T, user string) {
-	t.Parallel()
-
 	wantErr := `invalid_authorization_specification`
 	if pqtest.Pgbouncer() {
 		wantErr = "protocol_violation"
@@ -40,6 +38,9 @@ func startSSLTest(t *testing.T, user string) {
 }
 
 func TestSSLMode(t *testing.T) {
+	t.Parallel()
+	startSSLTest(t, "pqgossl")
+
 	f := pqtest.NewFake(t, func(f pqtest.Fake, cn net.Conn) {
 		f.Startup(cn, nil)
 		for {
@@ -106,8 +107,6 @@ func TestSSLMode(t *testing.T) {
 		{"sslmode=prefer sslnegotiation=direct", "weak sslmode"},
 	}
 
-	startSSLTest(t, "pqgossl")
-
 	for _, tt := range tests {
 		tt := tt
 		t.Run("", func(t *testing.T) {
@@ -142,15 +141,9 @@ func TestSSLMode(t *testing.T) {
 func TestSSLClientCertificates(t *testing.T) {
 	pqtest.SkipPgpool(t)    // TODO: can't get it to work.
 	pqtest.SkipPgbouncer(t) // TODO: can't get it to work.
-
+	t.Parallel()
 	startSSLTest(t, "pqgosslcert")
-
-	// Make sure the permissions of the keyfile are correct, or it won't load.
-	// TODO: will probably fail on Windows? Dunno.
-	err := os.Chmod("testdata/init/postgresql.key", 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Chmod(t, 0o600, "testdata/init/postgresql.key")
 
 	tests := []struct {
 		connect string
@@ -197,13 +190,9 @@ func TestSSLClientCertificates(t *testing.T) {
 func TestSSLClientCertificateIntermediate(t *testing.T) {
 	pqtest.SkipPgpool(t)    // TODO: can't get it to work.
 	pqtest.SkipPgbouncer(t) // TODO: can't get it to work.
-
+	t.Parallel()
 	startSSLTest(t, "pqgosslcert")
-
-	err := os.Chmod("testdata/init/client_intermediate.key", 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Chmod(t, 0o600, "testdata/init/client_intermediate.key")
 
 	tests := []struct {
 		name    string
@@ -262,8 +251,8 @@ func TestSSLClientCertificateIntermediate(t *testing.T) {
 	}
 }
 
-// Check that clint sends SNI data when sslsni is not disabled
 func TestSSLSNI(t *testing.T) {
+	t.Parallel()
 	startSSLTest(t, "pqgosslcert")
 
 	tests := []struct {
@@ -347,6 +336,10 @@ func TestSSLSNI(t *testing.T) {
 }
 
 func TestSSLVersion(t *testing.T) {
+	t.Parallel()
+	startSSLTest(t, "pqgossl")
+	RegisterTLSConfig("empty", &tls.Config{})
+
 	tests := []struct {
 		in, wantErr string
 	}{
@@ -356,8 +349,6 @@ func TestSSLVersion(t *testing.T) {
 		{"sslmode=pqgo-empty ssl_max_protocol_version=TLSv1.0", `tls: no supported versions`},
 	}
 
-	RegisterTLSConfig("empty", &tls.Config{})
-	startSSLTest(t, "pqgossl")
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			db := pqtest.MustDB(t, "user=pqgossl "+tt.in)
@@ -370,11 +361,75 @@ func TestSSLVersion(t *testing.T) {
 	}
 }
 
+// Test that the defaults are being used by writing invalid data to them:
+// they're skipped if they don't exist, but do error if they're invalid.
+func TestSSLDefaults(t *testing.T) {
+	pqtest.SkipPgpool(t)    // TODO: can't get it to work.
+	pqtest.SkipPgbouncer(t) // TODO: can't get it to work.
+	startSSLTest(t, "pqgosslcert")
+
+	tests := []struct {
+		file    string
+		wantErr string
+	}{
+		{"root.crt", `couldn't parse pem from sslrootcert`},
+		{"postgresql.crt", `failed to find any PEM data in certificate input`},
+		{"postgresql.key", `failed to find any PEM data in key input`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			if err := os.MkdirAll(pqutil.Home(), 0o777); err != nil {
+				t.Fatal(err)
+			}
+
+			pqtest.Write(t, []byte("invalid data"), pqutil.Home(), tt.file)
+			if tt.file == "postgresql.crt" {
+				pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.key"), pqutil.Home(), "postgresql.key")
+				pqtest.Chmod(t, 0o600, pqutil.Home(), "postgresql.key")
+			}
+			if tt.file == "postgresql.key" {
+				pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.crt"), pqutil.Home(), "postgresql.crt")
+				pqtest.Chmod(t, 0o600, pqutil.Home(), "postgresql.key")
+			}
+
+			db := pqtest.MustDB(t, "user=pqgossl sslmode=require")
+			defer db.Close()
+			err := db.Ping()
+			if !pqtest.ErrorContains(err, tt.wantErr) {
+				t.Fatalf("wrong error:\nhave: %v\nwant: %s", err, tt.wantErr)
+			}
+		})
+	}
+
+	t.Run("work with default paths", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		if err := os.MkdirAll(pqutil.Home(), 0o777); err != nil {
+			t.Fatal(err)
+		}
+
+		pqtest.Write(t, pqtest.Read(t, "testdata/init/root.crt"), pqutil.Home(), "root.crt")
+		pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.crt"), pqutil.Home(), "postgresql.crt")
+		pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.key"), pqutil.Home(), "postgresql.key")
+		pqtest.Chmod(t, 0o600, pqutil.Home(), "postgresql.key")
+		db := pqtest.MustDB(t, "host=postgres user=pqgosslcert sslmode=verify-ca")
+		defer db.Close()
+		if err := db.Ping(); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 func TestUnreadableHome(t *testing.T) {
 	// Ignore HOME being unset or not a directory
 	for _, h := range []string{"", "/dev/null"} {
-		os.Setenv("HOME", h)
-		err := sslClientCertificates(&tls.Config{}, Config{})
+		t.Setenv("HOME", h)
+		err := sslClientCertificates(&tls.Config{}, Config{}, h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = ssl(Config{}, SSLModeRequire)
 		if err != nil {
 			t.Fatal(err)
 		}
