@@ -10,11 +10,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/lib/pq/internal/pqutil"
 )
@@ -71,7 +69,14 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 		// custom one was registered. Set it after the sslmode switch.
 		tlsConf      = &tls.Config{}
 		verifyCaOnly = false
+		home         = pqutil.Home()
 	)
+	if mode.ssl() && !cfg.SSLInline && cfg.SSLRootCert == "" && home != "" {
+		f := filepath.Join(home, "root.crt")
+		if _, err := os.Stat(f); err == nil {
+			cfg.SSLRootCert = f
+		}
+	}
 	switch {
 	case mode == SSLModeDisable || mode == SSLModeAllow:
 		return nil, nil
@@ -124,7 +129,7 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 		tlsConf.ServerName = cfg.Host
 	}
 
-	err := sslClientCertificates(tlsConf, cfg)
+	err := sslClientCertificates(tlsConf, cfg, home)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +174,7 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 // "sslkey" settings, or if they aren't set, from the .postgresql directory
 // in the user's home directory. The configured files must exist and have
 // the correct permissions.
-func sslClientCertificates(tlsConf *tls.Config, cfg Config) error {
+func sslClientCertificates(tlsConf *tls.Config, cfg Config, home string) error {
 	if cfg.SSLInline {
 		cert, err := tls.X509KeyPair([]byte(cfg.SSLCert), []byte(cfg.SSLKey))
 		if err != nil {
@@ -187,59 +192,38 @@ func sslClientCertificates(tlsConf *tls.Config, cfg Config) error {
 		return nil
 	}
 
-	home := pqutil.Home()
-
-	// In libpq, the client certificate is only loaded if the setting is not blank.
-	//
-	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1036-L1037
-	sslcert := cfg.SSLCert
-	if len(sslcert) == 0 && home != "" {
-		if runtime.GOOS == "windows" {
-			sslcert = filepath.Join(sslcert, "postgresql.crt")
-		} else {
-			sslcert = filepath.Join(home, ".postgresql/postgresql.crt")
-		}
+	// Only load client certificate and key if the setting is not blank, like libpq.
+	if cfg.SSLCert == "" && home != "" {
+		cfg.SSLCert = filepath.Join(home, "postgresql.crt")
 	}
-	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1045
-	if len(sslcert) == 0 {
+	if cfg.SSLCert == "" {
 		return nil
 	}
-	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1050:L1054
-	_, err := os.Stat(sslcert)
+	_, err := os.Stat(cfg.SSLCert)
 	if err != nil {
-		perr := new(os.PathError)
-		if errors.As(err, &perr) && (perr.Err == syscall.ENOENT || perr.Err == syscall.ENOTDIR) {
+		if pqutil.ErrNotExists(err) {
 			return nil
 		}
 		return err
 	}
 
 	// In libpq, the ssl key is only loaded if the setting is not blank.
-	//
-	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1123-L1222
-	sslkey := cfg.SSLKey
-	if len(sslkey) == 0 && home != "" {
-		if runtime.GOOS == "windows" {
-			sslkey = filepath.Join(home, "postgresql.key")
-		} else {
-			sslkey = filepath.Join(home, ".postgresql/postgresql.key")
-		}
+	if cfg.SSLKey == "" && home != "" {
+		cfg.SSLKey = filepath.Join(home, "postgresql.key")
 	}
-
-	if len(sslkey) > 0 {
-		err := pqutil.SSLKeyPermissions(sslkey)
+	if cfg.SSLKey != "" {
+		err := pqutil.SSLKeyPermissions(cfg.SSLKey)
 		if err != nil {
 			return err
 		}
 	}
 
-	cert, err := tls.LoadX509KeyPair(sslcert, sslkey)
+	cert, err := tls.LoadX509KeyPair(cfg.SSLCert, cfg.SSLKey)
 	if err != nil {
 		return err
 	}
 
-	// Using GetClientCertificate instead of Certificates field as per comment
-	// above.
+	// Using GetClientCertificate instead of Certificates per comment above.
 	tlsConf.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 		return &cert, nil
 	}
@@ -248,9 +232,7 @@ func sslClientCertificates(tlsConf *tls.Config, cfg Config) error {
 
 // sslCertificateAuthority adds the RootCA specified in the "sslrootcert" setting.
 func sslCertificateAuthority(tlsConf *tls.Config, cfg Config) ([]byte, error) {
-	// In libpq, the root certificate is only loaded if the setting is not blank.
-	//
-	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L950-L951
+	// Only load root certificate if not blank, like libpq.
 	if cfg.SSLRootCert == "" {
 		return nil, nil
 	}
@@ -269,7 +251,7 @@ func sslCertificateAuthority(tlsConf *tls.Config, cfg Config) ([]byte, error) {
 	}
 
 	if !tlsConf.RootCAs.AppendCertsFromPEM(cert) {
-		return nil, errors.New("pq: couldn't parse pem in sslrootcert")
+		return nil, errors.New("pq: couldn't parse pem from sslrootcert")
 	}
 	return cert, nil
 }

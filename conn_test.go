@@ -147,9 +147,7 @@ func TestPgpass(t *testing.T) {
 	}
 	warnbuf.Reset()
 
-	if err := os.Chmod(file, 0600); err != nil { // Fix the permissions
-		t.Fatal(err)
-	}
+	pqtest.Chmod(t, 0o600, file) // Fix the permissions
 
 	assertPassword("pass_A", map[string]string{"host": "server", "passfile": file, "dbname": "some_db", "user": "some_user"})
 	assertPassword("pass_fallback", map[string]string{"host": "example.com", "passfile": file, "user": "foo"})

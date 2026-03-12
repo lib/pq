@@ -3,6 +3,7 @@
 package pqtest
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,13 +28,30 @@ func ErrorContains(have error, want string) bool {
 // Read data from a file.
 func Read(t *testing.T, paths ...string) []byte {
 	t.Helper()
-
 	path := filepath.Join(paths...)
 	file, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ztest.Read: cannot read %v: %v", path, err)
 	}
 	return file
+}
+
+// Write data to a file.
+func Write(t *testing.T, data []byte, paths ...string) {
+	t.Helper()
+	path := filepath.Join(paths...)
+	if err := os.WriteFile(path, data, 0o777); err != nil {
+		t.Fatalf("ztest.Write: cannot write to %v: %v", path, err)
+	}
+}
+
+// Chmod a file
+func Chmod(t *testing.T, mode fs.FileMode, paths ...string) {
+	t.Helper()
+	path := filepath.Join(paths...)
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatalf("ztest.Chmod(%q): %s", path, err)
+	}
 }
 
 // TempFile creates a new temporary file and returns the path.
