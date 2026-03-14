@@ -22,6 +22,9 @@ unreleased
 
 - Support `ssl_min_protocol_version` and `ssl_max_protocol_version` ([#1277]).
 
+- Support `sslrootcert=system` and use `~/.postgresql/root.crt` as the default
+  value of sslrootcert ([#1280], [#1281]).
+
 ### Fixes
 
 - Fix SSL key permission check to allow modes stricter than 0600/0640#1265 ([#1265]).
@@ -41,6 +44,8 @@ unreleased
 [#1272]: https://github.com/lib/pq/pull/1272
 [#1277]: https://github.com/lib/pq/pull/1277
 [#1278]: https://github.com/lib/pq/pull/1278
+[#1280]: https://github.com/lib/pq/pull/1280
+[#1281]: https://github.com/lib/pq/pull/1281
 
 v1.11.2 (2026-02-10)
 --------------------

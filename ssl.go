@@ -65,13 +65,14 @@ func getTLSConfigClone(key string) *tls.Config {
 // in case of sslmode=allow or prefer.
 func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 	var (
+		home = pqutil.Home()
 		// Don't set defaults here, because tlsConf may be overwritten if a
 		// custom one was registered. Set it after the sslmode switch.
-		tlsConf      = &tls.Config{}
+		tlsConf = &tls.Config{}
+		// Only verify the CA signing but not the hostname.
 		verifyCaOnly = false
-		home         = pqutil.Home()
 	)
-	if mode.ssl() && !cfg.SSLInline && cfg.SSLRootCert == "" && home != "" {
+	if mode.useSSL() && !cfg.SSLInline && cfg.SSLRootCert == "" && home != "" {
 		f := filepath.Join(home, "root.crt")
 		if _, err := os.Stat(f); err == nil {
 			cfg.SSLRootCert = f
@@ -99,7 +100,7 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 				verifyCaOnly = true
 			} else if _, err := os.Stat(cfg.SSLRootCert); err == nil {
 				verifyCaOnly = true
-			} else {
+			} else if cfg.SSLRootCert != "system" {
 				cfg.SSLRootCert = ""
 			}
 		}
@@ -230,10 +231,18 @@ func sslClientCertificates(tlsConf *tls.Config, cfg Config, home string) error {
 	return nil
 }
 
+var testSystemRoots *x509.CertPool
+
 // sslCertificateAuthority adds the RootCA specified in the "sslrootcert" setting.
 func sslCertificateAuthority(tlsConf *tls.Config, cfg Config) ([]byte, error) {
 	// Only load root certificate if not blank, like libpq.
 	if cfg.SSLRootCert == "" {
+		return nil, nil
+	}
+
+	if cfg.SSLRootCert == "system" {
+		// No work to do as system CAs are used by default if RootCAs is nil.
+		tlsConf.RootCAs = testSystemRoots
 		return nil, nil
 	}
 

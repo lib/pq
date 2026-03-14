@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"fmt"
 	"io"
@@ -419,6 +420,45 @@ func TestSSLDefaults(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestRootCA(t *testing.T) {
+	startSSLTest(t, "pqgossl")
+
+	// TODO: can remove this once https://github.com/lib/pq/pull/1271 is merged.
+	os.Unsetenv("PGSSLMODE")
+	t.Cleanup(func() {
+		os.Setenv("PGSSLMODE", "disable")
+		testSystemRoots = nil
+	})
+	testSystemRoots = x509.NewCertPool()
+	if !testSystemRoots.AppendCertsFromPEM(pqtest.Read(t, "testdata/init/root.crt")) {
+		t.Fatal()
+	}
+
+	tests := []struct {
+		connect string
+		wantErr string
+	}{
+		{"", ``},
+		{"sslmode=verify-full", ``},
+
+		{"sslmode=verify-ca", `weak sslmode`},
+		{"sslmode=disable", `weak sslmode`},
+		{"sslmode=allow", `weak sslmode`},
+	}
+
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			db := pqtest.MustDB(t, "host=postgres user=pqgossl sslrootcert=system "+tt.connect)
+			defer db.Close()
+
+			err := db.Ping()
+			if !pqtest.ErrorContains(err, tt.wantErr) {
+				t.Fatalf("wrong error:\nhave: %v\nwant: %s", err, tt.wantErr)
+			}
+		})
+	}
 }
 
 func TestUnreadableHome(t *testing.T) {
