@@ -350,14 +350,14 @@ func TestNewConfig(t *testing.T) {
 	}{
 		// Override defaults
 		{"", nil, "", ""},
-		{"user=u port=1 host=example.com", nil,
-			"host=example.com port=1 user=u", ""},
-		{"", []string{"PGUSER=u", "PGPORT=1", "PGHOST=example.com"},
-			"host=example.com port=1 user=u", ""},
+		{"user=u port=1 host=example.com sslmode=verify-ca", nil,
+			"host=example.com port=1 sslmode=verify-ca user=u", ""},
+		{"", []string{"PGUSER=u", "PGPORT=1", "PGHOST=example.com", "PGSSLMODE=verify-ca"},
+			"host=example.com port=1 sslmode=verify-ca user=u", ""},
 
 		// Socket
-		{"host=/var/run/psql", nil, "host=/var/run/psql sslmode=disable", ""},
-		{"host=@/var/run/psql", nil, "host=@/var/run/psql sslmode=disable", ""},
+		{"host=/var/run/psql", nil, "host=/var/run/psql", ""},
+		{"host=@/var/run/psql", nil, "host=@/var/run/psql", ""},
 		{"host=/var/run/psql sslmode=require", nil, "host=/var/run/psql sslmode=disable", ""},
 
 		// Empty value, value with space, and value with escaped \'

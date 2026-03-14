@@ -70,7 +70,6 @@ func DSN(conninfo string) string {
 		defaultTo("PGHOST", "localhost")
 		defaultTo("PGDATABASE", "pqgo")
 		defaultTo("PGUSER", "pqgo")
-		defaultTo("PGSSLMODE", "disable")
 		defaultTo("PGCONNECT_TIMEOUT", "20")
 	})
 

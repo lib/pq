@@ -526,6 +526,7 @@ func newConfig(dsn string, env []string) (Config, error) {
 		Host:               "localhost",
 		Port:               5432,
 		SSLSNI:             true,
+		SSLMode:            SSLModePrefer,
 		MinProtocolVersion: "3.0",
 		MaxProtocolVersion: "3.0",
 	}
@@ -981,7 +982,7 @@ func (cfg Config) string() string {
 		switch k {
 		case "datestyle", "client_encoding":
 			continue
-		case "host", "port", "user", "sslsni", "min_protocol_version", "max_protocol_version":
+		case "host", "port", "user", "sslsni", "sslmode", "min_protocol_version", "max_protocol_version":
 			if !cfg.isset(k) {
 				continue
 			}
