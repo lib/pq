@@ -70,7 +70,7 @@ const (
 var sslModes = []SSLMode{SSLModeDisable, SSLModeAllow, SSLModePrefer, SSLModeRequire,
 	SSLModeVerifyFull, SSLModeVerifyCA}
 
-func (s SSLMode) ssl() bool {
+func (s SSLMode) useSSL() bool {
 	switch s {
 	case SSLModePrefer, SSLModeRequire, SSLModeVerifyCA, SSLModeVerifyFull:
 		return true
@@ -321,6 +321,12 @@ type Config struct {
 	SSLKey string `postgres:"sslkey" env:"PGSSLKEY"`
 
 	// Path to root certificate. The file must contain PEM encoded data.
+	//
+	// The special value "system" can be used to load the system's root
+	// certificates ([x509.SystemCertPool]). This will change the default
+	// sslmode to verify-full and issue an error if a lower setting is used – as
+	// anyone can register a valid certificate hostname verification becomes
+	// essential.
 	//
 	// Defaults to ~/.postgresql/root.crt.
 	SSLRootCert string `postgres:"sslrootcert" env:"PGSSLROOTCERT"`
@@ -605,6 +611,16 @@ func newConfig(dsn string, env []string) (Config, error) {
 		case SSLModeDisable, SSLModeAllow, SSLModePrefer:
 			return Config{}, fmt.Errorf(
 				`pq: weak sslmode %q may not be used with sslnegotiation=direct (use "require", "verify-ca", or "verify-full")`,
+				cfg.SSLMode)
+		}
+	}
+	if cfg.SSLRootCert == "system" {
+		if !cfg.isset("sslmode") {
+			cfg.SSLMode = SSLModeVerifyFull
+		}
+		if cfg.SSLMode != SSLModeVerifyFull {
+			return Config{}, fmt.Errorf(
+				`pq: weak sslmode %q may not be used with sslrootcert=system (use "verify-full")`,
 				cfg.SSLMode)
 		}
 	}
