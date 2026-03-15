@@ -83,8 +83,7 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 		return nil, nil
 
 	case mode == "" || mode == SSLModeRequire || mode == SSLModePrefer:
-		// We must skip TLS's own verification since it requires full
-		// verification since Go 1.3.
+		// Skip TLS's own verification since it requires full verification.
 		tlsConf.InsecureSkipVerify = true
 
 		// From http://www.postgresql.org/docs/current/static/libpq-ssl.html:
@@ -105,8 +104,7 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 			}
 		}
 	case mode == SSLModeVerifyCA:
-		// We must skip TLS's own verification since it requires full
-		// verification since Go 1.3.
+		// Skip TLS's own verification since it requires full verification.
 		tlsConf.InsecureSkipVerify = true
 		verifyCaOnly = true
 	case mode == SSLModeVerifyFull:

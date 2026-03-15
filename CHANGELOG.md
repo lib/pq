@@ -1,11 +1,12 @@
 unreleased
 ----------
 
-### Deprecated features
+- The next release may change the default sslmode from `require` to `prefer`.
+  See [#1271]
 
 - `CopyIn()` and `CopyInToSchema()` have been marked as deprecated. These are
   simple query builders and not needed for `COPY [..] FROM STDIN` support (which
-  is *not* deprecated).
+  is *not* deprecated). ([#1279])
 
       // Old
       tx.Prepare(CopyIn("temp", "num", "text", "blob", "nothing"))
@@ -37,17 +38,20 @@ unreleased
 - Send intermediate CAs with client certificates, so they can be signed by an
   intermediate CA ([#1267]).
 
-- Use `time.UTC` for UTC alises such as `Etc/UTC` ([#1282]).
+- Use `time.UTC` for UTC aliases such as `Etc/UTC` ([#1282]).
 
 [#1258]: https://github.com/lib/pq/pull/1258
 [#1265]: https://github.com/lib/pq/pull/1265
 [#1267]: https://github.com/lib/pq/pull/1267
 [#1270]: https://github.com/lib/pq/pull/1270
+[#1271]: https://github.com/lib/pq/pull/1271
 [#1272]: https://github.com/lib/pq/pull/1272
 [#1277]: https://github.com/lib/pq/pull/1277
 [#1278]: https://github.com/lib/pq/pull/1278
+[#1279]: https://github.com/lib/pq/pull/1279
 [#1280]: https://github.com/lib/pq/pull/1280
 [#1281]: https://github.com/lib/pq/pull/1281
+[#1282]: https://github.com/lib/pq/pull/1282
 [#1283]: https://github.com/lib/pq/pull/1283
 
 v1.11.2 (2026-02-10)

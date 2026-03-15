@@ -408,7 +408,7 @@ func TestSSLDefaults(t *testing.T) {
 	})
 }
 
-func TestRootCA(t *testing.T) {
+func TestSSLRootCA(t *testing.T) {
 	startSSLTest(t, "pqgossl")
 
 	// TODO: can remove this once https://github.com/lib/pq/pull/1271 is merged.

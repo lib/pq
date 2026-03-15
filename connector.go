@@ -440,14 +440,13 @@ type ConfigMultihost struct {
 	Port     uint16
 }
 
-// NewConfig creates a new [Config] from the current environment and given DSN.
+// NewConfig creates a new [Config] from the defaults, environment, and DSN.
 //
-// A subset of the connection parameters supported by PostgreSQL are supported
-// by pq; see the [Config] struct fields for supported parameters. pq also lets
-// you specify any [run-time parameter] (such as search_path or work_mem)
-// directly in the connection string. This is different from libpq, which does
-// not allow run-time parameters in the connection string, instead requiring you
-// to supply them in the options parameter.
+// Most connection parameters supported by PostgreSQL are supported; see the
+// [Config] struct for supported parameters. pq also lets you specify any
+// [run-time parameter] such as search_path or work_mem in the connection
+// string. This is different from libpq, which uses the "options" parameter for
+// this (which also works in pq).
 //
 // # key=value connection strings
 //
@@ -486,8 +485,8 @@ type ConfigMultihost struct {
 // support are set. Environment variables have a lower precedence than
 // explicitly provided connection parameters.
 //
-// [run-time parameter]: http://www.postgresql.org/docs/current/static/runtime-config.html
 // [PostgreSQL environment variables]: http://www.postgresql.org/docs/current/static/libpq-envars.html
+// [run-time parameter]: http://www.postgresql.org/docs/current/static/runtime-config.html
 func NewConfig(dsn string) (Config, error) {
 	return newConfig(dsn, os.Environ())
 }

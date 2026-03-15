@@ -114,8 +114,6 @@ The channel name in both Listen and Unlisten is case sensitive, and can contain
 any characters legal in an [identifier]. Note that the channel name will be
 truncated to 63 bytes by the PostgreSQL server.
 
-You can find a complete, working example of Listener usage at [cmd/pqlisten].
-
 # Kerberos Support
 
 If you need support for Kerberos authentication, add the following to your main
@@ -130,7 +128,6 @@ package:
 This package is in a separate module so that users who don't need Kerberos don't
 have to add unnecessary dependencies.
 
-[cmd/pqlisten]: https://github.com/lib/pq/tree/master/cmd/pqlisten
 [identifier]: http://www.postgresql.org/docs/current/static/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS
 [NOTIFY]: http://www.postgresql.org/docs/current/static/sql-notify.html
 */
