@@ -66,6 +66,8 @@ func ParseURL(url string) (string, error) { return convertURL(url) }
 // NullTime represents a [time.Time] that may be null.
 //
 // Deprecated: this is an alias for [sql.NullTime].
+//
+//go:fix inline
 type NullTime = sql.NullTime
 
 // CopyIn creates a COPY FROM statement which can be prepared with Tx.Prepare().
