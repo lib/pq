@@ -401,3 +401,43 @@ func BenchmarkResultParsing(b *testing.B) {
 		res.Close()
 	}
 }
+
+func BenchmarkAppendEscapedText(b *testing.B) {
+	var longString strings.Builder
+	for i := 0; i < 100; i++ {
+		longString.WriteString("123456789\n")
+	}
+	for i := 0; i < b.N; i++ {
+		appendEscapedText(nil, longString.String())
+	}
+}
+
+func BenchmarkAppendEscapedTextNoEscape(b *testing.B) {
+	var longString strings.Builder
+	for i := 0; i < 100; i++ {
+		longString.WriteString("1234567890")
+	}
+	for i := 0; i < b.N; i++ {
+		appendEscapedText(nil, longString.String())
+	}
+}
+
+func BenchmarkDecodeUUIDBinary(b *testing.B) {
+	x := []byte{0x03, 0xa3, 0x52, 0x2f, 0x89, 0x28, 0x49, 0x87, 0x84, 0xd6, 0x93, 0x7b, 0x36, 0xec, 0x27, 0x6f}
+	for i := 0; i < b.N; i++ {
+		decodeUUIDBinary(x)
+	}
+}
+
+func Benchmark_writeBuf_string(b *testing.B) {
+	var buf writeBuf
+	const s = "foo"
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		buf.string(s)
+		buf.buf = buf.buf[:0]
+	}
+}

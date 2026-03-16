@@ -10,7 +10,8 @@ import (
 	"github.com/lib/pq/internal/pqtest"
 )
 
-func TestIssue1046(t *testing.T) {
+// #1046: stmt.QueryRowContext doesn't respect canceled context
+func TestQueryRowContext(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
 	defer db.Close()
@@ -39,7 +40,8 @@ func TestIssue1046(t *testing.T) {
 	}
 }
 
-func TestIssue1062(t *testing.T) {
+// #1062: drivers.ErrBadConn returned for DB.QueryRowContext.Scan when context is cancelled
+func TestQueryRowContextBad(t *testing.T) {
 	if !pqtest.Pgpool() {
 		t.Parallel()
 	}
