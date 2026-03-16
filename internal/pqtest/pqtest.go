@@ -177,5 +177,9 @@ func Query[T any](t testing.TB, db interface {
 		}
 		res = append(res, r)
 	}
+	err = rows.Close()
+	if err != nil {
+		t.Fatalf("pqtest.Query: %s", err)
+	}
 	return res
 }

@@ -73,11 +73,7 @@ func binaryDecode(s []byte, typ oid.Oid) (any, error) {
 	case oid.T_int2:
 		return int64(int16(binary.BigEndian.Uint16(s))), nil
 	case oid.T_uuid:
-		b, err := decodeUUIDBinary(s)
-		if err != nil {
-			err = errors.New("pq: " + err.Error())
-		}
-		return b, err
+		return decodeUUIDBinary(s)
 	default:
 		return nil, fmt.Errorf("pq: don't know how to decode binary parameter of type %d", uint32(typ))
 	}
@@ -97,7 +93,6 @@ func decodeUUIDBinary(src []byte) ([]byte, error) {
 	hex.Encode(dst[14:], src[6:8])
 	hex.Encode(dst[19:], src[8:10])
 	hex.Encode(dst[24:], src[10:16])
-
 	return dst, nil
 }
 
@@ -260,11 +255,6 @@ var (
 	infinityTSPositive time.Time
 )
 
-const (
-	infinityTSEnabledAlready        = "pq: infinity timestamp enabled already"
-	infinityTSNegativeMustBeSmaller = "pq: infinity timestamp: negative value must be smaller (before) than positive"
-)
-
 // EnableInfinityTs controls the handling of Postgres' "-infinity" and
 // "infinity" "timestamp"s.
 //
@@ -287,10 +277,10 @@ const (
 // panic.
 func EnableInfinityTs(negative time.Time, positive time.Time) {
 	if infinityTSEnabled {
-		panic(infinityTSEnabledAlready)
+		panic("pq: infinity timestamp already enabled")
 	}
 	if !negative.Before(positive) {
-		panic(infinityTSNegativeMustBeSmaller)
+		panic("pq: infinity timestamp: negative value must be smaller (before) than positive")
 	}
 	infinityTSEnabled = true
 	infinityTSNegative = negative
@@ -331,7 +321,7 @@ func parseTS(currentLocation *time.Location, str string) (any, error) {
 // Postgres server. Otherwise, ParseTimestamp returns a time.Time with the fixed
 // offset offset provided by the Postgres server.
 func ParseTimestamp(currentLocation *time.Location, str string) (time.Time, error) {
-	return pqtime.ParseTimestamp(currentLocation, str)
+	return pqtime.Parse(currentLocation, str)
 }
 
 // formatTS formats t into a format postgres understands.
@@ -351,36 +341,7 @@ func formatTS(t time.Time) []byte {
 
 // FormatTimestamp formats t into Postgres' text format for timestamps.
 func FormatTimestamp(t time.Time) []byte {
-	// Need to send dates before 0001 A.D. with " BC" suffix, instead of the
-	// minus sign preferred by Go.
-	// Beware, "0000" in ISO is "1 BC", "-0001" is "2 BC" and so on
-	bc := false
-	if t.Year() <= 0 {
-		// flip year sign, and add 1, e.g: "0" will be "1", and "-10" will be "11"
-		t = t.AddDate((-t.Year())*2+1, 0, 0)
-		bc = true
-	}
-	b := []byte(t.Format("2006-01-02 15:04:05.999999999Z07:00"))
-
-	_, offset := t.Zone()
-	offset %= 60
-	if offset != 0 {
-		// RFC3339Nano already printed the minus sign
-		if offset < 0 {
-			offset = -offset
-		}
-
-		b = append(b, ':')
-		if offset < 10 {
-			b = append(b, '0')
-		}
-		b = strconv.AppendInt(b, int64(offset), 10)
-	}
-
-	if bc {
-		b = append(b, " BC"...)
-	}
-	return b
+	return pqtime.Format(t)
 }
 
 // Parse a bytea value received from the server.  Both "hex" and the legacy
