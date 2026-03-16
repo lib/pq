@@ -18,11 +18,6 @@ import (
 	"github.com/lib/pq/internal/proto"
 )
 
-func openSSLConn(t *testing.T, conninfo ...string) (*sql.DB, error) {
-	db := pqtest.MustDB(t, conninfo...)
-	return db, db.Ping() // Do something with the connection to see if it's working
-}
-
 // Environment sanity check: should fail without SSL
 func startSSLTest(t *testing.T, user string) {
 	wantErr := `invalid_authorization_specification`
@@ -31,7 +26,7 @@ func startSSLTest(t *testing.T, user string) {
 	} else if pqtest.Pgpool() {
 		wantErr = "internal_error"
 	}
-	_, err := openSSLConn(t, "sslmode=disable user="+user)
+	_, err := pqtest.DB(t, "sslmode=disable user="+user)
 	pqErr := pqError(t, err)
 	if pqErr.Code.Name() != wantErr {
 		t.Fatalf("wrong error code %q", pqErr.Code.Name())
@@ -122,8 +117,7 @@ func TestSSLMode(t *testing.T) {
 				tt.wantErr = "login rejected"
 			}
 
-			_, err := openSSLConn(t, tt.connect)
-			t.Log(tt.connect)
+			_, err := pqtest.DB(t, tt.connect)
 			switch {
 			case tt.wantErr == "" && err != nil:
 				t.Fatalf("\nfailed for %q\n%s", tt.connect, err)
@@ -170,7 +164,7 @@ func TestSSLClientCertificates(t *testing.T) {
 		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
-			db, err := openSSLConn(t, tt.connect)
+			db, err := pqtest.DB(t, tt.connect)
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Fatalf("wrong error\nwant: %s\nhave: %s", tt.wantErr, err)
 			}
@@ -235,7 +229,7 @@ func TestSSLClientCertificateIntermediate(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			db, err := openSSLConn(t, tt.connect)
+			db, err := pqtest.DB(t, tt.connect)
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Fatalf("wrong error\nwant: %s\nhave: %s", tt.wantErr, err)
 			}
@@ -352,9 +346,7 @@ func TestSSLVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
-			db := pqtest.MustDB(t, "user=pqgossl "+tt.in)
-			defer db.Close()
-			err := db.Ping()
+			_, err := pqtest.DB(t, "user=pqgossl "+tt.in)
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Fatalf("wrong error: %v", err)
 			}
@@ -395,9 +387,7 @@ func TestSSLDefaults(t *testing.T) {
 				pqtest.Chmod(t, 0o600, pqutil.Home(), "postgresql.key")
 			}
 
-			db := pqtest.MustDB(t, "user=pqgossl sslmode=require")
-			defer db.Close()
-			err := db.Ping()
+			_, err := pqtest.DB(t, "user=pqgossl sslmode=require")
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Fatalf("wrong error:\nhave: %v\nwant: %s", err, tt.wantErr)
 			}
@@ -414,11 +404,7 @@ func TestSSLDefaults(t *testing.T) {
 		pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.crt"), pqutil.Home(), "postgresql.crt")
 		pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.key"), pqutil.Home(), "postgresql.key")
 		pqtest.Chmod(t, 0o600, pqutil.Home(), "postgresql.key")
-		db := pqtest.MustDB(t, "host=postgres user=pqgosslcert sslmode=verify-ca")
-		defer db.Close()
-		if err := db.Ping(); err != nil {
-			t.Fatal(err)
-		}
+		_ = pqtest.MustDB(t, "host=postgres user=pqgosslcert sslmode=verify-ca")
 	})
 }
 
@@ -450,10 +436,7 @@ func TestRootCA(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
-			db := pqtest.MustDB(t, "host=postgres user=pqgossl sslrootcert=system "+tt.connect)
-			defer db.Close()
-
-			err := db.Ping()
+			_, err := pqtest.DB(t, "host=postgres user=pqgossl sslrootcert=system "+tt.connect)
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Fatalf("wrong error:\nhave: %v\nwant: %s", err, tt.wantErr)
 			}

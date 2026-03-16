@@ -82,20 +82,26 @@ func DSN(conninfo string) string {
 	return conninfo
 }
 
-// DB connects to the test database. The caller must call db.Close().
-func DB(conninfo ...string) (*sql.DB, error) {
-	return sql.Open("postgres", DSN(strings.Join(conninfo, " ")))
+// DB connects to the test database and returns the Ping error. The connection
+// is closed in t.Cleanup().
+func DB(t testing.TB, conninfo ...string) (*sql.DB, error) {
+	t.Helper()
+	db, err := sql.Open("postgres", DSN(strings.Join(conninfo, " ")))
+	if err != nil {
+		t.Fatalf("pqtest.DB: %s", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db, db.Ping()
 }
 
-// MustDB connects to the test database, calling t.Fatal() if this fails. The
-// connection is closed in t.Cleanup().
+// MustDB connects and pings the test database, calling t.Fatal() if this fails.
+// The connection is closed in t.Cleanup().
 func MustDB(t testing.TB, conninfo ...string) *sql.DB {
 	t.Helper()
-	db, err := DB(conninfo...)
+	db, err := DB(t, conninfo...)
 	if err != nil {
 		t.Fatalf("pqtest.MustDB: %s", err)
 	}
-	t.Cleanup(func() { db.Close() })
 	return db
 }
 

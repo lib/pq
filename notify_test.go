@@ -75,15 +75,12 @@ func newTestListenerConn(t *testing.T) (*ListenerConn, <-chan *Notification) {
 
 func TestNewListenerConn(t *testing.T) {
 	l, _ := newTestListenerConn(t)
-
 	defer l.Close()
 }
 
 func TestListenerConnListen(t *testing.T) {
 	l, channel := newTestListenerConn(t)
-
 	defer l.Close()
-
 	db := pqtest.MustDB(t)
 
 	ok, err := l.Listen("notify_test")
@@ -104,9 +101,7 @@ func TestListenerConnListen(t *testing.T) {
 
 func TestListenerConnUnlisten(t *testing.T) {
 	l, channel := newTestListenerConn(t)
-
 	defer l.Close()
-
 	db := pqtest.MustDB(t)
 
 	ok, err := l.Listen("notify_test")
@@ -142,9 +137,7 @@ func TestListenerConnUnlisten(t *testing.T) {
 
 func TestListenerConnUnlistenAll(t *testing.T) {
 	l, channel := newTestListenerConn(t)
-
 	defer l.Close()
-
 	db := pqtest.MustDB(t)
 
 	ok, err := l.Listen("notify_test")
@@ -270,10 +263,9 @@ func TestListenerConnCloseWhileQueryIsExecuting(t *testing.T) {
 }
 
 func TestListenerNotifyExtra(t *testing.T) {
-	db := pqtest.MustDB(t)
-
 	l, channel := newTestListenerConn(t)
 	defer l.Close()
+	db := pqtest.MustDB(t)
 
 	ok, err := l.Listen("notify_test")
 	if !ok || err != nil {
@@ -313,7 +305,6 @@ func newTestListener(t *testing.T) (*Listener, <-chan ListenerEventType) {
 func TestListenerListen(t *testing.T) {
 	l, _ := newTestListener(t)
 	defer l.Close()
-
 	db := pqtest.MustDB(t)
 
 	err := l.Listen("notify_listen_test")
@@ -335,7 +326,6 @@ func TestListenerListen(t *testing.T) {
 func TestListenerUnlisten(t *testing.T) {
 	l, _ := newTestListener(t)
 	defer l.Close()
-
 	db := pqtest.MustDB(t)
 
 	err := l.Listen("notify_listen_test")
@@ -372,7 +362,6 @@ func TestListenerUnlisten(t *testing.T) {
 func TestListenerUnlistenAll(t *testing.T) {
 	l, _ := newTestListener(t)
 	defer l.Close()
-
 	db := pqtest.MustDB(t)
 
 	err := l.Listen("notify_listen_test")
@@ -409,7 +398,6 @@ func TestListenerUnlistenAll(t *testing.T) {
 func TestListenerFailedQuery(t *testing.T) {
 	l, eventch := newTestListener(t)
 	defer l.Close()
-
 	db := pqtest.MustDB(t)
 
 	err := l.Listen("notify_listen_test")
@@ -456,7 +444,6 @@ func TestListenerFailedQuery(t *testing.T) {
 func TestListenerReconnect(t *testing.T) {
 	l, eventch := newTestListenerTimeout(t, 20*time.Millisecond, time.Hour)
 	defer l.Close()
-
 	db := pqtest.MustDB(t)
 
 	err := l.Listen("notify_listen_test")

@@ -88,13 +88,7 @@ func TestOpen(t *testing.T) {
 		t.Run(tt.dsn, func(t *testing.T) {
 			t.Parallel()
 
-			db, err := pqtest.DB(tt.dsn)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-
-			err = db.Ping()
+			_, err := pqtest.DB(t, tt.dsn)
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
 			}
@@ -580,9 +574,8 @@ func TestErrorDuringStartup(t *testing.T) {
 
 	// Don't use the normal connection setup, this is intended to blow up in the
 	// startup packet from a non-existent user.
-	db := pqtest.MustDB(t, "user=thisuserreallydoesntexist")
+	_, err := pqtest.DB(t, "user=thisuserreallydoesntexist")
 
-	_, err := db.Begin()
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -941,13 +934,7 @@ func TestSimpleQueryWithoutResponse(t *testing.T) {
 	})
 	defer f.Close()
 
-	db := pqtest.MustDB(t, f.DSN())
-	if err := db.Ping(); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Ping(); err != nil {
-		t.Fatal(err)
-	}
+	_ = pqtest.MustDB(t, f.DSN())
 }
 
 func TestBindError(t *testing.T) {
@@ -2116,9 +2103,7 @@ func TestAuth(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.conn, func(t *testing.T) {
-				db := pqtest.MustDB(t, tt.conn)
-
-				err := db.Ping()
+				_, err := pqtest.DB(t, tt.conn)
 				if !pqtest.ErrorContains(err, tt.wantErr) {
 					t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
 				}
@@ -2247,8 +2232,7 @@ func TestPreProtocolError(t *testing.T) {
 			})
 			defer f.Close()
 
-			db := pqtest.MustDB(t, f.DSN())
-			err := db.Ping()
+			_, err := pqtest.DB(t, f.DSN())
 			if err == nil {
 				t.Fatal("expected error")
 			}

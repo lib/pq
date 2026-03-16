@@ -123,11 +123,11 @@ func TestNewConnector(t *testing.T) {
 
 		// Make sure database= consistently take precedence over dbname=
 		for i := 0; i < 10; i++ {
-			err := pqtest.MustDB(t, "database=err").Ping()
+			_, err := pqtest.DB(t, "database=err")
 			if err == nil || err.Error() != want1 {
 				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, want1)
 			}
-			err = pqtest.MustDB(t, "dbname=one database=two").Ping()
+			_, err = pqtest.DB(t, "dbname=one database=two")
 			if err == nil || err.Error() != want2 {
 				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, want2)
 			}
@@ -237,11 +237,14 @@ func TestRuntimeParameters(t *testing.T) {
 				tt.wantErr = `unsupported startup parameter`
 			}
 
-			db := pqtest.MustDB(t, tt.conninfo)
+			db, err := pqtest.DB(t, tt.conninfo)
+			if !pqtest.ErrorContains(err, tt.wantErr) {
+				t.Fatalf("wrong error\nhave: %v\nwant: %v", err, tt.wantErr)
+			}
 
 			var have string
 			row := db.QueryRow("select current_setting($1)", tt.param)
-			err := row.Scan(&have)
+			err = row.Scan(&have)
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Fatalf("wrong error\nhave: %v\nwant: %v", err, tt.wantErr)
 			}
@@ -614,8 +617,7 @@ func TestConnectMulti(t *testing.T) {
 		t.Run("", func(t *testing.T) {
 			connectedTo = [3]bool{}
 
-			db := pqtest.MustDB(t, "connect_timeout=1 "+tt.dsn)
-			err := db.Ping()
+			_, err := pqtest.DB(t, "connect_timeout=1 "+tt.dsn)
 			if err != nil {
 				if tt.wantErr == nil {
 					t.Fatal(err)
@@ -651,13 +653,8 @@ func TestConnectMulti(t *testing.T) {
 		hosts := [3]int{}
 		for i := 0; i < 25; i++ {
 			connectedTo = [3]bool{}
-			db := pqtest.MustDB(t, fmt.Sprintf(
-				"host=%s,%s,%s port=%s,%s,%s load_balance_hosts=random", f1.Host(), f2.Host(), f3.Host(), f1.Port(), f2.Port(), f3.Port(),
-			))
-			err := db.Ping()
-			if err != nil {
-				t.Fatal(err)
-			}
+			_ = pqtest.MustDB(t, fmt.Sprintf("host=%s,%s,%s port=%s,%s,%s load_balance_hosts=random",
+				f1.Host(), f2.Host(), f3.Host(), f1.Port(), f2.Port(), f3.Port()))
 			if n := strings.Count(fmt.Sprintf("%v", connectedTo), "true"); n != 1 {
 				t.Fatal(connectedTo)
 			}
@@ -751,9 +748,7 @@ func TestConnectionTargetSessionAttrs(t *testing.T) {
 			})
 			defer f.Close()
 
-			db := pqtest.MustDB(t, f.DSN()+" "+tt.dsn)
-
-			err := db.Ping()
+			_, err := pqtest.DB(t, f.DSN()+" "+tt.dsn)
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Errorf("\nhave: %v\nwant: %v", err, tt.wantErr)
 			}
@@ -844,8 +839,7 @@ func TestProtocolVersion(t *testing.T) {
 				extra = append(extra, "max_protocol_version="+tt.max)
 			}
 
-			db := pqtest.MustDB(t, f.DSN()+" "+strings.Join(extra, " "))
-			err := db.Ping()
+			_, err := pqtest.DB(t, f.DSN()+" "+strings.Join(extra, " "))
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Fatalf("wrong error\nhave: %v\nwant: %v", err, tt.wantErr)
 			}
