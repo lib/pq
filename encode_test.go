@@ -38,6 +38,10 @@ func TestTimeScan(t *testing.T) {
 		{"timestamp", "2020-03-04 24:00:00", time.Date(2020, 3, 5, 0, 0, 0, 0, time.FixedZone("", 0))},
 		{"timestamptz", "2020-03-04 24:00:00+02", time.Date(2020, 3, 4, 22, 0, 0, 0, time.UTC)},
 		{"timestamptz", "2020-03-04 24:00:00-02", time.Date(2020, 3, 5, 2, 0, 0, 0, time.UTC)},
+
+		{"timestamptz", "2001-02-03T12:13:14 UTC", time.Date(2001, 2, 3, 12, 13, 14, 0, time.UTC)},
+		{"timestamptz", "2001-02-03T12:13:14 Etc/UTC", time.Date(2001, 2, 3, 12, 13, 14, 0, time.UTC)},
+		{"timestamptz", "2001-02-03T12:13:14 Asia/Makassar", time.Date(2001, 2, 3, 04, 13, 14, 0, time.UTC)},
 	}
 
 	db := pqtest.MustDB(t)
@@ -92,6 +96,18 @@ func TestTimeWithZone(t *testing.T) {
 			}
 		}
 	}
+
+	t.Run("UTC aliases", func(t *testing.T) {
+		for _, z := range []string{"UTC", "Etc/UTC", "Etc/Universal", "Etc/Zulu", "Etc/UCT"} {
+			t.Run(z, func(t *testing.T) {
+				have := pqtest.Query[time.Time](t, pqtest.MustDB(t, "timezone="+z),
+					`select '2001-02-03 12:13:14Z'::timestamptz`)[0]["timestamptz"]
+				if l := have.Location(); l != time.UTC {
+					t.Errorf("%s", l)
+				}
+			})
+		}
+	})
 }
 
 func TestTimeWithoutZone(t *testing.T) {

@@ -1561,10 +1561,15 @@ func (cn *conn) processParameterStatus(r *readBuf) {
 			cn.parameterStatus.serverVersion = major1*10000 + major2*100
 		}
 	case "TimeZone":
-		var err error
-		cn.parameterStatus.currentLocation, err = time.LoadLocation(r.string())
-		if err != nil {
-			cn.parameterStatus.currentLocation = nil
+		switch tz := r.string(); tz {
+		case "UTC", "Etc/UTC", "Etc/Universal", "Etc/Zulu", "Etc/UCT":
+			cn.parameterStatus.currentLocation = time.UTC
+		default:
+			var err error
+			cn.parameterStatus.currentLocation, err = time.LoadLocation(tz)
+			if err != nil {
+				cn.parameterStatus.currentLocation = nil
+			}
 		}
 	// Use sql.NullBool so we can distinguish between false and not sent. If
 	// it's not sent we use a query to get the value – I don't know when these

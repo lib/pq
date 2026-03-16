@@ -37,6 +37,8 @@ unreleased
 - Send intermediate CAs with client certificates, so they can be signed by an
   intermediate CA ([#1267]).
 
+- Use `time.UTC` for UTC alises such as `Etc/UTC` ([#1282]).
+
 [#1258]: https://github.com/lib/pq/pull/1258
 [#1265]: https://github.com/lib/pq/pull/1265
 [#1267]: https://github.com/lib/pq/pull/1267
@@ -46,6 +48,7 @@ unreleased
 [#1278]: https://github.com/lib/pq/pull/1278
 [#1280]: https://github.com/lib/pq/pull/1280
 [#1281]: https://github.com/lib/pq/pull/1281
+[#1283]: https://github.com/lib/pq/pull/1283
 
 v1.11.2 (2026-02-10)
 --------------------
