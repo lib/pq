@@ -5,6 +5,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -27,7 +28,7 @@ func (o OID) Name() string {
 }
 
 func main() {
-	db, err := pqtest.DB()
+	db, err := sql.Open("postgres", pqtest.DSN())
 	if err != nil {
 		log.Fatal(err)
 	}

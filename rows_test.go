@@ -294,9 +294,7 @@ func TestRowsClose(t *testing.T) {
 
 func TestRowsConcurrentUse(t *testing.T) {
 	t.Parallel()
-
 	db := pqtest.MustDB(t, "")
-	defer db.Close()
 
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {

@@ -27,7 +27,6 @@ func TestCopyInError(t *testing.T) {
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
 			db := pqtest.MustDB(t)
-			defer db.Close()
 			tx := pqtest.Begin(t, db)
 
 			pqtest.Exec(t, tx, `create temp table tbl (num integer)`)
@@ -48,7 +47,6 @@ func TestCopyInError(t *testing.T) {
 func TestCopyInErrorWrongType(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 	tx := pqtest.Begin(t, db)
 
 	pqtest.Exec(t, tx, `create temp table tbl (num integer)`)
@@ -72,7 +70,6 @@ func TestCopyInErrorWrongType(t *testing.T) {
 func TestCopyInErrorOutsideTransaction(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 
 	_, err := db.Prepare(`copy tbl (num) from stdin`)
 	if err != errCopyNotSupportedOutsideTxn {
@@ -83,7 +80,6 @@ func TestCopyInErrorOutsideTransaction(t *testing.T) {
 func TestCopyInQueryWhileCopy(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 	tx := pqtest.Begin(t, db)
 
 	pqtest.Exec(t, tx, `create temp table tbl (i int primary key)`)
@@ -112,7 +108,6 @@ func TestCopyInMultipleValues(t *testing.T) {
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
 			db := pqtest.MustDB(t)
-			defer db.Close()
 			tx := pqtest.Begin(t, db)
 
 			pqtest.Exec(t, tx, `create temp table tbl (a int, b varchar)`)
@@ -163,7 +158,6 @@ func TestCopyInMultipleValues(t *testing.T) {
 func TestCopyInRaiseStmtTrigger(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 	tx := pqtest.Begin(t, db)
 
 	pqtest.Exec(t, tx, `create temp table tbl (a int, b varchar)`)
@@ -210,7 +204,6 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 func TestCopyInTypes(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 	tx := pqtest.Begin(t, db)
 
 	pqtest.Exec(t, tx, `create temp table tbl (num integer, text varchar, blob bytea, nothing varchar)`)
@@ -264,7 +257,6 @@ func TestCopyInRespLoopConnectionError(t *testing.T) {
 
 	t.Parallel()
 	db := pqtest.MustDB(t)
-	defer db.Close()
 	tx := pqtest.Begin(t, db)
 
 	pid := pqtest.Query[int64](t, tx, `select pg_backend_pid() as pid`)
@@ -304,7 +296,6 @@ func TestCopyInRespLoopConnectionError(t *testing.T) {
 
 func BenchmarkCopyIn(b *testing.B) {
 	db := pqtest.MustDB(b)
-	defer db.Close()
 	tx := pqtest.Begin(b, db)
 
 	pqtest.Exec(b, tx, `create temp table tbl (a int, b varchar)`)
