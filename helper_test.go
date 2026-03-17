@@ -1,6 +1,7 @@
 package pq
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/lib/pq/internal/pqtest"
@@ -10,22 +11,19 @@ import (
 // Called for the side-effect of setting the environment.
 func init() { pqtest.DSN("") }
 
-const cancelErrorCode pqerror.Code = "57014"
-
-// pqError converts an error to *pq.Error, calling t.Fatal() if the error is nil
-// or if this fails.
+// mustAs calls As(), calling t.Fatal() if the error is nil or if this fails.
 //
 // This should probably be in pqtest, but can't right now due to import cycles,
 // and using pq_test package requires some refactoring as it refers to
 // unexported symbols.
-func pqError(t *testing.T, err error) *Error {
+func mustAs(t *testing.T, err error, codes ...pqerror.Code) *Error {
 	t.Helper()
-	if err == nil {
-		t.Fatalf("pqError: error is nil")
+	pqErr := As(err)
+	if pqErr == nil {
+		t.Fatalf("mustAs: not *pq.Error: %T", err)
 	}
-	pqErr, ok := err.(*Error)
-	if !ok {
-		t.Fatalf("wrong error %T: %[1]s", err)
+	if len(codes) > 0 && !slices.Contains(codes, pqErr.Code) {
+		t.Fatalf("mustAs: wrong error %q (code not one of %s)", pqErr.Error(), codes)
 	}
 	return pqErr
 }

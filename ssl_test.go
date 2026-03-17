@@ -27,7 +27,7 @@ func startSSLTest(t *testing.T, user string) {
 		wantErr = "internal_error"
 	}
 	_, err := pqtest.DB(t, "sslmode=disable user="+user)
-	pqErr := pqError(t, err)
+	pqErr := mustAs(t, err)
 	if pqErr.Code.Name() != wantErr {
 		t.Fatalf("wrong error code %q", pqErr.Code.Name())
 	}

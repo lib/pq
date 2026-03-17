@@ -3,11 +3,11 @@ package pq
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/lib/pq/internal/pqtest"
+	"github.com/lib/pq/pqerror"
 )
 
 // #1046: stmt.QueryRowContext doesn't respect canceled context
@@ -32,11 +32,7 @@ func TestQueryRowContext(t *testing.T) {
 		t.Logf("FAIL %s: query returned after context deadline: %v\n", t.Name(), since)
 		t.Fail()
 	}
-	if pgErr := (*Error)(nil); !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
-		t.Logf("ctx.Err(): [%T]%+v\n", ctx.Err(), ctx.Err())
-		t.Logf("got err: [%T] %+v expected errCode: %v", err, err, cancelErrorCode)
-		t.Fail()
-	}
+	mustAs(t, err, pqerror.QueryCanceled)
 }
 
 // #1062: drivers.ErrBadConn returned for DB.QueryRowContext.Scan when context is cancelled
@@ -55,10 +51,10 @@ func TestQueryRowContextBad(t *testing.T) {
 
 		var v int
 		err := row.Scan(&v)
-		if pgErr := (*Error)(nil); err != nil &&
-			err != context.Canceled &&
-			!(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
-			t.Fatalf("Scan resulted in unexpected error %v for canceled QueryRowContext at attempt %d", err, i+1)
+
+		// nil, context Canceled, and  QueryCancelled are all fine.
+		if err != nil && err != context.Canceled {
+			mustAs(t, err, pqerror.QueryCanceled)
 		}
 	}
 }
@@ -97,9 +93,8 @@ func TestQueryCancelRace(t *testing.T) {
 	row := db.QueryRowContext(ctx, "select pg_sleep(0.5)")
 	var pgSleepVoid string
 	err := row.Scan(&pgSleepVoid)
-	if pgErr := (*Error)(nil); !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
-		t.Fatalf("expected cancelled error; err=%#v", err)
-	}
+
+	mustAs(t, err, pqerror.QueryCanceled)
 
 	// get a connection: it must be a valid
 	connIsValid(t, db)

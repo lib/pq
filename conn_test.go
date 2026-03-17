@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -22,6 +21,7 @@ import (
 	"github.com/lib/pq/internal/pqtest"
 	"github.com/lib/pq/internal/pqutil"
 	"github.com/lib/pq/internal/proto"
+	"github.com/lib/pq/pqerror"
 )
 
 func TestReconnect(t *testing.T) {
@@ -59,14 +59,14 @@ func TestReconnect(t *testing.T) {
 func TestCommitInFailedTransaction(t *testing.T) {
 	db := pqtest.MustDB(t)
 
-	txn := pqtest.Begin(t, db)
+	tx := pqtest.Begin(t, db)
 
-	rows, err := txn.Query("SELECT error")
+	rows, err := tx.Query("select error")
 	if err == nil {
 		rows.Close()
 		t.Fatal("expected failure")
 	}
-	err = txn.Commit()
+	err = tx.Commit()
 	if err != ErrInFailedTransaction {
 		t.Fatalf("expected ErrInFailedTransaction; got %#v", err)
 	}
@@ -575,18 +575,7 @@ func TestErrorDuringStartup(t *testing.T) {
 	// Don't use the normal connection setup, this is intended to blow up in the
 	// startup packet from a non-existent user.
 	_, err := pqtest.DB(t, "user=thisuserreallydoesntexist")
-
-	if err == nil {
-		t.Fatal("expected error")
-	}
-
-	e, ok := err.(*Error)
-	if !ok {
-		t.Fatalf("wrong error type %T: %[1]s", err)
-	}
-	if e.Code.Name() != "invalid_authorization_specification" && e.Code.Name() != "invalid_password" {
-		t.Fatalf("wrong error code %q: %s", e.Code.Name(), err)
-	}
+	mustAs(t, err, pqerror.InvalidAuthorizationSpecification, pqerror.InvalidPassword)
 }
 
 type testConn struct {
@@ -685,17 +674,8 @@ func TestConnClose(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// During the Go 1.9 cycle, https://github.com/golang/go/commit/3792db5
-		// changed this error from
-		//
-		// net.errClosing = errors.New("use of closed network connection")
-		//
-		// to
-		//
-		// internal/poll.ErrClosing = errors.New("use of closed file or network connection")
-		const errClosing = "use of closed"
-
 		// Verify write after closing fails.
+		const errClosing = "use of closed"
 		_, err = nc.Write(nil)
 		if err == nil {
 			t.Fatal("expected error")
@@ -716,84 +696,33 @@ func TestConnClose(t *testing.T) {
 
 func TestErrorOnExec(t *testing.T) {
 	db := pqtest.MustDB(t)
+	tx := pqtest.Begin(t, db)
 
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer txn.Rollback()
+	pqtest.Exec(t, tx, `create temp table foo(f1 int primary key)`)
 
-	_, err = txn.Exec("CREATE TEMPORARY TABLE foo(f1 int PRIMARY KEY)")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = txn.Exec("INSERT INTO foo VALUES (0), (0)")
-	if err == nil {
-		t.Fatal("Should have raised error")
-	}
-
-	e, ok := err.(*Error)
-	if !ok {
-		t.Fatalf("expected Error, got %#v", err)
-	} else if e.Code.Name() != "unique_violation" {
-		t.Fatalf("expected unique_violation, got %s (%+v)", e.Code.Name(), err)
-	}
+	_, err := tx.Exec("insert into foo values (0), (0)")
+	mustAs(t, err, pqerror.UniqueViolation)
 }
 
 func TestErrorOnQuery(t *testing.T) {
 	db := pqtest.MustDB(t)
+	tx := pqtest.Begin(t, db)
 
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer txn.Rollback()
+	pqtest.Exec(t, tx, `create temp table foo(f1 int primary key)`)
 
-	_, err = txn.Exec("CREATE TEMPORARY TABLE foo(f1 int PRIMARY KEY)")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = txn.Query("INSERT INTO foo VALUES (0), (0)")
-	if err == nil {
-		t.Fatal("Should have raised error")
-	}
-
-	e, ok := err.(*Error)
-	if !ok {
-		t.Fatalf("expected Error, got %#v", err)
-	} else if e.Code.Name() != "unique_violation" {
-		t.Fatalf("expected unique_violation, got %s (%+v)", e.Code.Name(), err)
-	}
+	_, err := tx.Query("insert into foo values (0), (0)")
+	mustAs(t, err, pqerror.UniqueViolation)
 }
 
 func TestErrorOnQueryRowSimpleQuery(t *testing.T) {
 	db := pqtest.MustDB(t)
+	tx := pqtest.Begin(t, db)
 
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer txn.Rollback()
-
-	_, err = txn.Exec("CREATE TEMPORARY TABLE foo(f1 int PRIMARY KEY)")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Exec(t, tx, `create temp table foo(f1 int primary key)`)
 
 	var v int
-	err = txn.QueryRow("INSERT INTO foo VALUES (0), (0)").Scan(&v)
-	if err == nil {
-		t.Fatal("Should have raised error")
-	}
-
-	e, ok := err.(*Error)
-	if !ok {
-		t.Fatalf("expected Error, got %#v", err)
-	} else if e.Code.Name() != "unique_violation" {
-		t.Fatalf("expected unique_violation, got %s (%+v)", e.Code.Name(), err)
-	}
+	err := tx.QueryRow("insert into foo values (0), (0)").Scan(&v)
+	mustAs(t, err, pqerror.UniqueViolation)
 }
 
 // Test the QueryRow bug workarounds in stmt.exec() and simpleQuery()
@@ -807,53 +736,25 @@ func TestQueryRowBugWorkaround(t *testing.T) {
 	}
 
 	var a string
-	err = db.QueryRow("INSERT INTO notnulltemp(a) values($1) RETURNING a", nil).Scan(&a)
-	if err == sql.ErrNoRows {
-		t.Fatalf("expected constraint violation error; got: %v", err)
-	}
-	pge, ok := err.(*Error)
-	if !ok {
-		t.Fatalf("expected *Error; got: %#v", err)
-	}
-	if pge.Code.Name() != "not_null_violation" {
-		t.Fatalf("expected not_null_violation; got: %s (%+v)", pge.Code.Name(), err)
-	}
+	err = db.QueryRow("insert into notnulltemp(a) values($1) returning a", nil).Scan(&a)
+	mustAs(t, err, pqerror.NotNullViolation)
 
 	// Test workaround in simpleQuery()
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("unexpected error %s in Begin", err)
-	}
-	defer tx.Rollback()
+	tx := pqtest.Begin(t, db)
 
-	_, err = tx.Exec("SET LOCAL check_function_bodies TO FALSE")
-	if err != nil {
-		t.Fatalf("could not disable check_function_bodies: %s", err)
-	}
-	_, err = tx.Exec(`
-		CREATE OR REPLACE FUNCTION bad_function()
-		RETURNS integer
+	pqtest.Exec(t, tx, `set local check_function_bodies to false`)
+	pqtest.Exec(t, tx, `
+		create or replace function bad_function()
+		returns integer
 		-- hack to prevent the function from being inlined
-		SET check_function_bodies TO TRUE
-		AS $$
-			SELECT text 'bad'
-		$$ LANGUAGE sql
+		set check_function_bodies to true
+		as $$
+			select text 'bad'
+		$$ language sql
 	`)
-	if err != nil {
-		t.Fatalf("could not create function: %s", err)
-	}
 
-	err = tx.QueryRow("SELECT * FROM bad_function()").Scan(&a)
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-	pge, ok = err.(*Error)
-	if !ok {
-		t.Fatalf("expected *Error; got: %#v", err)
-	}
-	if pge.Code.Name() != "invalid_function_definition" {
-		t.Fatalf("expected invalid_function_definition; got: %s (%+v)", pge.Code.Name(), err)
-	}
+	err = tx.QueryRow("select * from bad_function()").Scan(&a)
+	mustAs(t, err, pqerror.InvalidFunctionDefinition)
 
 	err = tx.Rollback()
 	if err != nil {
@@ -885,13 +786,7 @@ func TestQueryRowBugWorkaround(t *testing.T) {
 	if rows.Next() {
 		t.Fatalf("unexpected row")
 	}
-	pge, ok = rows.Err().(*Error)
-	if !ok {
-		t.Fatalf("expected *Error; got: %#v", err)
-	}
-	if pge.Code.Name() != "cardinality_violation" {
-		t.Fatalf("expected cardinality_violation; got: %s (%+v)", pge.Code.Name(), rows.Err())
-	}
+	mustAs(t, rows.Err(), pqerror.CardinalityViolation)
 }
 
 func TestSimpleQuery(t *testing.T) {
@@ -963,14 +858,10 @@ func TestParseErrorInExtendedQuery(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
 
-	_, err := db.Query("PARSE_ERROR $1", 1)
-	pqErr, _ := err.(*Error)
-	// Expecting a syntax error.
-	if err == nil || pqErr == nil || pqErr.Code != "42601" {
-		t.Fatalf("expected syntax error, got %s", err)
-	}
+	_, err := db.Query("parse_error $1", 1)
+	mustAs(t, err, pqerror.SyntaxError)
 
-	rows, err := db.Query("SELECT 1")
+	rows, err := db.Query("select 1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -987,8 +878,7 @@ func TestReturning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rows, err := db.Query("INSERT INTO distributors (did, dname) VALUES (DEFAULT, 'XYZ Widgets') " +
-		"RETURNING did;")
+	rows, err := db.Query("INSERT INTO distributors (did, dname) VALUES (DEFAULT, 'XYZ Widgets') RETURNING did;")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1314,19 +1204,16 @@ func TestErrorClass(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
 
-	_, err := db.Query("SELECT int 'notint'")
-	if err == nil {
+	_, err := db.Query("select int 'notint'")
+	pqErr := As(err)
+	if pqErr == nil {
 		t.Fatal("expected error")
 	}
-	pge, ok := err.(*Error)
-	if !ok {
-		t.Fatalf("expected *pq.Error, got %#+v", err)
+	if pqErr.Code.Class() != "22" {
+		t.Fatalf("expected class 28, got %v", pqErr.Code.Class())
 	}
-	if pge.Code.Class() != "22" {
-		t.Fatalf("expected class 28, got %v", pge.Code.Class())
-	}
-	if pge.Code.Class().Name() != "data_exception" {
-		t.Fatalf("expected data_exception, got %v", pge.Code.Class().Name())
+	if pqErr.Code.Class().Name() != "data_exception" {
+		t.Fatalf("expected data_exception, got %v", pqErr.Code.Class().Name())
 	}
 }
 
@@ -1534,31 +1421,26 @@ func TestConnPrepareContext(t *testing.T) {
 
 func TestStmtQueryContext(t *testing.T) {
 	tests := []struct {
-		name       string
-		ctx        func() (context.Context, context.CancelFunc)
-		sql        string
-		wantCancel bool
+		sql     string
+		ctx     func() (context.Context, context.CancelFunc)
+		wantErr string
 	}{
-		{
-			name: "context.WithTimeout exceeded",
-			ctx: func() (context.Context, context.CancelFunc) {
+		{"select pg_sleep(1)",
+			func() (context.Context, context.CancelFunc) {
 				return context.WithTimeout(context.Background(), 50*time.Millisecond)
 			},
-			sql:        "select pg_sleep(1)",
-			wantCancel: true,
+			`pq: canceling statement due to user request (57014)`,
 		},
-		{
-			name: "context.WithTimeout",
-			ctx: func() (context.Context, context.CancelFunc) {
+		{"select pg_sleep(0.05)",
+			func() (context.Context, context.CancelFunc) {
 				return context.WithTimeout(context.Background(), time.Minute)
 			},
-			sql:        "select pg_sleep(0.05)",
-			wantCancel: false,
+			``,
 		},
 	}
 	for _, tt := range tests {
 		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run("", func(t *testing.T) {
 			if !pqtest.Pgpool() {
 				t.Parallel()
 			}
@@ -1566,20 +1448,15 @@ func TestStmtQueryContext(t *testing.T) {
 			db := pqtest.MustDB(t)
 
 			ctx, cancel := tt.ctx()
-			if cancel != nil {
-				defer cancel()
-			}
+			defer cancel()
+
 			stmt, err := db.PrepareContext(ctx, tt.sql)
 			if err != nil {
 				t.Fatal(err)
 			}
 			_, err = stmt.QueryContext(ctx)
-			pgErr := (*Error)(nil)
-			switch {
-			case (err != nil) != tt.wantCancel:
-				t.Fatalf("stmt.QueryContext() unexpected nil err got = %v, wantCancel = %v", err, tt.wantCancel)
-			case (err != nil && tt.wantCancel) && !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode):
-				t.Errorf("stmt.QueryContext() got = %v, wantCancel = %v", err.Error(), tt.wantCancel)
+			if !pqtest.ErrorContains(err, tt.wantErr) {
+				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
 			}
 		})
 	}
@@ -1587,31 +1464,26 @@ func TestStmtQueryContext(t *testing.T) {
 
 func TestStmtExecContext(t *testing.T) {
 	tests := []struct {
-		name       string
-		ctx        func() (context.Context, context.CancelFunc)
-		sql        string
-		wantCancel bool
+		sql     string
+		ctx     func() (context.Context, context.CancelFunc)
+		wantErr string
 	}{
-		{
-			name: "context.WithTimeout exceeded",
-			ctx: func() (context.Context, context.CancelFunc) {
+		{"select pg_sleep(1)",
+			func() (context.Context, context.CancelFunc) {
 				return context.WithTimeout(context.Background(), 50*time.Millisecond)
 			},
-			sql:        "select pg_sleep(1)",
-			wantCancel: true,
+			`pq: canceling statement due to user request (57014)`,
 		},
-		{
-			name: "context.WithTimeout",
-			ctx: func() (context.Context, context.CancelFunc) {
+		{"select pg_sleep(0.05)",
+			func() (context.Context, context.CancelFunc) {
 				return context.WithTimeout(context.Background(), time.Minute)
 			},
-			sql:        "select pg_sleep(0.05)",
-			wantCancel: false,
+			``,
 		},
 	}
 	for _, tt := range tests {
 		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run("", func(t *testing.T) {
 			if !pqtest.Pgpool() {
 				t.Parallel()
 			}
@@ -1619,20 +1491,15 @@ func TestStmtExecContext(t *testing.T) {
 			db := pqtest.MustDB(t)
 
 			ctx, cancel := tt.ctx()
-			if cancel != nil {
-				defer cancel()
-			}
+			defer cancel()
+
 			stmt, err := db.PrepareContext(ctx, tt.sql)
 			if err != nil {
 				t.Fatal(err)
 			}
 			_, err = stmt.ExecContext(ctx)
-			pgErr := (*Error)(nil)
-			switch {
-			case (err != nil) != tt.wantCancel:
-				t.Fatalf("stmt.QueryContext() unexpected nil err got = %v, wantCancel = %v", err, tt.wantCancel)
-			case (err != nil && tt.wantCancel) && !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode):
-				t.Errorf("stmt.QueryContext() got = %v, wantCancel = %v", err.Error(), tt.wantCancel)
+			if !pqtest.ErrorContains(err, tt.wantErr) {
+				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
 			}
 		})
 	}
@@ -1712,11 +1579,8 @@ func TestContextCancelExec(t *testing.T) {
 	defer time.AfterFunc(time.Millisecond*10, cancel).Stop()
 
 	// Not canceled until after the exec has started.
-	if _, err := db.ExecContext(ctx, "select pg_sleep(1)"); err == nil {
-		t.Fatal("expected error")
-	} else if pgErr := (*Error)(nil); !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
-		t.Fatalf("unexpected error: %s", err)
-	}
+	_, err := db.ExecContext(ctx, "select pg_sleep(1)")
+	mustAs(t, err, pqerror.QueryCanceled)
 
 	// Context is already canceled, so error should come before execution.
 	if _, err := db.ExecContext(ctx, "select pg_sleep(1)"); err == nil {
@@ -1751,11 +1615,8 @@ func TestContextCancelQuery(t *testing.T) {
 	defer time.AfterFunc(time.Millisecond*10, cancel).Stop()
 
 	// Not canceled until after the exec has started.
-	if _, err := db.QueryContext(ctx, "select pg_sleep(1)"); err == nil {
-		t.Fatal("expected error")
-	} else if pgErr := (*Error)(nil); !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
-		t.Fatalf("unexpected error: %s", err)
-	}
+	_, err := db.QueryContext(ctx, "select pg_sleep(1)")
+	mustAs(t, err, pqerror.QueryCanceled)
 
 	// Context is already canceled, so error should come before execution.
 	if _, err := db.QueryContext(ctx, "select pg_sleep(1)"); err == nil {
@@ -1797,11 +1658,7 @@ func TestIssue617(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			_, err := db.QueryContext(ctx, `SELECT * FROM DOESNOTEXIST`)
-			pqErr, _ := err.(*Error)
-			// Expecting "pq: relation \"doesnotexist\" does not exist" error.
-			if err == nil || pqErr == nil || pqErr.Code != "42P01" {
-				t.Fatalf("expected undefined table error, got %v", err)
-			}
+			mustAs(t, err, pqerror.UndefinedTable)
 		}()
 	}
 
@@ -1841,11 +1698,8 @@ func TestContextCancelBegin(t *testing.T) {
 	defer time.AfterFunc(time.Millisecond*10, cancel).Stop()
 
 	// Not canceled until after the exec has started.
-	if _, err := tx.Exec("select pg_sleep(1)"); err == nil {
-		t.Fatal("expected error")
-	} else if pgErr := (*Error)(nil); !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) {
-		t.Fatalf("unexpected error: %s", err)
-	}
+	_, err = tx.Exec("select pg_sleep(1)")
+	mustAs(t, err, pqerror.QueryCanceled)
 
 	// Transaction is canceled, so expect an error.
 	if _, err := tx.Query("select pg_sleep(1)"); err == nil {
@@ -1868,10 +1722,10 @@ func TestContextCancelBegin(t *testing.T) {
 			cancel()
 			if err != nil {
 				t.Fatal(err)
-			} else if err, pgErr := tx.Rollback(), (*Error)(nil); err != nil &&
-				!(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode) &&
-				err != sql.ErrTxDone && err != driver.ErrBadConn && err != context.Canceled {
-				t.Fatal(err)
+			}
+			err = tx.Rollback()
+			if err != nil && err != sql.ErrTxDone && err != driver.ErrBadConn && err != context.Canceled {
+				mustAs(t, err, pqerror.QueryCanceled)
 			}
 		}()
 
