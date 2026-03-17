@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/lib/pq/internal/pqtest"
+	"github.com/lib/pq/pqerror"
 )
 
 func TestErrorSQLState(t *testing.T) {
@@ -140,7 +142,7 @@ func TestError(t *testing.T) {
 				t.Errorf("\nhave: %s\nwant: %s", err.Error(), tt.want)
 			}
 			tt.wantDetail = pqtest.NormalizeIndent(tt.wantDetail)
-			if pqErr.Query != "" && pqErr.Position != "" {
+			if pqErr.query != "" && pqErr.Position != "" {
 				tt.wantDetail += "\n"
 			}
 			if pqErr.ErrorWithDetail() != tt.wantDetail {
@@ -148,45 +150,6 @@ func TestError(t *testing.T) {
 			}
 		})
 	}
-}
-
-func BenchmarkError(b *testing.B) {
-	db := pqtest.MustDB(b)
-	_, err := db.Exec(pqtest.NormalizeIndent(`
-		create table browsers (
-			browser_id     serial,
-			name           varchar,
-			version        varchar
-		);
-		create unique index "browsers#name#version" on browsers(name, version);
-
-		create table systems (
-			system_id      serial,
-			name           varchar,
-			version        varchar,
-		);
-		create unique index "systems#name#version"  on systems(name, version);
-	`))
-	if err == nil {
-		b.Fatal("err is nil?")
-	}
-
-	b.ResetTimer()
-	b.Run("error", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			_ = err.Error()
-		}
-	})
-	b.Run("errorWithDetail", func(b *testing.B) {
-		pqErr := new(Error)
-		if !errors.As(err, &pqErr) {
-			b.Fatalf("not pq.Error: %T", err)
-		}
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			_ = pqErr.ErrorWithDetail()
-		}
-	})
 }
 
 type (
@@ -297,4 +260,96 @@ func TestNetworkError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestAs(t *testing.T) {
+	tests := []struct {
+		err        error
+		codes      []pqerror.Code
+		wantReturn bool
+	}{
+		{nil, nil, false},
+		{nil, []pqerror.Code{pqerror.SyntaxError}, false},
+		{errors.New("oh noes"), []pqerror.Code{pqerror.SyntaxError}, false},
+		{&Error{Code: "00000", Message: "okay"}, nil, true},
+
+		{&Error{Code: "00000", Message: "okay"}, []pqerror.Code{pqerror.SyntaxError}, false},
+		{&Error{Code: "00000", Message: "okay"}, []pqerror.Code{pqerror.SyntaxError, pqerror.SuccessfulCompletion}, true},
+	}
+
+	t.Parallel()
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			have := As(tt.err, tt.codes...)
+			if tt.wantReturn {
+				if !reflect.DeepEqual(have, tt.err) {
+					t.Errorf("\nhave: %#v\nwant: %#v", have, tt.err)
+				}
+			} else {
+				if have != nil {
+					t.Errorf("expected return to be nil, but have:\n%#v", have)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkError(b *testing.B) {
+	db := pqtest.MustDB(b)
+	_, err := db.Exec(pqtest.NormalizeIndent(`
+		create table browsers (
+			browser_id     serial,
+			name           varchar,
+			version        varchar
+		);
+		create unique index "browsers#name#version" on browsers(name, version);
+
+		create table systems (
+			system_id      serial,
+			name           varchar,
+			version        varchar,
+		);
+		create unique index "systems#name#version"  on systems(name, version);
+	`))
+	if err == nil {
+		b.Fatal("err is nil?")
+	}
+
+	b.ResetTimer()
+	b.Run("error", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = err.Error()
+		}
+	})
+	b.Run("errorWithDetail", func(b *testing.B) {
+		pqErr := new(Error)
+		if !errors.As(err, &pqErr) {
+			b.Fatalf("not pq.Error: %T", err)
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = pqErr.ErrorWithDetail()
+		}
+	})
+}
+
+func BenchmarkAs(b *testing.B) {
+	b.Run("nil", func(b *testing.B) {
+		var nilerr error
+		for i := 0; i < b.N; i++ {
+			_ = As(nilerr, pqerror.SuccessfulCompletion)
+		}
+	})
+	b.Run("other error", func(b *testing.B) {
+		patherr := &os.PathError{}
+		for i := 0; i < b.N; i++ {
+			_ = As(patherr, pqerror.SuccessfulCompletion)
+		}
+	})
+	b.Run("pq.Error", func(b *testing.B) {
+		pqerr := &Error{Code: "00000", Message: "okay"}
+		for i := 0; i < b.N; i++ {
+			_ = As(pqerr, pqerror.SuccessfulCompletion)
+		}
+	})
 }

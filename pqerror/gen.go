@@ -109,12 +109,12 @@ func main() {
 		class := strings.HasSuffix(sqlstate, "000")
 
 		if class {
-			fmt.Fprintf(out, "\tClass%s = ErrorClass(%q) // %s\n", name, sqlstate[:2], section[11:])
+			fmt.Fprintf(out, "\tClass%s = Class(%q) // %s\n", name, sqlstate[:2], section[11:])
 		}
 
 		fmt.Fprintf(names, "\t%q: %q,\n", sqlstate, spec)
 
-		fmt.Fprintf(codes, "\t%s = ErrorCode(%q)", name, sqlstate)
+		fmt.Fprintf(codes, "\t%s = Code(%q)", name, sqlstate)
 		if class {
 			fmt.Fprintf(codes, " // %s", section)
 		}
@@ -130,7 +130,7 @@ func main() {
 	out.Write(codes.Bytes())
 	out.WriteString(")\n\n")
 
-	out.WriteString("var errorCodeNames = map[ErrorCode]string{\n")
+	out.WriteString("var errorCodeNames = map[Code]string{\n")
 	out.Write(names.Bytes())
 	out.WriteString("}\n")
 

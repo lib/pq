@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+	"github.com/lib/pq/pqerror"
 )
 
 func Example_open() {
@@ -338,4 +339,21 @@ func ExampleListener() {
 	// notification on "coconut" with data "got a lovely bunch"
 	// notification on "banana" with data "yellow and curvy"
 	// nil notify: closing Listener
+}
+
+func ExampleAs() {
+	db, err := sql.Open("postgres", "")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	email := "hello@example.com"
+
+	_, err = db.Exec("insert into t (email) values ($1)", email)
+	if pqErr := pq.As(err, pqerror.UniqueViolation); pqErr != nil {
+		log.Fatalf("email %q already exsts", email)
+	}
+	if err != nil {
+		log.Fatalf("unknown error: %s", err)
+	}
 }
