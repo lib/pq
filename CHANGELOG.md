@@ -32,14 +32,13 @@ unreleased
 
   For example, to test if an error is a UNIQUE constraint violation:
 
-      pqErr, ok := pq.AsType[*pq.Error](err)
-      if ok && pqErr.Code == pqerror.UniqueViolation {
+      if pqErr, ok := errors.AsType[*pq.Error](err); ok && pqErr.Code == pqerror.UniqueViolation {
           log.Fatalf("email %q already exsts", email)
       }
 
-  To make this a bit more convenient, it also adds a pqerror.As() function:
+  To make this a bit more convenient, it also adds a `pq.As()` function:
 
-      pqErr := pqerror.As(err, pqerror.UniqueViolation)
+      pqErr := pq.As(err, pqerror.UniqueViolation)
       if pqErr != nil {
           log.Fatalf("email %q already exsts", email)
       }
@@ -73,7 +72,6 @@ unreleased
 [#1282]: https://github.com/lib/pq/pull/1282
 [#1283]: https://github.com/lib/pq/pull/1283
 [#1285]: https://github.com/lib/pq/pull/1285
-
 
 v1.11.2 (2026-02-10)
 --------------------

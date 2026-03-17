@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"github.com/lib/pq/internal/pqtest"
+	"github.com/lib/pq/pqerror"
 )
 
 // Called for the side-effect of setting the environment.
 func init() { pqtest.DSN("") }
 
-const cancelErrorCode ErrorCode = "57014"
+const cancelErrorCode pqerror.Code = "57014"
 
 // pqError converts an error to *pq.Error, calling t.Fatal() if the error is nil
 // or if this fails.

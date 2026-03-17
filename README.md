@@ -90,8 +90,17 @@ The libpq way (which also works in pq) is to use `options='-c k=v'` like so:
 
 Errors
 ------
-Errors from PostgreSQL are returned as [pq.Error]; the Error() string contains
-the error message and code:
+Errors from PostgreSQL are returned as [pq.Error]; [pq.As] can be used to
+convert an error to `pq.Error`:
+
+```go
+pqErr := pq.As(err, pqerror.UniqueViolation)
+if pqErr != nil {
+  return fmt.Errorf("email %q already exsts", email)
+}
+```
+
+the Error() string contains the error message and code:
 
     pq: duplicate key value violates unique constraint "users_lower_idx" (23505)
 
@@ -118,6 +127,7 @@ It contains the context where this error occurred:
                      ^
 
 [pq.Error]: https://pkg.go.dev/github.com/lib/pq#Error
+[pq.As]: https://pkg.go.dev/github.com/lib/pq#As
 
 PostgreSQL features
 -------------------

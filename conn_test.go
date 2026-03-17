@@ -642,7 +642,7 @@ func TestErrorDuringStartupClosesConn(t *testing.T) {
 
 func TestBadConn(t *testing.T) {
 	t.Parallel()
-	for _, tt := range []error{io.EOF, &Error{Severity: Efatal}} {
+	for _, tt := range []error{io.EOF, &Error{Severity: pqerror.SeverityFatal}} {
 		t.Run(fmt.Sprintf("%s", tt), func(t *testing.T) {
 			var cn conn
 			err := cn.handleError(tt)
