@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/lib/pq/internal/pqutil"
 )
 
 func Pgbouncer() bool { return os.Getenv("PGPORT") == "6432" }
@@ -53,7 +55,7 @@ func InvalidCertificate(err error) bool {
 
 // Ptr gets a pointer to any value.
 //
-// TODO: replace with new(..) once pq requires Go 1.26.
+// TODO(go1.26): replace with new(..) once pq requires Go 1.26.
 func Ptr[T any](t T) *T {
 	return &t
 }
@@ -80,6 +82,17 @@ func DSN(conninfo string) string {
 		conninfo += " binary_parameters=yes"
 	}
 	return conninfo
+}
+
+// Home sets the HOME directory to a temporary directly and makes sure the
+// .postgresql directory exists.
+func Home(t *testing.T) string {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	if err := os.MkdirAll(pqutil.Home(), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	return pqutil.Home()
 }
 
 // DB connects to the test database and returns the Ping error. The connection

@@ -29,10 +29,10 @@ func SSLKeyPermissions(sslkey string) error {
 		return err
 	}
 
-	return checkPermissions(fi)
+	return CheckPermissions(fi)
 }
 
-func checkPermissions(fi os.FileInfo) error {
+func CheckPermissions(fi os.FileInfo) error {
 	// The maximum permissions that a private key file owned by a regular user
 	// is allowed to have. This translates to u=rw. Regardless of if we're
 	// running as root or not, 0600 is acceptable, so we return if no bits
