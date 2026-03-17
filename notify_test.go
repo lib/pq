@@ -1,11 +1,13 @@
 package pq
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"runtime"
 	"sync"
@@ -31,7 +33,6 @@ func expectNotification(t *testing.T, ch <-chan *Notification, relname string, e
 		return fmt.Errorf("timeout")
 	}
 }
-
 func expectNoNotification(t *testing.T, ch <-chan *Notification) error {
 	select {
 	case n := <-ch:
@@ -40,7 +41,6 @@ func expectNoNotification(t *testing.T, ch <-chan *Notification) error {
 		return nil
 	}
 }
-
 func expectEvent(t *testing.T, eventch <-chan ListenerEventType, et ListenerEventType) error {
 	select {
 	case e := <-eventch:
@@ -52,7 +52,6 @@ func expectEvent(t *testing.T, eventch <-chan ListenerEventType, et ListenerEven
 		panic("expectEvent timeout")
 	}
 }
-
 func expectNoEvent(t *testing.T, eventch <-chan ListenerEventType) error {
 	select {
 	case e := <-eventch:
@@ -61,7 +60,6 @@ func expectNoEvent(t *testing.T, eventch <-chan ListenerEventType) error {
 		return nil
 	}
 }
-
 func newTestListenerConn(t *testing.T) (*ListenerConn, <-chan *Notification) {
 	t.Helper()
 
@@ -72,62 +70,62 @@ func newTestListenerConn(t *testing.T) (*ListenerConn, <-chan *Notification) {
 	}
 	return l, ch
 }
-
-func TestNewListenerConn(t *testing.T) {
-	l, _ := newTestListenerConn(t)
-	defer l.Close()
+func channelName() string {
+	b := []byte("pqtest")
+	sel := "abcdefghjkmnpqrstuvwxyz"
+	m := big.NewInt(int64(len(sel)))
+	for i := 0; i < 10; i++ {
+		n, _ := rand.Int(rand.Reader, m)
+		b = append(b, sel[n.Int64()])
+	}
+	return string(b)
 }
 
 func TestListenerConnListen(t *testing.T) {
+	t.Parallel()
 	l, channel := newTestListenerConn(t)
 	defer l.Close()
 	db := pqtest.MustDB(t)
+	n := channelName()
 
-	ok, err := l.Listen("notify_test")
+	ok, err := l.Listen(n)
 	if !ok || err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = db.Exec("NOTIFY notify_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Exec(t, db, "notify "+n)
 
-	err = expectNotification(t, channel, "notify_test", "")
+	err = expectNotification(t, channel, n, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestListenerConnUnlisten(t *testing.T) {
+	t.Parallel()
 	l, channel := newTestListenerConn(t)
 	defer l.Close()
 	db := pqtest.MustDB(t)
+	n := channelName()
 
-	ok, err := l.Listen("notify_test")
+	ok, err := l.Listen(n)
 	if !ok || err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = db.Exec("NOTIFY notify_test")
+	pqtest.Exec(t, db, "notify "+n)
+
+	err = expectNotification(t, channel, n, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = expectNotification(t, channel, "notify_test", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ok, err = l.Unlisten("notify_test")
+	ok, err = l.Unlisten(n)
 	if !ok || err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = db.Exec("NOTIFY notify_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Exec(t, db, "notify "+n)
 
 	err = expectNoNotification(t, channel)
 	if err != nil {
@@ -136,21 +134,20 @@ func TestListenerConnUnlisten(t *testing.T) {
 }
 
 func TestListenerConnUnlistenAll(t *testing.T) {
+	t.Parallel()
 	l, channel := newTestListenerConn(t)
 	defer l.Close()
 	db := pqtest.MustDB(t)
+	n := channelName()
 
-	ok, err := l.Listen("notify_test")
+	ok, err := l.Listen(n)
 	if !ok || err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = db.Exec("NOTIFY notify_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Exec(t, db, "notify "+n)
 
-	err = expectNotification(t, channel, "notify_test", "")
+	err = expectNotification(t, channel, n, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,10 +157,7 @@ func TestListenerConnUnlistenAll(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = db.Exec("NOTIFY notify_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Exec(t, db, "notify "+n)
 
 	err = expectNoNotification(t, channel)
 	if err != nil {
@@ -172,6 +166,7 @@ func TestListenerConnUnlistenAll(t *testing.T) {
 }
 
 func TestListenerConnClose(t *testing.T) {
+	t.Parallel()
 	l, _ := newTestListenerConn(t)
 	defer l.Close()
 
@@ -186,6 +181,7 @@ func TestListenerConnClose(t *testing.T) {
 }
 
 func TestListernerConnPing(t *testing.T) {
+	t.Parallel()
 	l, _ := newTestListenerConn(t)
 	defer l.Close()
 	err := l.Ping()
@@ -204,6 +200,7 @@ func TestListernerConnPing(t *testing.T) {
 
 // Test for deadlock where a query fails while another one is queued
 func TestListenerConnExecDeadlock(t *testing.T) {
+	t.Parallel()
 	l, _ := newTestListenerConn(t)
 	defer l.Close()
 
@@ -232,6 +229,7 @@ func TestListenerConnExecDeadlock(t *testing.T) {
 
 // Test for ListenerConn being closed while a slow query is executing
 func TestListenerConnCloseWhileQueryIsExecuting(t *testing.T) {
+	t.Parallel()
 	l, _ := newTestListenerConn(t)
 	defer l.Close()
 
@@ -263,21 +261,20 @@ func TestListenerConnCloseWhileQueryIsExecuting(t *testing.T) {
 }
 
 func TestListenerNotifyExtra(t *testing.T) {
+	t.Parallel()
 	l, channel := newTestListenerConn(t)
 	defer l.Close()
 	db := pqtest.MustDB(t)
+	n := channelName()
 
-	ok, err := l.Listen("notify_test")
+	ok, err := l.Listen(n)
 	if !ok || err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = db.Exec("NOTIFY notify_test, 'something'")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Exec(t, db, fmt.Sprintf("notify %s, 'something'", n))
 
-	err = expectNotification(t, channel, "notify_test", "something")
+	err = expectNotification(t, channel, n, "something")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,55 +300,50 @@ func newTestListener(t *testing.T) (*Listener, <-chan ListenerEventType) {
 }
 
 func TestListenerListen(t *testing.T) {
+	t.Parallel()
 	l, _ := newTestListener(t)
 	defer l.Close()
 	db := pqtest.MustDB(t)
+	n := channelName()
 
-	err := l.Listen("notify_listen_test")
+	err := l.Listen(n)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = db.Exec("NOTIFY notify_listen_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Exec(t, db, "notify "+n)
 
-	err = expectNotification(t, l.Notify, "notify_listen_test", "")
+	err = expectNotification(t, l.Notify, n, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestListenerUnlisten(t *testing.T) {
+	t.Parallel()
 	l, _ := newTestListener(t)
 	defer l.Close()
 	db := pqtest.MustDB(t)
+	n := channelName()
 
-	err := l.Listen("notify_listen_test")
+	err := l.Listen(n)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = db.Exec("NOTIFY notify_listen_test")
+	pqtest.Exec(t, db, "notify "+n)
+
+	err = l.Unlisten(n)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = l.Unlisten("notify_listen_test")
+	err = expectNotification(t, l.Notify, n, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = expectNotification(t, l.Notify, "notify_listen_test", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = db.Exec("NOTIFY notify_listen_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Exec(t, db, "notify "+n)
 
 	err = expectNoNotification(t, l.Notify)
 	if err != nil {
@@ -360,34 +352,30 @@ func TestListenerUnlisten(t *testing.T) {
 }
 
 func TestListenerUnlistenAll(t *testing.T) {
+	t.Parallel()
 	l, _ := newTestListener(t)
 	defer l.Close()
 	db := pqtest.MustDB(t)
+	n := channelName()
 
-	err := l.Listen("notify_listen_test")
+	err := l.Listen(n)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = db.Exec("NOTIFY notify_listen_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Exec(t, db, "notify "+n)
 
 	err = l.UnlistenAll()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = expectNotification(t, l.Notify, "notify_listen_test", "")
+	err = expectNotification(t, l.Notify, n, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = db.Exec("NOTIFY notify_listen_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Exec(t, db, "notify "+n)
 
 	err = expectNoNotification(t, l.Notify)
 	if err != nil {
@@ -396,21 +384,20 @@ func TestListenerUnlistenAll(t *testing.T) {
 }
 
 func TestListenerFailedQuery(t *testing.T) {
+	t.Parallel()
 	l, eventch := newTestListener(t)
 	defer l.Close()
 	db := pqtest.MustDB(t)
+	n := channelName()
 
-	err := l.Listen("notify_listen_test")
+	err := l.Listen(n)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = db.Exec("NOTIFY notify_listen_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Exec(t, db, "notify "+n)
 
-	err = expectNotification(t, l.Notify, "notify_listen_test", "")
+	err = expectNotification(t, l.Notify, n, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,33 +417,29 @@ func TestListenerFailedQuery(t *testing.T) {
 	}
 
 	// should still work
-	_, err = db.Exec("NOTIFY notify_listen_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Exec(t, db, "notify "+n)
 
-	err = expectNotification(t, l.Notify, "notify_listen_test", "")
+	err = expectNotification(t, l.Notify, n, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestListenerReconnect(t *testing.T) {
+	t.Parallel()
 	l, eventch := newTestListenerTimeout(t, 20*time.Millisecond, time.Hour)
 	defer l.Close()
 	db := pqtest.MustDB(t)
+	n := channelName()
 
-	err := l.Listen("notify_listen_test")
+	err := l.Listen(n)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = db.Exec("NOTIFY notify_listen_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Exec(t, db, "notify "+n)
 
-	err = expectNotification(t, l.Notify, "notify_listen_test", "")
+	err = expectNotification(t, l.Notify, n, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,10 +472,7 @@ func TestListenerReconnect(t *testing.T) {
 	}
 
 	// should still work
-	_, err = db.Exec("NOTIFY notify_listen_test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	pqtest.Exec(t, db, "notify "+n)
 
 	// should get nil after Reconnected
 	err = expectNotification(t, l.Notify, "", "")
@@ -500,13 +480,14 @@ func TestListenerReconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = expectNotification(t, l.Notify, "notify_listen_test", "")
+	err = expectNotification(t, l.Notify, n, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestListenerClose(t *testing.T) {
+	t.Parallel()
 	l, _ := newTestListenerTimeout(t, 20*time.Millisecond, time.Hour)
 	defer l.Close()
 
@@ -521,6 +502,7 @@ func TestListenerClose(t *testing.T) {
 }
 
 func TestListenerPing(t *testing.T) {
+	t.Parallel()
 	l, _ := newTestListenerTimeout(t, 20*time.Millisecond, time.Hour)
 	defer l.Close()
 

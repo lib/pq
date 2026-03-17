@@ -15,11 +15,11 @@ func TestQueryRowContext(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
 
-	ctxTimeout := time.Second * 2
+	ctxTimeout := time.Millisecond * 50
 	ctx, cancel := context.WithTimeout(context.Background(), ctxTimeout)
 	defer cancel()
 
-	stmt, err := db.PrepareContext(ctx, `SELECT pg_sleep(10) AS id`)
+	stmt, err := db.PrepareContext(ctx, `SELECT pg_sleep(1) AS id`)
 	if err != nil {
 		t.Fatal(err)
 	}

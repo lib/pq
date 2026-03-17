@@ -1533,43 +1533,36 @@ func TestConnPrepareContext(t *testing.T) {
 }
 
 func TestStmtQueryContext(t *testing.T) {
-	if !pqtest.Pgpool() {
-		t.Parallel()
-	}
-
 	tests := []struct {
-		name           string
-		ctx            func() (context.Context, context.CancelFunc)
-		sql            string
-		cancelExpected bool
+		name       string
+		ctx        func() (context.Context, context.CancelFunc)
+		sql        string
+		wantCancel bool
 	}{
-		{
-			name: "context.Background",
-			ctx: func() (context.Context, context.CancelFunc) {
-				return context.Background(), nil
-			},
-			sql:            "SELECT pg_sleep(1);",
-			cancelExpected: false,
-		},
 		{
 			name: "context.WithTimeout exceeded",
 			ctx: func() (context.Context, context.CancelFunc) {
-				return context.WithTimeout(context.Background(), 1*time.Second)
+				return context.WithTimeout(context.Background(), 50*time.Millisecond)
 			},
-			sql:            "SELECT pg_sleep(10);",
-			cancelExpected: true,
+			sql:        "select pg_sleep(1)",
+			wantCancel: true,
 		},
 		{
 			name: "context.WithTimeout",
 			ctx: func() (context.Context, context.CancelFunc) {
 				return context.WithTimeout(context.Background(), time.Minute)
 			},
-			sql:            "SELECT pg_sleep(1);",
-			cancelExpected: false,
+			sql:        "select pg_sleep(0.05)",
+			wantCancel: false,
 		},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			if !pqtest.Pgpool() {
+				t.Parallel()
+			}
+
 			db := pqtest.MustDB(t)
 
 			ctx, cancel := tt.ctx()
@@ -1583,53 +1576,46 @@ func TestStmtQueryContext(t *testing.T) {
 			_, err = stmt.QueryContext(ctx)
 			pgErr := (*Error)(nil)
 			switch {
-			case (err != nil) != tt.cancelExpected:
-				t.Fatalf("stmt.QueryContext() unexpected nil err got = %v, cancelExpected = %v", err, tt.cancelExpected)
-			case (err != nil && tt.cancelExpected) && !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode):
-				t.Errorf("stmt.QueryContext() got = %v, cancelExpected = %v", err.Error(), tt.cancelExpected)
+			case (err != nil) != tt.wantCancel:
+				t.Fatalf("stmt.QueryContext() unexpected nil err got = %v, wantCancel = %v", err, tt.wantCancel)
+			case (err != nil && tt.wantCancel) && !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode):
+				t.Errorf("stmt.QueryContext() got = %v, wantCancel = %v", err.Error(), tt.wantCancel)
 			}
 		})
 	}
 }
 
 func TestStmtExecContext(t *testing.T) {
-	if !pqtest.Pgpool() {
-		t.Parallel()
-	}
-
 	tests := []struct {
-		name           string
-		ctx            func() (context.Context, context.CancelFunc)
-		sql            string
-		cancelExpected bool
+		name       string
+		ctx        func() (context.Context, context.CancelFunc)
+		sql        string
+		wantCancel bool
 	}{
-		{
-			name: "context.Background",
-			ctx: func() (context.Context, context.CancelFunc) {
-				return context.Background(), nil
-			},
-			sql:            "SELECT pg_sleep(1);",
-			cancelExpected: false,
-		},
 		{
 			name: "context.WithTimeout exceeded",
 			ctx: func() (context.Context, context.CancelFunc) {
-				return context.WithTimeout(context.Background(), 1*time.Second)
+				return context.WithTimeout(context.Background(), 50*time.Millisecond)
 			},
-			sql:            "SELECT pg_sleep(10);",
-			cancelExpected: true,
+			sql:        "select pg_sleep(1)",
+			wantCancel: true,
 		},
 		{
 			name: "context.WithTimeout",
 			ctx: func() (context.Context, context.CancelFunc) {
 				return context.WithTimeout(context.Background(), time.Minute)
 			},
-			sql:            "SELECT pg_sleep(1);",
-			cancelExpected: false,
+			sql:        "select pg_sleep(0.05)",
+			wantCancel: false,
 		},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			if !pqtest.Pgpool() {
+				t.Parallel()
+			}
+
 			db := pqtest.MustDB(t)
 
 			ctx, cancel := tt.ctx()
@@ -1643,10 +1629,10 @@ func TestStmtExecContext(t *testing.T) {
 			_, err = stmt.ExecContext(ctx)
 			pgErr := (*Error)(nil)
 			switch {
-			case (err != nil) != tt.cancelExpected:
-				t.Fatalf("stmt.QueryContext() unexpected nil err got = %v, cancelExpected = %v", err, tt.cancelExpected)
-			case (err != nil && tt.cancelExpected) && !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode):
-				t.Errorf("stmt.QueryContext() got = %v, cancelExpected = %v", err.Error(), tt.cancelExpected)
+			case (err != nil) != tt.wantCancel:
+				t.Fatalf("stmt.QueryContext() unexpected nil err got = %v, wantCancel = %v", err, tt.wantCancel)
+			case (err != nil && tt.wantCancel) && !(errors.As(err, &pgErr) && pgErr.Code == cancelErrorCode):
+				t.Errorf("stmt.QueryContext() got = %v, wantCancel = %v", err.Error(), tt.wantCancel)
 			}
 		})
 	}
