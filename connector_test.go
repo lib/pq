@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -845,6 +847,84 @@ func TestProtocolVersion(t *testing.T) {
 			}
 			if tt.wantErr == "" && !reflect.DeepEqual(*have, tt.wantKey) {
 				t.Fatalf("wrong keydata\nhave: %v\nwant: %v", *have, tt.wantKey)
+			}
+		})
+	}
+}
+
+func TestService(t *testing.T) {
+	h := pqtest.Home(t)
+	if runtime.GOOS != "windows" {
+		h = filepath.Dir(h)
+	}
+
+	// Test without ~/.pg_service.conf existing
+	t.Run("default file doesn't exist", func(t *testing.T) {
+		cfg, err := NewConfig("service=svc1")
+		if wantErr := fmt.Sprintf(`pq: service file "%s/.pg_service.conf" not found`, h); !pqtest.ErrorContains(err, wantErr) {
+			t.Fatalf("wrong error\nhave: %v\nwant: %v", err, wantErr)
+		}
+		if have := cfg.string(); have != "" {
+			t.Errorf("\nhave: %q\nwant: %q", have, "")
+		}
+	})
+
+	tests := []struct {
+		connect string
+		env     map[string]string
+		want    string
+		wantErr string
+	}{
+		{"service=doesntexist", nil, ``, `definition of service "doesntexist" not found`},
+		{"service=svc1", nil, `connect_timeout=20 dbname=xyz host=firsthost port=1234 service=svc1 sslmode=disable user=pqgo`, ``},
+		{"service=svc2", nil, `connect_timeout=20 dbname='with space' host=localhost service=svc2 sslmode=disable user=''`, ``},
+		{"service=svc3", nil, ``, `pq: unknown setting "unknown" in service file for service "svc3"`},
+		{"service=svc4", nil, `connect_timeout=20 dbname=pqgo host=localhost service=svc4 sslmode=disable user=pqgo`, ``},
+		{"service=svc5", nil, `connect_timeout=20 dbname=pqgo host=localhost service=svc5 sslmode=disable user=pqgo`, ``},
+
+		{"service=svc5", map[string]string{"PGSERVICEFILE": "none"}, ``, `service file "none" not found`},
+		{"service=svc1", map[string]string{"PGSERVICEFILE": filepath.Join(h, "other")}, ``, `definition of service "svc1" not found`},
+		{"service=other", map[string]string{"PGSERVICEFILE": filepath.Join(h, "other")},
+			`connect_timeout=20 dbname=other host=localhost service=other sslmode=disable user=pqgo`, ``},
+	}
+
+	pqtest.Write(t, []byte("[other]\ndbname=other"), h, "other")
+	pqtest.Write(t, []byte(`
+		[svc1]
+		# Connect to this instead.
+		host=firsthost
+		dbname = xyz
+		port=1234
+
+		[svc2]
+		user=
+		dbname=with space
+
+		[svc3]
+		unknown=wut
+
+		# Empty
+		[svc4]
+		[svc5]
+	`), h, ".pg_service.conf")
+
+	// pgbouncer sets PGPORT; not really used to just unset.
+	// TODO: might want to add pqtest.Clearenv() or the like.
+	t.Setenv("PGPORT", "")
+	os.Unsetenv("PGPORT")
+
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+
+			cfg, err := NewConfig(tt.connect)
+			if !pqtest.ErrorContains(err, tt.wantErr) {
+				t.Fatalf("wrong error\nhave: %v\nwant: %v", err, tt.wantErr)
+			}
+			if have := cfg.string(); have != tt.want {
+				t.Errorf("\nhave: %q\nwant: %q", have, tt.want)
 			}
 		})
 	}

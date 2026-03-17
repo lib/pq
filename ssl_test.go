@@ -372,10 +372,7 @@ func TestSSLDefaults(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
-			if err := os.MkdirAll(pqutil.Home(), 0o777); err != nil {
-				t.Fatal(err)
-			}
+			pqtest.Home(t)
 
 			pqtest.Write(t, []byte("invalid data"), pqutil.Home(), tt.file)
 			if tt.file == "postgresql.crt" {
@@ -395,11 +392,7 @@ func TestSSLDefaults(t *testing.T) {
 	}
 
 	t.Run("work with default paths", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
-		if err := os.MkdirAll(pqutil.Home(), 0o777); err != nil {
-			t.Fatal(err)
-		}
-
+		pqtest.Home(t)
 		pqtest.Write(t, pqtest.Read(t, "testdata/init/root.crt"), pqutil.Home(), "root.crt")
 		pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.crt"), pqutil.Home(), "postgresql.crt")
 		pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.key"), pqutil.Home(), "postgresql.key")

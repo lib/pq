@@ -1,6 +1,6 @@
 //go:build !windows && !plan9
 
-package pqutil
+package pqutil_test
 
 import (
 	"os"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lib/pq/internal/pqtest"
+	. "github.com/lib/pq/internal/pqutil"
 )
 
 type statWrapper struct{ stat syscall.Stat_t }
@@ -54,7 +55,7 @@ func TestSSLKeyPermissions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
-			have := checkPermissions(&statWrapper{stat: tt.stat})
+			have := CheckPermissions(&statWrapper{stat: tt.stat})
 			if !pqtest.ErrorContains(have, tt.wantErr) {
 				t.Errorf("\nhave: %s\nwant: %s", have, tt.wantErr)
 			}

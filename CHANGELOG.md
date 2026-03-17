@@ -23,6 +23,8 @@ unreleased
 
 - Support `ssl_min_protocol_version` and `ssl_max_protocol_version` ([#1277]).
 
+- Support connection service file to load connection details ([#1285]).
+
 - Support `sslrootcert=system` and use `~/.postgresql/root.crt` as the default
   value of sslrootcert ([#1280], [#1281]).
 
@@ -53,6 +55,7 @@ unreleased
 [#1281]: https://github.com/lib/pq/pull/1281
 [#1282]: https://github.com/lib/pq/pull/1282
 [#1283]: https://github.com/lib/pq/pull/1283
+[#1285]: https://github.com/lib/pq/pull/1285
 
 v1.11.2 (2026-02-10)
 --------------------

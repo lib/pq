@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/lib/pq/internal/pgservice"
 	"github.com/lib/pq/internal/pqutil"
 	"github.com/lib/pq/internal/proto"
 )
@@ -412,6 +414,23 @@ type Config struct {
 	// Maximum PostgreSQL protocol version to request from the server. Defaults to "3.0".
 	MaxProtocolVersion ProtocolVersion `postgres:"max_protocol_version" env:"PGMAXPROTOCOLVERSION"`
 
+	// Load connection parameters from the service file at ~/.pg_service.conf
+	// (which can be configured with PGSERVICEFILE).
+	//
+	// The service file is a INI-like file to configure connection parameters:
+	//
+	//   [servicename]
+	//   # Comment
+	//   dbname=foo
+	//
+	// Unlike libpq, this does not look at the system-wide service file, as the
+	// location of this is a compile-time value that is not easy for pq to
+	// retrieve.
+	Service string `postgres:"service" env:"PGSERVICE"`
+
+	// Path to connection service file. Defaults to ~/.pg_service.conf.
+	ServiceFile string `postgres:"-" env:"PGSERVICEFILE"`
+
 	// Runtime parameters: any unrecognized parameter in the DSN will be added
 	// to this and sent to PostgreSQL during startup.
 	Runtime map[string]string `postgres:"-" env:"-"`
@@ -440,7 +459,10 @@ type ConfigMultihost struct {
 	Port     uint16
 }
 
-// NewConfig creates a new [Config] from the defaults, environment, and DSN.
+// NewConfig creates a new [Config] from the defaults, environment, service
+// file, and DSN, in that order. That is: a service overrides any value from the
+// environment, which in turn gets overridden by the same parameter in the
+// connection string.
 //
 // Most connection parameters supported by PostgreSQL are supported; see the
 // [Config] struct for supported parameters. pq also lets you specify any
@@ -532,6 +554,9 @@ func newConfig(dsn string, env []string) (Config, error) {
 		return Config{}, err
 	}
 	if err := cfg.fromDSN(dsn); err != nil {
+		return Config{}, err
+	}
+	if err := cfg.fromService(); err != nil {
 		return Config{}, err
 	}
 
@@ -650,7 +675,7 @@ func (cfg *Config) fromEnv(env []string) error {
 		switch k {
 		case "PGREQUIRESSL", "PGSSLCOMPRESSION", // Deprecated.
 			"PGREALM", "PGGSSENCMODE", "PGGSSDELEGATION", "PGGSSLIB", // krb stuff
-			"PGREQUIREAUTH", "PGCHANNELBINDING", "PGSERVICE", "PGSERVICEFILE",
+			"PGREQUIREAUTH", "PGCHANNELBINDING",
 			"PGSSLCERTMODE", "PGSSLCRL", "PGSSLCRLDIR", "PGREQUIREPEER":
 			return fmt.Errorf("pq: environment variable $%s is not supported", k)
 		case "PGKRBSRVNAME":
@@ -660,7 +685,7 @@ func (cfg *Config) fromEnv(env []string) error {
 		}
 		e[k] = v
 	}
-	return cfg.setFromTag(e, "env")
+	return cfg.setFromTag(e, "env", false)
 }
 
 // parseOpts parses the options from name and adds them to the values.
@@ -766,10 +791,31 @@ func (cfg *Config) fromDSN(dsn string) error {
 		opt[string(keyRunes)] = string(valRunes)
 	}
 
-	return cfg.setFromTag(opt, "postgres")
+	return cfg.setFromTag(opt, "postgres", false)
 }
 
-func (cfg *Config) setFromTag(o map[string]string, tag string) error {
+func (cfg *Config) fromService() error {
+	if cfg.Service == "" {
+		return nil
+	}
+
+	if !cfg.isset("PGSERVICEFILE") {
+		if home := pqutil.Home(); home != "" {
+			if runtime.GOOS != "windows" {
+				home = filepath.Dir(home) // Unlike other files this uses ~/ and not ~/.postgresql
+			}
+			cfg.ServiceFile = filepath.Join(home, ".pg_service.conf")
+		}
+	}
+
+	opts, err := pgservice.FindService(cfg.ServiceFile, cfg.Service)
+	if err != nil {
+		return fmt.Errorf("pq: %w", err)
+	}
+	return cfg.setFromTag(opts, "postgres", true)
+}
+
+func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) error {
 	f := "pq: wrong value for %q: "
 	if tag == "env" {
 		f = "pq: wrong value for $%s: "
@@ -803,7 +849,11 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 		v, ok := o[k]
 		delete(o, k)
 		if ok {
-			if t, ok := rt.Tag.Lookup("postgres"); ok && t != "" && t != "-" {
+			t, ok := rt.Tag.Lookup("postgres")
+			if !ok || t == "" || t == "-" { // For PGSERVICEFILE, which can only be from env
+				t, ok = rt.Tag.Lookup("env")
+			}
+			if ok && t != "" && t != "-" {
 				cfg.set = append(cfg.set, t)
 			}
 			switch rt.Type.Kind() {
@@ -903,8 +953,18 @@ func (cfg *Config) setFromTag(o map[string]string, tag string) error {
 		}
 	}
 
+	if service && len(o) > 0 {
+		// TODO(go1.23): use maps.Keys once we require Go 1.23.
+		var key string
+		for k := range o {
+			key = k
+			break
+		}
+		return fmt.Errorf("pq: unknown setting %q in service file for service %q", key, cfg.Service)
+	}
+
 	// Set run-time; we delete map keys as they're set in the struct.
-	if tag == "postgres" {
+	if !service && tag == "postgres" {
 		// Make sure database= sets dbname=, as that previously worked (kind of
 		// by accident).
 		// TODO(v2): remove
