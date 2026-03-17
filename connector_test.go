@@ -229,7 +229,6 @@ func TestRuntimeParameters(t *testing.T) {
 		{"fallback_application_name=bar", "application_name", "bar", "", false},
 	}
 
-	t.Parallel()
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			if tt.skipPgbouncer {
