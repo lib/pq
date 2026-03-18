@@ -161,6 +161,11 @@ func (rs *rows) ColumnTypeScanType(index int) reflect.Type {
 
 // ColumnTypeDatabaseTypeName return the database system type name.
 func (rs *rows) ColumnTypeDatabaseTypeName(index int) string {
+	if rs.cn.parameterStatus.isRedshift {
+		if n, ok := redshiftTypeName[rs.colTyps[index].OID]; ok {
+			return n
+		}
+	}
 	return rs.colTyps[index].Name()
 }
 
@@ -242,4 +247,27 @@ func (fd fieldDesc) PrecisionScale() (precision, scale int64, ok bool) {
 	default:
 		return 0, 0, false
 	}
+}
+
+var redshiftTypeName = map[oid.Oid]string{
+	86:   "PG_SHADOW",
+	87:   "PG_GROUP",
+	88:   "PG_DATABASE",
+	90:   "PG_TABLESPACE",
+	635:  "_SPECTRUM_ARRAY",
+	636:  "_SPECTRUM_MAP",
+	637:  "_SPECTRUM_STRUCT",
+	1188: "INTERVALY2M",
+	1189: "_INTERVALY2M",
+	1190: "INTERVALD2S",
+	1191: "_INTERVALD2S",
+	2935: "HLLSKETCH",
+	3000: "GEOMETRY",
+	3001: "GEOGRAPHY",
+	4000: "SUPER",
+	4600: "USERITEM",
+	4601: "_USERITEM",
+	4602: "ROLEITEM",
+	4603: "_ROLEITEM",
+	6551: "VARBYTE",
 }

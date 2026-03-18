@@ -13,30 +13,42 @@ import (
 
 func TestDataTypeName(t *testing.T) {
 	tests := []struct {
-		typ  oid.Oid
-		name string
+		typ      oid.Oid
+		name     string
+		redshift bool
 	}{
-		{oid.T_int8, "INT8"},
-		{oid.T_int4, "INT4"},
-		{oid.T_int2, "INT2"},
-		{oid.T_varchar, "VARCHAR"},
-		{oid.T_text, "TEXT"},
-		{oid.T_bit, "BIT"},
-		{oid.T_varbit, "VARBIT"},
-		{oid.T_bool, "BOOL"},
-		{oid.T_numeric, "NUMERIC"},
-		{oid.T_date, "DATE"},
-		{oid.T_time, "TIME"},
-		{oid.T_timetz, "TIMETZ"},
-		{oid.T_timestamp, "TIMESTAMP"},
-		{oid.T_timestamptz, "TIMESTAMPTZ"},
-		{oid.T_bytea, "BYTEA"},
+		{oid.T_int8, "INT8", false},
+		{oid.T_int4, "INT4", false},
+		{oid.T_int2, "INT2", false},
+		{oid.T_varchar, "VARCHAR", false},
+		{oid.T_text, "TEXT", false},
+		{oid.T_bit, "BIT", false},
+		{oid.T_varbit, "VARBIT", false},
+		{oid.T_bool, "BOOL", false},
+		{oid.T_numeric, "NUMERIC", false},
+		{oid.T_date, "DATE", false},
+		{oid.T_time, "TIME", false},
+		{oid.T_timetz, "TIMETZ", false},
+		{oid.T_timestamp, "TIMESTAMP", false},
+		{oid.T_timestamptz, "TIMESTAMPTZ", false},
+		{oid.T_bytea, "BYTEA", false},
+
+		{oid.T_int8, "INT8", true},
+		{635, "_SPECTRUM_ARRAY", true},
+		{636, "_SPECTRUM_MAP", true},
+		{637, "_SPECTRUM_STRUCT", true},
+		{4000, "SUPER", true},
+
+		{635, "", false},
 	}
 
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
-			have := fieldDesc{OID: tt.typ}
-			if name := have.Name(); name != tt.name {
+			have := &rows{
+				cn:         &conn{parameterStatus: parameterStatus{isRedshift: tt.redshift}},
+				rowsHeader: rowsHeader{colTyps: []fieldDesc{{OID: tt.typ}}},
+			}
+			if name := have.ColumnTypeDatabaseTypeName(0); name != tt.name {
 				t.Errorf("\nhave: %s\nwant: %s", name, tt.name)
 			}
 		})

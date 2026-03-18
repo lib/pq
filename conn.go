@@ -87,6 +87,7 @@ type parameterStatus struct {
 	serverVersion                            int
 	currentLocation                          *time.Location
 	inHotStandby, defaultTransactionReadOnly sql.NullBool
+	isRedshift                               bool
 }
 
 type format int
@@ -1558,6 +1559,8 @@ func (cn *conn) processParameterStatus(r *readBuf) {
 	switch r.string() {
 	default:
 		// ignore
+	case "padb_version":
+		cn.parameterStatus.isRedshift = true
 	case "server_version":
 		var major1, major2 int
 		_, err := fmt.Sscanf(r.string(), "%d.%d", &major1, &major2)
