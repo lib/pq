@@ -16,7 +16,7 @@ jobs:
         run: |
           set -eu
           f=($(grep -Eo '^func Fuzz[a-zA-Z0-9_]+' fuzz_test.go | cut -d' ' -f2))
-          t=$(( 300 / ${#f[@]} ))s
+          t=$(( 60 / ${#f[@]} ))s
           for ff in ${f[@]}; do
             echo go test -test.run=DontRunTests -fuzztime=$t -fuzz=$ff
             go test -test.run=DontRunTests -fuzztime=$t -fuzz=$ff

@@ -55,16 +55,10 @@ jobs:
           exit $fail
 
       # Store cache, only on master branch
-      - name: 'delete existing cache'
-        if:   "github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'"
-        env:  {GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'}
-        continue-on-error: true
-        run: |
-          gh extension install actions/gh-actions-cache
-          gh actions-cache delete "${{ env.cache }}" --confirm
       - uses: 'actions/cache/save@v5'
+        if:   "github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'"
         with:
-          key: '${{ env.cache }}'
+          key: 'staticcheck'
           path: |
             ${{ runner.temp }}/staticcheck
             /home/runner/.cache/go-build
