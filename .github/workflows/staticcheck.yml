@@ -13,6 +13,8 @@ jobs:
     steps:
       # Setup
       - uses: 'actions/checkout@v6'
+
+      # Store and restore staticcheck only from master branch.
       - id:   'cache-restore'
         uses: 'actions/cache/restore@v5'
         with:
@@ -21,8 +23,7 @@ jobs:
             ${{ runner.temp }}/staticcheck
             /home/runner/.cache/go-build
           restore-keys: |
-            staticcheck-${{ github.ref }}
-            staticcheck-refs/heads/main
+            staticcheck
       - uses: 'actions/setup-go@v6'
         with: {go-version: 'stable'}
       - uses: 'actions/cache@v5'
@@ -53,9 +54,9 @@ jobs:
           done
           exit $fail
 
-      # Store cache
+      # Store cache, only on master branch
       - name: 'delete existing cache'
-        if:   '${{ steps.cache-restore.outputs.cache-hit }}'
+        if:   "github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'"
         env:  {GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'}
         continue-on-error: true
         run: |
