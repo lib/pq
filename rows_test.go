@@ -54,7 +54,7 @@ func TestDataTypeNameRedshift(t *testing.T) {
 
 	rs := &rows{
 		cn: &conn{
-			cfg: Config{RedshiftOIDs: true},
+			parameterStatus: parameterStatus{isRedshift: true},
 		},
 		rowsHeader: rowsHeader{
 			colTyps: []fieldDesc{},
@@ -69,7 +69,7 @@ func TestDataTypeNameRedshift(t *testing.T) {
 	}
 
 	// Without Redshift flag
-	rs.cn.cfg.RedshiftOIDs = false
+	rs.cn.parameterStatus.isRedshift = false
 	rs.colTyps = []fieldDesc{{OID: 635}}
 	if name := rs.ColumnTypeDatabaseTypeName(0); name != "" {
 		t.Errorf("got: %q want: %q", name, "") // 635 is not in standard types map, so it returns empty string

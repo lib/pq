@@ -162,7 +162,7 @@ func (rs *rows) ColumnTypeScanType(index int) reflect.Type {
 // ColumnTypeDatabaseTypeName return the database system type name.
 func (rs *rows) ColumnTypeDatabaseTypeName(index int) string {
 	name := rs.colTyps[index].Name()
-	if name == "" && rs.cn != nil && rs.cn.cfg.RedshiftOIDs {
+	if name == "" && rs.cn != nil && rs.cn.parameterStatus.isRedshift {
 		if mapped, ok := redshiftTypeName[rs.colTyps[index].OID]; ok {
 			return mapped
 		}
