@@ -1,3 +1,10 @@
+unreleased
+----------
+
+- This release changes the default `sslmode` from `require` to `prefer`, which
+  is the default used by libpq and the rest of the PostgreSQL ecosystem. See
+  [#1271] for some background.
+
 v1.12.0 (2026-03-18)
 --------------------
 

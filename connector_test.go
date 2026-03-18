@@ -354,14 +354,14 @@ func TestNewConfig(t *testing.T) {
 	}{
 		// Override defaults
 		{"", nil, "", ""},
-		{"user=u port=1 host=example.com", nil,
-			"host=example.com port=1 user=u", ""},
-		{"", []string{"PGUSER=u", "PGPORT=1", "PGHOST=example.com"},
-			"host=example.com port=1 user=u", ""},
+		{"user=u port=1 host=example.com sslmode=verify-ca", nil,
+			"host=example.com port=1 sslmode=verify-ca user=u", ""},
+		{"", []string{"PGUSER=u", "PGPORT=1", "PGHOST=example.com", "PGSSLMODE=verify-ca"},
+			"host=example.com port=1 sslmode=verify-ca user=u", ""},
 
 		// Socket
-		{"host=/var/run/psql", nil, "host=/var/run/psql sslmode=disable", ""},
-		{"host=@/var/run/psql", nil, "host=@/var/run/psql sslmode=disable", ""},
+		{"host=/var/run/psql", nil, "host=/var/run/psql", ""},
+		{"host=@/var/run/psql", nil, "host=@/var/run/psql", ""},
 		{"host=/var/run/psql sslmode=require", nil, "host=/var/run/psql sslmode=disable", ""},
 
 		// Empty value, value with space, and value with escaped \'
@@ -875,16 +875,16 @@ func TestService(t *testing.T) {
 		wantErr string
 	}{
 		{"service=doesntexist", nil, ``, `definition of service "doesntexist" not found`},
-		{"service=svc1", nil, `connect_timeout=20 dbname=xyz host=firsthost port=1234 service=svc1 sslmode=disable user=pqgo`, ``},
-		{"service=svc2", nil, `connect_timeout=20 dbname='with space' host=localhost service=svc2 sslmode=disable user=''`, ``},
+		{"service=svc1", nil, `connect_timeout=20 dbname=xyz host=firsthost port=1234 service=svc1 user=pqgo`, ``},
+		{"service=svc2", nil, `connect_timeout=20 dbname='with space' host=localhost service=svc2 user=''`, ``},
 		{"service=svc3", nil, ``, `pq: unknown setting "unknown" in service file for service "svc3"`},
-		{"service=svc4", nil, `connect_timeout=20 dbname=pqgo host=localhost service=svc4 sslmode=disable user=pqgo`, ``},
-		{"service=svc5", nil, `connect_timeout=20 dbname=pqgo host=localhost service=svc5 sslmode=disable user=pqgo`, ``},
+		{"service=svc4", nil, `connect_timeout=20 dbname=pqgo host=localhost service=svc4 user=pqgo`, ``},
+		{"service=svc5", nil, `connect_timeout=20 dbname=pqgo host=localhost service=svc5 user=pqgo`, ``},
 
 		{"service=svc5", map[string]string{"PGSERVICEFILE": "none"}, ``, `service file "none" not found`},
 		{"service=svc1", map[string]string{"PGSERVICEFILE": filepath.Join(h, "other")}, ``, `definition of service "svc1" not found`},
 		{"service=other", map[string]string{"PGSERVICEFILE": filepath.Join(h, "other")},
-			`connect_timeout=20 dbname=other host=localhost service=other sslmode=disable user=pqgo`, ``},
+			`connect_timeout=20 dbname=other host=localhost service=other user=pqgo`, ``},
 	}
 
 	pqtest.Write(t, []byte("[other]\ndbname=other"), h, "other")
