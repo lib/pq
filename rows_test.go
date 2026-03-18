@@ -41,6 +41,41 @@ func TestDataTypeName(t *testing.T) {
 	}
 }
 
+func TestDataTypeNameRedshift(t *testing.T) {
+	tts := []struct {
+		typ  oid.Oid
+		name string
+	}{
+		{635, "_SPECTRUM_ARRAY"},
+		{636, "_SPECTRUM_MAP"},
+		{637, "_SPECTRUM_STRUCT"},
+		{16, "BOOL"},
+	}
+
+	rs := &rows{
+		cn: &conn{
+			cfg: Config{RedshiftOIDs: true},
+		},
+		rowsHeader: rowsHeader{
+			colTyps: []fieldDesc{},
+		},
+	}
+
+	for i, tt := range tts {
+		rs.colTyps = []fieldDesc{{OID: tt.typ}}
+		if name := rs.ColumnTypeDatabaseTypeName(0); name != tt.name {
+			t.Errorf("(%d) got: %s want: %s", i, name, tt.name)
+		}
+	}
+
+	// Without Redshift flag
+	rs.cn.cfg.RedshiftOIDs = false
+	rs.colTyps = []fieldDesc{{OID: 635}}
+	if name := rs.ColumnTypeDatabaseTypeName(0); name != "" {
+		t.Errorf("got: %q want: %q", name, "") // 635 is not in standard types map, so it returns empty string
+	}
+}
+
 func TestDataType(t *testing.T) {
 	tts := []struct {
 		typ  oid.Oid

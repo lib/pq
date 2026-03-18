@@ -374,6 +374,7 @@ func TestNewConfig(t *testing.T) {
 		{"sslinline=yes", nil, "sslinline=yes", ""},
 		{"sslinline=no", nil, "sslinline=no", ""},
 		{"sslinline=lol", nil, "", `pq: wrong value for "sslinline": strconv.ParseBool: parsing "lol": invalid syntax`},
+		{"redshift_oids=1", nil, "redshift_oids=yes", ""},
 
 		// application_name and fallback_application_name
 		{"application_name=acme", nil, "application_name=acme", ""},

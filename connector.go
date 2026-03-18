@@ -372,6 +372,10 @@ type Config struct {
 	// supported in libpq.
 	BinaryParameters bool `postgres:"binary_parameters" env:"-"`
 
+	// When true, Redshift type mapping is enabled for ColumnTypeDatabaseTypeName.
+	// This includes OIDs mapped to _spectrum_array, unknown types, etc.
+	RedshiftOIDs bool `postgres:"redshift_oids" env:"PGREDSHIFTOIDS"`
+
 	// This connection should never use the binary format when receiving query
 	// results from prepared statements. Only provided for debugging. This is a
 	// pq extension, not supported in libpq.
