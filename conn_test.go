@@ -251,17 +251,10 @@ func TestExec(t *testing.T) {
 func TestStatment(t *testing.T) {
 	db := pqtest.MustDB(t)
 
-	st, err := db.Prepare("SELECT 1")
-	if err != nil {
-		t.Fatal(err)
-	}
+	stmt1 := pqtest.Prepare(t, db, "select 1")
+	stmt2 := pqtest.Prepare(t, db, "select 2")
 
-	st1, err := db.Prepare("SELECT 2")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	r, err := st.Query()
+	r, err := stmt1.Query()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,12 +269,11 @@ func TestStatment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	if i != 1 {
 		t.Fatalf("expected 1, got %d", i)
 	}
 
-	r1, err := st1.Query()
+	r1, err := stmt2.Query()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,14 +353,9 @@ func TestEmptyQuery(t *testing.T) {
 		t.Fatal(rows.Err())
 	}
 
-	stmt, err := db.Prepare("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	res, err = stmt.Exec()
-	if err != nil {
-		t.Fatal(err)
-	}
+	stmt := pqtest.Prepare(t, db, "")
+	stmt.MustExec(t)
+	res = stmt.MustExec(t)
 	if _, err := res.RowsAffected(); err != errNoRowsAffected {
 		t.Fatalf("expected %s, got %v", errNoRowsAffected, err)
 	}
@@ -419,10 +406,7 @@ func TestEmptyResultSetColumns(t *testing.T) {
 		t.Fatalf("unexpected Columns result %v", cols)
 	}
 
-	stmt, err := db.Prepare("SELECT $1::int AS a, text 'bar' AS bar WHERE FALSE")
-	if err != nil {
-		t.Fatal(err)
-	}
+	stmt := pqtest.Prepare(t, db, "select $1::int as a, text 'bar' AS bar where false")
 	rows, err = stmt.Query(1)
 	if err != nil {
 		t.Fatal(err)
@@ -529,13 +513,10 @@ func TestEncodeDecode(t *testing.T) {
 func TestNoData(t *testing.T) {
 	db := pqtest.MustDB(t)
 
-	st, err := db.Prepare("SELECT 1 WHERE true = false")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
+	stmt := pqtest.Prepare(t, db, "select 1 where true = false")
+	defer stmt.Close()
 
-	r, err := st.Query()
+	r, err := stmt.Query()
 	if err != nil {
 		t.Fatal(err)
 	}

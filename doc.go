@@ -88,6 +88,9 @@ related to the data passed in the call that failed.
 
 It is not possible to COPY outside of an explicit transaction in pq.
 
+Use nil for NULL, or explicitly add WITH NULL 'SOME STRING' (the default of \N
+doesn't work).
+
 # Notifications
 
 PostgreSQL supports a simple publish/subscribe model using PostgreSQL's [NOTIFY] mechanism.
