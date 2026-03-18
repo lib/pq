@@ -132,16 +132,37 @@ func Begin(t testing.TB, db *sql.DB) *sql.Tx {
 	return tx
 }
 
+type Stmt struct{ *sql.Stmt }
+
+// MustExec calls Stmt.Exec(), calling t.Fatal if this fails.
+func (s *Stmt) MustExec(t testing.TB, args ...any) sql.Result {
+	t.Helper()
+	res, err := s.Stmt.Exec(args...)
+	if err != nil {
+		t.Fatalf("pqtest.Stmt.MustExec: %s", err)
+	}
+	return res
+}
+
+// MustClose calls Stmt.Close(), calling t.Fatal if this fails.
+func (s *Stmt) MustClose(t testing.TB) {
+	t.Helper()
+	err := s.Stmt.Close()
+	if err != nil {
+		t.Fatalf("pqtest.Stmt.MustClose: %s", err)
+	}
+}
+
 // Prepare a new statement, calling t.Fatal() if this fails.
 func Prepare(t testing.TB, db interface {
 	Prepare(string) (*sql.Stmt, error)
-}, q string) *sql.Stmt {
+}, q string) *Stmt {
 	t.Helper()
 	stmt, err := db.Prepare(q)
 	if err != nil {
 		t.Fatalf("pqtest.Prepare: %s", err)
 	}
-	return stmt
+	return &Stmt{stmt}
 }
 
 // Exec calls db.Exec(), calling t.Fatal if this fails.

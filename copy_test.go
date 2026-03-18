@@ -2,6 +2,7 @@ package pq
 
 import (
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lib/pq/internal/pqtest"
+	"github.com/lib/pq/pqerror"
 )
 
 func TestCopyInError(t *testing.T) {
@@ -26,9 +28,7 @@ func TestCopyInError(t *testing.T) {
 		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
-			db := pqtest.MustDB(t)
-			tx := pqtest.Begin(t, db)
-
+			tx := pqtest.Begin(t, pqtest.MustDB(t))
 			pqtest.Exec(t, tx, `create temp table tbl (num integer)`)
 
 			_, err := tx.Prepare(tt.query)
@@ -36,8 +36,7 @@ func TestCopyInError(t *testing.T) {
 				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
 			}
 			// Check that the protocol is in a valid state
-			err = tx.Rollback()
-			if err != nil {
+			if err := tx.Rollback(); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -46,25 +45,13 @@ func TestCopyInError(t *testing.T) {
 
 func TestCopyInErrorWrongType(t *testing.T) {
 	t.Parallel()
-	db := pqtest.MustDB(t)
-	tx := pqtest.Begin(t, db)
-
+	tx := pqtest.Begin(t, pqtest.MustDB(t))
 	pqtest.Exec(t, tx, `create temp table tbl (num integer)`)
 
-	stmt, err := tx.Prepare(`copy tbl (num) from stdin`)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = stmt.Exec("Héllö\n ☃!\r\t\\")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = stmt.Exec()
-	if !pqtest.ErrorContains(err, `(22P02)`) {
-		t.Errorf("wrong error: %v", err)
-	}
+	stmt := pqtest.Prepare(t, tx, `copy tbl (num) from stdin`)
+	stmt.MustExec(t, "Héllö\n ☃!\r\t\\")
+	_, err := stmt.Exec()
+	mustAs(t, err, pqerror.InvalidTextRepresentation)
 }
 
 func TestCopyInErrorOutsideTransaction(t *testing.T) {
@@ -79,19 +66,55 @@ func TestCopyInErrorOutsideTransaction(t *testing.T) {
 
 func TestCopyInQueryWhileCopy(t *testing.T) {
 	t.Parallel()
-	db := pqtest.MustDB(t)
-	tx := pqtest.Begin(t, db)
-
+	tx := pqtest.Begin(t, pqtest.MustDB(t))
 	pqtest.Exec(t, tx, `create temp table tbl (i int primary key)`)
 
-	_, err := tx.Prepare("copy tbl (i) from stdin")
-	if err != nil {
-		t.Fatal(err)
+	pqtest.Prepare(t, tx, "copy tbl (i) from stdin")
+	_, err := tx.Query(`select 1`)
+	if !errors.Is(err, errQueryInProgress) {
+		t.Errorf("wrong error:\nhave: %s\nwant: %s", err, errQueryInProgress)
+	}
+}
+
+func TestCopyInNull(t *testing.T) {
+	tests := []struct {
+		null any
+		copy string
+	}{
+		{nil, `copy tbl (i, t) from stdin`},
+		{`NULL`, `copy tbl (i, t) from stdin with null 'NULL'`},
+		{``, `copy tbl (i, t) from stdin with null ''`},
+		{`\N`, `copy tbl (i, t) from stdin with null '\\N'`},
+
+		// The default doesn't work as copyin.Exec() calls appendEncodedText(),
+		// which escapes \N to \\N. To fix it we need to read query, see if
+		// "WITH NULL" was passed, and don't escape that text (of the default of
+		// \N).
+		//{`\N`, `copy tbl (i, t) from stdin`},
 	}
 
-	_, err = tx.Query(`select 1`)
-	if err == nil {
-		t.Fatal("expected error")
+	for _, tt := range tests {
+		tt := tt
+		t.Run("", func(t *testing.T) {
+			t.Parallel()
+			tx := pqtest.Begin(t, pqtest.MustDB(t))
+
+			pqtest.Exec(t, tx, `create temp table tbl (i int, t text)`)
+			stmt := pqtest.Prepare(t, tx, tt.copy)
+			stmt.MustExec(t, 42, "forty-two")
+			stmt.MustExec(t, tt.null, tt.null)
+			stmt.MustExec(t)
+			stmt.MustClose(t)
+
+			rows := pqtest.Query[any](t, tx, `select * from tbl`)
+			want := []map[string]any{
+				{"i": int64(42), "t": "forty-two"},
+				{"i": nil, "t": nil},
+			}
+			if !reflect.DeepEqual(rows, want) {
+				t.Errorf("\nhave: %#v\nwant: %#v", rows, want)
+			}
+		})
 	}
 }
 
@@ -107,30 +130,18 @@ func TestCopyInMultipleValues(t *testing.T) {
 		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
-			db := pqtest.MustDB(t)
-			tx := pqtest.Begin(t, db)
-
+			tx := pqtest.Begin(t, pqtest.MustDB(t))
 			pqtest.Exec(t, tx, `create temp table tbl (a int, b varchar)`)
+
 			stmt := pqtest.Prepare(t, tx, tt.query)
-
-			str := strings.Repeat("#", 500)
 			for i := 0; i < 500; i++ {
-				_, err := stmt.Exec(int64(i), str)
-				if err != nil {
-					t.Fatal(err)
-				}
+				stmt.MustExec(t, int64(i), strings.Repeat("#", 500))
 			}
 
-			res, err := stmt.Exec()
-			if err != nil {
-				t.Fatal(err)
-			}
+			res := stmt.MustExec(t)
 			rows, err := res.RowsAffected()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if rows != 500 {
-				t.Fatalf("expected 500 rows affected, not %d", rows)
+			if err != nil || rows != 500 {
+				t.Fatalf("\nerr: %v\nrows: %v", err, rows)
 			}
 
 			n, err := res.LastInsertId()
@@ -138,28 +149,19 @@ func TestCopyInMultipleValues(t *testing.T) {
 				t.Errorf("n=%d; err=%v", n, err)
 			}
 
-			if err := stmt.Close(); err != nil {
-				t.Fatal(err)
-			}
+			stmt.MustClose(t)
 
-			var num int
-			err = tx.QueryRow("select count(*) from tbl").Scan(&num)
-			if err != nil {
-				t.Fatal(err)
-			}
+			num := pqtest.Query[int](t, tx, `select count(*) from tbl`)[0]["count"]
 			if num != 500 {
 				t.Fatalf("expected 500 items, not %d", num)
 			}
-
 		})
 	}
 }
 
 func TestCopyInRaiseStmtTrigger(t *testing.T) {
 	t.Parallel()
-	db := pqtest.MustDB(t)
-	tx := pqtest.Begin(t, db)
-
+	tx := pqtest.Begin(t, pqtest.MustDB(t))
 	pqtest.Exec(t, tx, `create temp table tbl (a int, b varchar)`)
 	pqtest.Exec(t, tx, `
 		create or replace function pg_temp.temptest()
@@ -176,20 +178,10 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 		for each row execute procedure pg_temp.temptest()
 	`)
 
-	stmt, err := tx.Prepare(`copy tbl (a, b) from stdin`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = stmt.Exec(int64(1), strings.Repeat("#", 500))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := stmt.Exec(); err != nil {
-		t.Fatal(err)
-	}
-	if err := stmt.Close(); err != nil {
-		t.Fatal(err)
-	}
+	stmt := pqtest.Prepare(t, tx, `copy tbl (a, b) from stdin`)
+	stmt.MustExec(t, int64(1), strings.Repeat("#", 500))
+	stmt.MustExec(t)
+	stmt.MustClose(t)
 
 	rows := pqtest.Query[any](t, tx, `select * from tbl`)
 	want := []map[string]any{{
@@ -203,25 +195,13 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 
 func TestCopyInTypes(t *testing.T) {
 	t.Parallel()
-	db := pqtest.MustDB(t)
-	tx := pqtest.Begin(t, db)
-
+	tx := pqtest.Begin(t, pqtest.MustDB(t))
 	pqtest.Exec(t, tx, `create temp table tbl (num integer, text varchar, blob bytea, nothing varchar)`)
 
-	stmt, err := tx.Prepare(`copy tbl (num, text, blob, nothing) from stdin`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = stmt.Exec(int64(1234567890), "Héllö\n ☃!\r\t\\", []byte{0, 255, 9, 10, 13}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := stmt.Exec(); err != nil {
-		t.Fatal(err)
-	}
-	if err := stmt.Close(); err != nil {
-		t.Fatal(err)
-	}
+	stmt := pqtest.Prepare(t, tx, `copy tbl (num, text, blob, nothing) from stdin`)
+	stmt.MustExec(t, int64(1234567890), "Héllö\n ☃!\r\t\\", []byte{0, 255, 9, 10, 13}, nil)
+	stmt.MustExec(t)
+	stmt.MustClose(t)
 
 	rows := pqtest.Query[any](t, tx, `select * from tbl`)
 	want := []map[string]any{{
@@ -261,14 +241,10 @@ func TestCopyInRespLoopConnectionError(t *testing.T) {
 
 	pid := pqtest.Query[int64](t, tx, `select pg_backend_pid() as pid`)
 	pqtest.Exec(t, tx, "create temp table tbl (a int)")
-
-	stmt, err := tx.Prepare(`copy tbl (a) from stdin`)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	stmt := pqtest.Prepare(t, tx, `copy tbl (a) from stdin`)
 	pqtest.Exec(t, db, `select pg_terminate_backend($1)`, pid[0]["pid"])
 
+	var err error
 	retry(t, time.Second*5, func() error {
 		_, err = stmt.Exec()
 		if err == nil {
@@ -291,37 +267,5 @@ func TestCopyInRespLoopConnectionError(t *testing.T) {
 		} else {
 			t.Fatalf("unexpected error: %v", err)
 		}
-	}
-}
-
-func BenchmarkCopyIn(b *testing.B) {
-	db := pqtest.MustDB(b)
-	tx := pqtest.Begin(b, db)
-
-	pqtest.Exec(b, tx, `create temp table tbl (a int, b varchar)`)
-
-	stmt, err := tx.Prepare(`copy tbl (a, b) from stdin`)
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, err = stmt.Exec(int64(i), "hello world!")
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-
-	if _, err := stmt.Exec(); err != nil {
-		b.Fatal(err)
-	}
-	if err := stmt.Close(); err != nil {
-		b.Fatal(err)
-	}
-
-	rows := pqtest.Query[int](b, tx, `select count(*) from tbl`)
-	if rows[0]["count"] != b.N {
-		b.Fatalf("expected %d items, not %d", b.N, rows[0]["count"])
 	}
 }

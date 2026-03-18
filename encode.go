@@ -153,7 +153,7 @@ func appendEncodedText(buf []byte, x any) ([]byte, error) {
 	case time.Time:
 		return append(buf, formatTS(v)...), nil
 	case nil:
-		return append(buf, "\\N"...), nil
+		return append(buf, `\N`...), nil
 	default:
 		return nil, fmt.Errorf("pq: encode: unknown type for %T", v)
 	}
@@ -162,11 +162,10 @@ func appendEncodedText(buf []byte, x any) ([]byte, error) {
 func appendEscapedText(buf []byte, text string) []byte {
 	escapeNeeded := false
 	startPos := 0
-	var c byte
 
 	// check if we need to escape
 	for i := 0; i < len(text); i++ {
-		c = text[i]
+		c := text[i]
 		if c == '\\' || c == '\n' || c == '\r' || c == '\t' {
 			escapeNeeded = true
 			startPos = i
@@ -180,8 +179,7 @@ func appendEscapedText(buf []byte, text string) []byte {
 	// copy till first char to escape, iterate the rest
 	result := append(buf, text[:startPos]...)
 	for i := startPos; i < len(text); i++ {
-		c = text[i]
-		switch c {
+		switch c := text[i]; c {
 		case '\\':
 			result = append(result, '\\', '\\')
 		case '\n':
