@@ -85,7 +85,6 @@ func TestArrayParseError(t *testing.T) {
 		{`{{a},{b,c}}`, "multidimensional arrays must have elements with matching dimensions"},
 	}
 
-	t.Parallel()
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			_, _, err := parseArray([]byte(tt.in), []byte{','})
@@ -133,7 +132,6 @@ func TestArrayFunc(t *testing.T) {
 		{&[][]string{}, GenericArray{&[][]string{}}},
 	}
 
-	t.Parallel()
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			have := Array(tt.in)
@@ -164,34 +162,15 @@ func TestArrayParameter(t *testing.T) {
 	}
 
 	db := pqtest.MustDB(t)
-	t.Parallel()
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			if tt.out == nil {
 				tt.out = tt.in
 			}
 
-			r, err := db.Query(fmt.Sprintf("SELECT $1::%s", tt.pgType), tt.in)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer r.Close()
-
-			if !r.Next() {
-				if r.Err() != nil {
-					t.Fatal(r.Err())
-				}
-				t.Fatal("expected row")
-			}
-
-			defer func() {
-				if r.Next() {
-					t.Fatal("unexpected row")
-				}
-			}()
-
 			have := reflect.New(reflect.TypeOf(tt.out))
-			if err := r.Scan(Array(have.Interface())); err != nil {
+			err := db.QueryRow(fmt.Sprintf("select $1::%s", tt.pgType), tt.in).Scan(Array(have.Interface()))
+			if err != nil {
 				t.Fatal(err)
 			}
 
@@ -374,7 +353,6 @@ func TestArrayScan(t *testing.T) {
 		{&GenericArray{new([]sql.NullInt64)}, `{x}`, &GenericArray{new([]sql.NullInt64)}, `parsing array element index 0: converting`},
 	}
 
-	t.Parallel()
 	for _, tt := range tests {
 		t.Run(strings.TrimPrefix(fmt.Sprintf("%T", tt.array), "*pq."), func(t *testing.T) {
 			err := tt.array.Scan(tt.in)
@@ -413,10 +391,9 @@ func TestArrayScanBackend(t *testing.T) {
 	}
 
 	db := pqtest.MustDB(t)
-	t.Parallel()
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
-			err := db.QueryRow(`SELECT ` + tt.s).Scan(tt.scan)
+			err := db.QueryRow(`select ` + tt.s).Scan(tt.scan)
 			if err != nil {
 				t.Error(err)
 			}
@@ -513,7 +490,6 @@ func TestArrayValue(t *testing.T) {
 		{GenericArray{[]any{nil, func() {}}}, `{NULL,`, `unsupported type func(), a func`},
 	}
 
-	t.Parallel()
 	for _, tt := range tests {
 		n := strings.TrimPrefix(strings.TrimPrefix(fmt.Sprintf("%T", tt.array), "*pq."), "pq.")
 		t.Run(n, func(t *testing.T) {
@@ -544,11 +520,7 @@ func TestArrayValueBackend(t *testing.T) {
 	db := pqtest.MustDB(t)
 	t.Parallel()
 	for _, tt := range tests {
-		var have string
-		err := db.QueryRow(`select $1::text`, tt.v).Scan(&have)
-		if err != nil {
-			t.Fatal(err)
-		}
+		have := pqtest.QueryRow[string](t, db, `select $1::text`, tt.v)["text"]
 		if !reflect.DeepEqual(have, tt.want) {
 			t.Errorf("\nhave: %v\nwant: %v", have, tt.want)
 		}

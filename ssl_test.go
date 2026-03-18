@@ -18,7 +18,7 @@ import (
 	"github.com/lib/pq/internal/proto"
 )
 
-// Environment sanity check: should fail without SSL
+// Environment sanity check: should fail without SSL.
 func startSSLTest(t *testing.T, user string) {
 	wantErr := `invalid_authorization_specification`
 	if pqtest.Pgbouncer() {

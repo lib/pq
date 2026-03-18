@@ -12,7 +12,7 @@ import (
 )
 
 func TestDataTypeName(t *testing.T) {
-	tts := []struct {
+	tests := []struct {
 		typ  oid.Oid
 		name string
 	}{
@@ -33,16 +33,18 @@ func TestDataTypeName(t *testing.T) {
 		{oid.T_bytea, "BYTEA"},
 	}
 
-	for i, tt := range tts {
-		dt := fieldDesc{OID: tt.typ}
-		if name := dt.Name(); name != tt.name {
-			t.Errorf("(%d) got: %s want: %s", i, name, tt.name)
-		}
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			have := fieldDesc{OID: tt.typ}
+			if name := have.Name(); name != tt.name {
+				t.Errorf("\nhave: %s\nwant: %s", name, tt.name)
+			}
+		})
 	}
 }
 
 func TestDataType(t *testing.T) {
-	tts := []struct {
+	tests := []struct {
 		typ  oid.Oid
 		kind reflect.Kind
 	}{
@@ -62,16 +64,18 @@ func TestDataType(t *testing.T) {
 		{oid.T_bytea, reflect.Slice},
 	}
 
-	for i, tt := range tts {
-		dt := fieldDesc{OID: tt.typ}
-		if kind := dt.Type().Kind(); kind != tt.kind {
-			t.Errorf("(%d) got: %s want: %s", i, kind, tt.kind)
-		}
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			have := fieldDesc{OID: tt.typ}
+			if kind := have.Type().Kind(); kind != tt.kind {
+				t.Errorf("\nhave: %s\nwant: %s", kind, tt.kind)
+			}
+		})
 	}
 }
 
 func TestDataTypeLength(t *testing.T) {
-	tts := []struct {
+	tests := []struct {
 		typ    oid.Oid
 		len    int
 		mod    int
@@ -86,16 +90,18 @@ func TestDataTypeLength(t *testing.T) {
 		{oid.T_varbit, 0, 10, 10, true},
 	}
 
-	for i, tt := range tts {
-		dt := fieldDesc{OID: tt.typ, Len: tt.len, Mod: tt.mod}
-		if l, k := dt.Length(); k != tt.ok || l != tt.length {
-			t.Errorf("(%d) got: %d, %t want: %d, %t", i, l, k, tt.length, tt.ok)
-		}
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			have := fieldDesc{OID: tt.typ, Len: tt.len, Mod: tt.mod}
+			if l, k := have.Length(); k != tt.ok || l != tt.length {
+				t.Errorf("\nhave: %d, %t\nwant: %d, %t", l, k, tt.length, tt.ok)
+			}
+		})
 	}
 }
 
 func TestDataTypePrecisionScale(t *testing.T) {
-	tts := []struct {
+	tests := []struct {
 		typ              oid.Oid
 		mod              int
 		precision, scale int64
@@ -106,87 +112,25 @@ func TestDataTypePrecisionScale(t *testing.T) {
 		{oid.T_text, -1, 0, 0, false},
 	}
 
-	for i, tt := range tts {
-		dt := fieldDesc{OID: tt.typ, Mod: tt.mod}
-		p, s, k := dt.PrecisionScale()
-		if k != tt.ok {
-			t.Errorf("(%d) got: %t want: %t", i, k, tt.ok)
-		}
-		if p != tt.precision {
-			t.Errorf("(%d) wrong precision got: %d want: %d", i, p, tt.precision)
-		}
-		if s != tt.scale {
-			t.Errorf("(%d) wrong scale got: %d want: %d", i, s, tt.scale)
-		}
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			dt := fieldDesc{OID: tt.typ, Mod: tt.mod}
+			p, s, k := dt.PrecisionScale()
+			if k != tt.ok {
+				t.Errorf("\nhave: %t\nwant: %t", k, tt.ok)
+			}
+			if p != tt.precision {
+				t.Errorf("wrong precision\nhave: %d\nwant: %d", p, tt.precision)
+			}
+			if s != tt.scale {
+				t.Errorf("wrong scale\nhave: %d\nwant: %d", s, tt.scale)
+			}
+		})
 	}
 }
 
 func TestRowsColumnTypes(t *testing.T) {
-	type (
-		length struct {
-			Len int64
-			OK  bool
-		}
-		decimalSize struct {
-			Precision int64
-			Scale     int64
-			OK        bool
-		}
-	)
-	tests := []struct {
-		Name        string
-		TypeName    string
-		Length      length
-		DecimalSize decimalSize
-		ScanType    reflect.Type
-	}{
-		{
-			Name:        "a",
-			TypeName:    "INT4",
-			Length:      length{Len: 0, OK: false},
-			DecimalSize: decimalSize{Precision: 0, Scale: 0, OK: false},
-			ScanType:    reflect.TypeOf(int32(0)),
-		},
-		{
-			Name:        "bar",
-			TypeName:    "TEXT",
-			Length:      length{Len: math.MaxInt64, OK: true},
-			DecimalSize: decimalSize{Precision: 0, Scale: 0, OK: false},
-			ScanType:    reflect.TypeOf(""),
-		},
-		{
-			Name:        "dec",
-			TypeName:    "NUMERIC",
-			Length:      length{Len: 0, OK: false},
-			DecimalSize: decimalSize{Precision: 9, Scale: 2, OK: true},
-			ScanType:    reflect.TypeOf(new(any)).Elem(),
-		},
-		{
-			Name:        "f",
-			TypeName:    "FLOAT8",
-			Length:      length{Len: 0, OK: false},
-			DecimalSize: decimalSize{Precision: 0, Scale: 0, OK: false},
-			ScanType:    reflect.TypeOf(float64(0)),
-		},
-		{
-			Name:        "bit4",
-			TypeName:    "BIT",
-			Length:      length{Len: 4, OK: true},
-			DecimalSize: decimalSize{Precision: 0, Scale: 0, OK: false},
-			ScanType:    reflect.TypeOf(""),
-		},
-		{
-			Name:        "varbit10",
-			TypeName:    "VARBIT",
-			Length:      length{Len: 10, OK: true},
-			DecimalSize: decimalSize{Precision: 0, Scale: 0, OK: false},
-			ScanType:    reflect.TypeOf(""),
-		},
-	}
-
-	db := pqtest.MustDB(t)
-
-	rows, err := db.Query(`select
+	rows, err := pqtest.MustDB(t).Query(`select
 		1 as a,
 		text 'bar' as bar,
 		1.28::numeric(9, 2) as dec,
@@ -203,40 +147,73 @@ func TestRowsColumnTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(columns) != 6 {
-		t.Errorf("expected 4 columns found %d", len(columns))
+
+	type h struct {
+		name        string
+		typeName    string
+		length      pqtest.Null[int64]
+		decimalSize pqtest.Null[[2]int64]
+		scanType    reflect.Type
 	}
 
-	for i, tt := range tests {
-		t.Run("", func(t *testing.T) {
-			c := columns[i]
-			if c.Name() != tt.Name {
-				t.Errorf("have: %s, want: %s", c.Name(), tt.Name)
-			}
-			if c.DatabaseTypeName() != tt.TypeName {
-				t.Errorf("have: %s, want: %s", c.DatabaseTypeName(), tt.TypeName)
-			}
-			l, ok := c.Length()
-			if l != tt.Length.Len {
-				t.Errorf("have: %d, want: %d", l, tt.Length.Len)
-			}
-			if ok != tt.Length.OK {
-				t.Errorf("have: %t, want: %t", ok, tt.Length.OK)
-			}
-			p, s, ok := c.DecimalSize()
-			if p != tt.DecimalSize.Precision {
-				t.Errorf("have: %d, want: %d", p, tt.DecimalSize.Precision)
-			}
-			if s != tt.DecimalSize.Scale {
-				t.Errorf("have: %d, want: %d", s, tt.DecimalSize.Scale)
-			}
-			if ok != tt.DecimalSize.OK {
-				t.Errorf("have: %t, want: %t", ok, tt.DecimalSize.OK)
-			}
-			if c.ScanType() != tt.ScanType {
-				t.Errorf("have: %v, want: %v", c.ScanType(), tt.ScanType)
-			}
+	have := make([]h, 0, len(columns))
+	for _, c := range columns {
+		l, lok := c.Length()
+		prec, scale, dok := c.DecimalSize()
+		have = append(have, h{
+			name:        c.Name(),
+			typeName:    c.DatabaseTypeName(),
+			scanType:    c.ScanType(),
+			length:      pqtest.Null[int64]{V: l, Valid: lok},
+			decimalSize: pqtest.Null[[2]int64]{V: [2]int64{prec, scale}, Valid: dok},
 		})
+	}
+
+	want := []h{
+		{
+			name:     "a",
+			typeName: "INT4",
+			scanType: reflect.TypeOf(int32(0)),
+		},
+		{
+			name:     "bar",
+			typeName: "TEXT",
+			length:   pqtest.Null[int64]{V: math.MaxInt64, Valid: true},
+			scanType: reflect.TypeOf(""),
+		},
+		{
+			name:        "dec",
+			typeName:    "NUMERIC",
+			decimalSize: pqtest.Null[[2]int64]{V: [2]int64{9, 2}, Valid: true},
+			scanType:    reflect.TypeOf(new(any)).Elem(),
+		},
+		{
+			name:     "f",
+			typeName: "FLOAT8",
+			scanType: reflect.TypeOf(float64(0)),
+		},
+		{
+			name:     "bit4",
+			typeName: "BIT",
+			length:   pqtest.Null[int64]{V: 4, Valid: true},
+			scanType: reflect.TypeOf(""),
+		},
+		{
+			name:     "varbit10",
+			typeName: "VARBIT",
+			length:   pqtest.Null[int64]{V: 10, Valid: true},
+			scanType: reflect.TypeOf(""),
+		},
+	}
+
+	if len(have) != len(want) {
+		t.Fatalf("wrong column length\nhave: %d\nwant: %d", len(have), len(want))
+	}
+
+	for i := range have {
+		if !reflect.DeepEqual(have[i], want[i]) {
+			t.Errorf("column %d wrong\nhave: %#v\nwant: %#v", i, have[i], want[i])
+		}
 	}
 }
 
@@ -264,12 +241,8 @@ func TestRowsClose(t *testing.T) {
 	// closing a query early allows a subsequent query to work.
 	t.Run("QuickClose", func(t *testing.T) {
 		t.Parallel()
-		db := pqtest.MustDB(t)
+		tx := pqtest.Begin(t, pqtest.MustDB(t))
 
-		tx, err := db.Begin()
-		if err != nil {
-			t.Fatal(err)
-		}
 		rows, err := tx.Query("select 1; select 2;")
 		if err != nil {
 			t.Fatal(err)
@@ -302,11 +275,7 @@ func TestRowsConcurrentUse(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			tx, err := db.Begin()
-			if err != nil {
-				t.Error(err)
-				return
-			}
+			tx := pqtest.Begin(t, db)
 			defer tx.Rollback()
 
 			rows, err := tx.Query(`select unnest('{1,2,3}'::int[])`)
@@ -314,7 +283,6 @@ func TestRowsConcurrentUse(t *testing.T) {
 				t.Error(err)
 				return
 			}
-			defer rows.Close()
 
 			all := make([]int, 0, 3)
 			for rows.Next() {

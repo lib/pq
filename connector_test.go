@@ -244,8 +244,7 @@ func TestRuntimeParameters(t *testing.T) {
 			}
 
 			var have string
-			row := db.QueryRow("select current_setting($1)", tt.param)
-			err = row.Scan(&have)
+			err = db.QueryRow("select current_setting($1)", tt.param).Scan(&have)
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Fatalf("wrong error\nhave: %v\nwant: %v", err, tt.wantErr)
 			}
@@ -303,7 +302,6 @@ func TestIsUTF8(t *testing.T) {
 		{"punycode", false},
 	}
 
-	t.Parallel()
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			have := isUTF8(tt.name)

@@ -28,6 +28,23 @@ func TestErrorSQLState(t *testing.T) {
 	}
 }
 
+func TestErrorClass(t *testing.T) {
+	t.Parallel()
+	db := pqtest.MustDB(t)
+
+	_, err := db.Query("select int 'notint'")
+	pqErr := As(err)
+	if pqErr == nil {
+		t.Fatal("expected error")
+	}
+	if pqErr.Code.Class() != "22" {
+		t.Fatalf("expected class 28, got %v", pqErr.Code.Class())
+	}
+	if pqErr.Code.Class().Name() != "data_exception" {
+		t.Fatalf("expected data_exception, got %v", pqErr.Code.Class().Name())
+	}
+}
+
 func TestError(t *testing.T) {
 	tests := []struct {
 		in, want, wantDetail string
@@ -277,7 +294,6 @@ func TestAs(t *testing.T) {
 		{&Error{Code: "00000", Message: "okay"}, []pqerror.Code{pqerror.SyntaxError, pqerror.SuccessfulCompletion}, true},
 	}
 
-	t.Parallel()
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			have := As(tt.err, tt.codes...)

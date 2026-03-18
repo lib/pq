@@ -136,6 +136,8 @@ func Example_copyFromStdin() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer tx.Rollback()
+
 	stmt, err := tx.Prepare(`copy users (name, age) from stdin`)
 	if err != nil {
 		log.Fatal(err)
@@ -172,6 +174,7 @@ func Example_copyFromStdin() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var (
 			name string

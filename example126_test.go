@@ -12,6 +12,7 @@ import (
 
 func Example_error() {
 	db, _ := sql.Open("postgres", "")
+	defer db.Close()
 	_, _ = db.Exec(`create temp table users (email text)`)
 	_, _ = db.Exec(`create unique index on users(lower(email))`)
 

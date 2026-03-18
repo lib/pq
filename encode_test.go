@@ -5,11 +5,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"reflect"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/lib/pq/internal/pqtest"
+	"github.com/lib/pq/internal/pqtime"
 	"github.com/lib/pq/oid"
 )
 
@@ -48,11 +51,7 @@ func TestTimeScan(t *testing.T) {
 	t.Parallel()
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
-			var have time.Time
-			err := db.QueryRow("select $1::"+tt.typ, tt.in).Scan(&have)
-			if err != nil {
-				t.Fatal(err)
-			}
+			have := pqtest.QueryRow[time.Time](t, db, fmt.Sprintf(`select $1::%s as t`, tt.typ), tt.in)["t"]
 			if !tt.want.Equal(have) {
 				t.Errorf("\nhave: %s\nwant: %s", have, tt.want)
 			}
@@ -100,8 +99,8 @@ func TestTimeWithZone(t *testing.T) {
 	t.Run("UTC aliases", func(t *testing.T) {
 		for _, z := range []string{"UTC", "Etc/UTC", "Etc/Universal", "Etc/Zulu", "Etc/UCT"} {
 			t.Run(z, func(t *testing.T) {
-				have := pqtest.Query[time.Time](t, pqtest.MustDB(t, "timezone="+z),
-					`select '2001-02-03 12:13:14Z'::timestamptz`)[0]["timestamptz"]
+				have := pqtest.QueryRow[time.Time](t, pqtest.MustDB(t, "timezone="+z),
+					`select '2001-02-03 12:13:14Z'::timestamptz`)["timestamptz"]
 				if l := have.Location(); l != time.UTC {
 					t.Errorf("%s", l)
 				}
@@ -119,17 +118,12 @@ func TestTimeWithoutZone(t *testing.T) {
 		want time.Time
 	}{
 		{"2000-01-01T00:00:00", time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)},
-		// Test higher precision time
-		{"2013-01-04 20:14:58.80033", time.Date(2013, 1, 4, 20, 14, 58, 800330000, time.UTC)},
+		{"2013-01-04 20:14:58.80033", time.Date(2013, 1, 4, 20, 14, 58, 800330000, time.UTC)}, // Higher precision time
 	}
 
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
-			var have time.Time
-			err := db.QueryRow("select $1::timestamp", tt.in).Scan(&have)
-			if err != nil {
-				t.Fatal(err)
-			}
+			have := pqtest.QueryRow[time.Time](t, db, "select $1::timestamp", tt.in)["timestamp"]
 			if !have.Equal(tt.want) {
 				t.Fatalf("\nhave: %s\nwant: %s", have, tt.want)
 			}
@@ -390,4 +384,112 @@ func TestAppendEscapedText(t *testing.T) {
 	if string(buf) != "hallo\\tescapehallo\\\\tescape\\n\\n\\r\\t\f" {
 		t.Fatal(string(buf))
 	}
+}
+
+func BenchmarkDecode(b *testing.B) {
+	b.Run("int64", func(b *testing.B) {
+		x := []byte("1234")
+		for i := 0; i < b.N; i++ {
+			decode(nil, x, oid.T_int8, formatText)
+		}
+	})
+	b.Run("float64", func(b *testing.B) {
+		x := []byte("3.14159")
+		for i := 0; i < b.N; i++ {
+			decode(nil, x, oid.T_float8, formatText)
+		}
+	})
+	b.Run("bool", func(b *testing.B) {
+		x := []byte{'t'}
+		for i := 0; i < b.N; i++ {
+			decode(nil, x, oid.T_bool, formatText)
+		}
+	})
+	b.Run("uuid_binary", func(b *testing.B) {
+		x := []byte{0x03, 0xa3, 0x52, 0x2f, 0x89, 0x28, 0x49, 0x87, 0x84, 0xd6, 0x93, 0x7b, 0x36, 0xec, 0x27, 0x6f}
+		for i := 0; i < b.N; i++ {
+			decodeUUIDBinary(x)
+		}
+	})
+	b.Run("timestamptz", func(b *testing.B) {
+		x := []byte("2013-09-17 22:15:32.360754-07")
+		for i := 0; i < b.N; i++ {
+			decode(&parameterStatus{}, x, oid.T_timestamptz, formatText)
+		}
+	})
+	b.Run("timestamptz_thread", func(b *testing.B) {
+		oldProcs := runtime.GOMAXPROCS(0)
+		defer runtime.GOMAXPROCS(oldProcs)
+		runtime.GOMAXPROCS(runtime.NumCPU())
+		pqtime.Reset()
+
+		x := []byte("2013-09-17 22:15:32.360754-07")
+		f := func(wg *sync.WaitGroup, loops int) {
+			defer wg.Done()
+			for i := 0; i < loops; i++ {
+				decode(&parameterStatus{}, x, oid.T_timestamptz, formatText)
+			}
+		}
+
+		wg := &sync.WaitGroup{}
+		b.ResetTimer()
+		for j := 0; j < 10; j++ {
+			wg.Add(1)
+			go f(wg, b.N/10)
+		}
+		wg.Wait()
+	})
+}
+
+func BenchmarkEncode(b *testing.B) {
+	b.Run("int64", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			encode(int64(1234), oid.T_int8)
+		}
+	})
+	b.Run("float64", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			encode(3.14159, oid.T_float8)
+		}
+	})
+	b.Run("bool", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			encode(true, oid.T_bool)
+		}
+	})
+	b.Run("timestamptz", func(b *testing.B) {
+		x := time.Date(2001, time.January, 1, 0, 0, 0, 0, time.Local)
+		for i := 0; i < b.N; i++ {
+			encode(x, oid.T_timestamptz)
+		}
+	})
+	b.Run("bytea_hex", func(b *testing.B) {
+		x := []byte("abcdefghijklmnopqrstuvwxyz")
+		for i := 0; i < b.N; i++ {
+			encode(x, oid.T_bytea)
+		}
+	})
+	b.Run("bytea_escape", func(b *testing.B) {
+		x := []byte("abcdefghijklmnopqrstuvwxyz")
+		for i := 0; i < b.N; i++ {
+			encode(x, oid.T_bytea)
+		}
+	})
+}
+
+func BenchmarkAppendEscapedText(b *testing.B) {
+	b.Run("100 lines", func(b *testing.B) {
+		s := strings.Repeat("123456789\n", 100)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			appendEscapedText(nil, s)
+		}
+	})
+	b.Run("noescape", func(b *testing.B) {
+		s := strings.Repeat("1234567890", 100)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			appendEscapedText(nil, s)
+		}
+	})
 }
