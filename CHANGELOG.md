@@ -1,8 +1,8 @@
-unreleased
-----------
+v1.12.0 (2026-03-18)
+--------------------
 
 - The next release may change the default sslmode from `require` to `prefer`.
-  See [#1271]
+  See [#1271] for details.
 
 - `CopyIn()` and `CopyInToSchema()` have been marked as deprecated. These are
   simple query builders and not needed for `COPY [..] FROM STDIN` support (which
