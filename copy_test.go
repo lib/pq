@@ -269,3 +269,23 @@ func TestCopyInRespLoopConnectionError(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkCopyIn(b *testing.B) {
+	tx := pqtest.Begin(b, pqtest.MustDB(b))
+
+	pqtest.Exec(b, tx, `create temp table tbl (a int, b varchar)`)
+	stmt := pqtest.Prepare(b, tx, `copy tbl (a, b) from stdin`)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		stmt.MustExec(b, int64(i), "hello world!")
+	}
+
+	stmt.MustExec(b)
+	stmt.MustClose(b)
+
+	rows := pqtest.Query[int](b, tx, `select count(*) from tbl`)
+	if rows[0]["count"] != b.N {
+		b.Fatalf("expected %d items, not %d", b.N, rows[0]["count"])
+	}
+}

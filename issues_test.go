@@ -23,6 +23,7 @@ func TestQueryRowContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer stmt.Close()
 
 	var d []uint8
 	err = stmt.QueryRowContext(ctx).Scan(&d)
@@ -43,7 +44,6 @@ func TestQueryRowContextBad(t *testing.T) {
 	db := pqtest.MustDB(t)
 
 	// Ensure that cancelling a QueryRowContext does not result in an ErrBadConn.
-
 	for i := 0; i < 100; i++ {
 		ctx, cancel := context.WithCancel(context.Background())
 		go cancel()
@@ -111,6 +111,7 @@ func TestQueryCancelledReused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 
 	// scan the first value
 	if !rows.Next() {

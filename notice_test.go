@@ -30,7 +30,7 @@ func TestConnectorWithNoticeHandler_Simple(t *testing.T) {
 	c := ConnectorWithNoticeHandler(b, func(n *Error) { notice = n })
 	raise(c, t, "Test notice #1")
 	if notice == nil || notice.Message != "Test notice #1" {
-		t.Fatalf("Expected notice w/ message, got %v", notice)
+		t.Fatalf("wrong message:\nhave: %q\nwant: %q", notice.Message, "Test notice #1")
 	}
 	// Unset the handler on the same connector
 	prevC := c
@@ -39,7 +39,7 @@ func TestConnectorWithNoticeHandler_Simple(t *testing.T) {
 	}
 	raise(c, t, "Test notice #2")
 	if notice == nil || notice.Message != "Test notice #1" {
-		t.Fatalf("Expected notice to not change, got %v", notice)
+		t.Fatalf("wrong message:\nhave: %q\nwant: %q", notice.Message, "Test notice #1")
 	}
 	// Set it back on the same connector
 	if c = ConnectorWithNoticeHandler(c, func(n *Error) { notice = n }); c != prevC {
@@ -47,6 +47,6 @@ func TestConnectorWithNoticeHandler_Simple(t *testing.T) {
 	}
 	raise(c, t, "Test notice #3")
 	if notice == nil || notice.Message != "Test notice #3" {
-		t.Fatalf("Expected notice w/ message, got %v", notice)
+		t.Fatalf("wrong message:\nhave: %q\nwant: %q", notice.Message, "Test notice #3")
 	}
 }

@@ -3,7 +3,7 @@ package pq
 import "testing"
 
 func TestQuoteIdentifier(t *testing.T) {
-	var cases = []struct {
+	tests := []struct {
 		input string
 		want  string
 	}{
@@ -14,16 +14,18 @@ func TestQuoteIdentifier(t *testing.T) {
 		{"\x00foo", `""`},
 	}
 
-	for _, test := range cases {
-		got := QuoteIdentifier(test.input)
-		if got != test.want {
-			t.Errorf("QuoteIdentifier(%q) = %v want %v", test.input, got, test.want)
-		}
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			have := QuoteIdentifier(tt.input)
+			if have != tt.want {
+				t.Errorf("\nhave: %q\nwant: %q", have, tt.want)
+			}
+		})
 	}
 }
 
 func TestQuoteLiteral(t *testing.T) {
-	var cases = []struct {
+	tests := []struct {
 		input string
 		want  string
 	}{
@@ -46,10 +48,12 @@ func TestQuoteLiteral(t *testing.T) {
 		{`e'\'abc\'; DROP TABLE users;'`, ` E'e''\\''abc\\''; DROP TABLE users;'''`},
 	}
 
-	for _, test := range cases {
-		got := QuoteLiteral(test.input)
-		if got != test.want {
-			t.Errorf("QuoteLiteral(%q) = %v want %v", test.input, got, test.want)
-		}
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			have := QuoteLiteral(tt.input)
+			if have != tt.want {
+				t.Errorf("\nhave: %q\nwant: %q", have, tt.want)
+			}
+		})
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -14,14 +15,12 @@ import (
 
 func Pgbouncer() bool { return os.Getenv("PGPORT") == "6432" }
 func Pgpool() bool    { return os.Getenv("PGPORT") == "7432" }
-
 func SkipPgbouncer(t testing.TB) {
 	t.Helper()
 	if Pgbouncer() {
 		t.Skip("skipped for pgbouncer (PGPORT=6432)")
 	}
 }
-
 func SkipPgpool(t testing.TB) {
 	t.Helper()
 	if Pgpool() {
@@ -178,7 +177,8 @@ func Exec(t testing.TB, db interface {
 
 // Query calls db.Query(), calling t.Fatal if this fails.
 //
-// The resulting rows are scanned to the type T.
+// The resulting rows are scanned to the type T. All result sets are scanned;
+// columns for additional result sets are prefixed with (rs %d), starting at 1.
 func Query[T any](t testing.TB, db interface {
 	Query(string, ...any) (*sql.Rows, error)
 }, q string, args ...any) []map[string]T {
@@ -188,38 +188,73 @@ func Query[T any](t testing.TB, db interface {
 		t.Fatalf("pqtest.Query: %s", err)
 	}
 
-	cols, err := rows.Columns()
-	if err != nil {
-		t.Fatalf("pqtest.Query: %s", err)
-	}
-
 	res := make([]map[string]T, 0, 16)
-	for rows.Next() {
-		if rows.Err() != nil {
-			t.Fatalf("pqtest.Query: %s", rows.Err())
-		}
-
-		var (
-			vals = make([]T, len(cols))
-			ptrs = make([]any, len(cols))
-		)
-		for i := range vals {
-			ptrs[i] = &vals[i]
-		}
-		err := rows.Scan(ptrs...)
+	readRows := func(rs int) {
+		cols, err := rows.Columns()
 		if err != nil {
 			t.Fatalf("pqtest.Query: %s", err)
 		}
+		for rows.Next() {
+			if rows.Err() != nil {
+				t.Fatalf("pqtest.Query: %s", rows.Err())
+			}
 
-		r := map[string]T{}
-		for i, v := range vals {
-			r[cols[i]] = v
+			var (
+				vals = make([]T, len(cols))
+				ptrs = make([]any, len(cols))
+			)
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			err := rows.Scan(ptrs...)
+			if err != nil {
+				t.Fatalf("pqtest.Query: %s", err)
+			}
+
+			r := map[string]T{}
+			for i, v := range vals {
+				k := cols[i]
+				if rs > 0 {
+					k = fmt.Sprintf("(rs %d) %s", rs, k)
+				}
+				r[k] = v
+			}
+			res = append(res, r)
 		}
-		res = append(res, r)
 	}
-	err = rows.Close()
-	if err != nil {
+	readRows(0)
+	for i := 1; rows.NextResultSet(); i++ {
+		readRows(i)
+	}
+	if err := rows.Close(); err != nil {
 		t.Fatalf("pqtest.Query: %s", err)
 	}
 	return res
+}
+
+// QueryRow scans exactly one row, calling t.Fatal if this fails.
+//
+// The resulting row is scanned to the type T.
+func QueryRow[T any](t testing.TB, db interface {
+	Query(string, ...any) (*sql.Rows, error)
+}, q string, args ...any) map[string]T {
+	t.Helper()
+	rows := Query[T](t, db, q, args...)
+	switch len(rows) {
+	case 0:
+		// Do nothing
+	case 1:
+		return rows[0]
+	default:
+		t.Fatalf("pqtest.QueryRow: query returned %d rows", len(rows))
+	}
+	return nil
+}
+
+// Null represents a value that may be null.
+//
+// TODO(go1.22): replace with sql.Null
+type Null[T any] struct {
+	V     T
+	Valid bool
 }
