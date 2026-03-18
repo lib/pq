@@ -49,7 +49,7 @@ func TestDataTypeNameRedshift(t *testing.T) {
 		{635, "_SPECTRUM_ARRAY"},
 		{636, "_SPECTRUM_MAP"},
 		{637, "_SPECTRUM_STRUCT"},
-		{16, "BOOL"},
+		{4000, "SUPER"},
 	}
 
 	rs := &rows{
