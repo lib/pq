@@ -109,7 +109,7 @@ func TestSSLMode(t *testing.T) {
 			t.Parallel()
 
 			if tt.wantErr == "no encryption" && pqtest.Pgbouncer() {
-				// PostgreSQL repsonds with:
+				// PostgreSQL responds with:
 				//   pq: pg_hba.conf rejects connection for host "172.18.0.1", user "pqgossl", database "pqgo", no encryption (28000)
 				//
 				// But pgbouncer has a different message and code:

@@ -350,7 +350,7 @@ type Config struct {
 	// newer protocol.
 	SSLMaxProtocolVersion SSLProtocolVersion `postgres:"ssl_max_protocol_version" env:"SSLPGMAXPROTOCOLVERSION"`
 
-	// Interpert sslcert and sslkey as PEM encoded data, rather than a path to a
+	// Interpret sslcert and sslkey as PEM encoded data, rather than a path to a
 	// PEM file. This is a pq extension, not supported in libpq.
 	SSLInline bool `postgres:"sslinline" env:"-"`
 

@@ -533,7 +533,7 @@ func (l *Listener) Listen(channel string) error {
 
 	// The server allows you to issue a LISTEN on a channel which is already
 	// open, but it seems useful to be able to detect this case to spot for
-	// mistakes in application logic. If the application genuinely does't care,
+	// mistakes in application logic. If the application genuinely doesn't care,
 	// it can check the exported error and ignore it.
 	_, exists := l.channels[channel]
 	if exists {

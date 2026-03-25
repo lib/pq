@@ -33,14 +33,14 @@ v1.12.0 (2026-03-18)
   For example, to test if an error is a UNIQUE constraint violation:
 
       if pqErr, ok := errors.AsType[*pq.Error](err); ok && pqErr.Code == pqerror.UniqueViolation {
-          log.Fatalf("email %q already exsts", email)
+          log.Fatalf("email %q already exists", email)
       }
 
   To make this a bit more convenient, it also adds a `pq.As()` function:
 
       pqErr := pq.As(err, pqerror.UniqueViolation)
       if pqErr != nil {
-          log.Fatalf("email %q already exsts", email)
+          log.Fatalf("email %q already exists", email)
       }
 
 ### Fixes

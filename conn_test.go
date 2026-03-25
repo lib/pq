@@ -248,7 +248,7 @@ func TestExec(t *testing.T) {
 	}
 }
 
-func TestStatment(t *testing.T) {
+func TestStatement(t *testing.T) {
 	db := pqtest.MustDB(t)
 
 	stmt1 := pqtest.Prepare(t, db, "select 1")
@@ -1233,7 +1233,7 @@ func TestRowsResultTag(t *testing.T) {
 			query: "CREATE TEMP TABLE t (a int); DROP TABLE t",
 			tag:   "DROP TABLE",
 		},
-		// Ensure a rows-returning query in any position among various tags-returing
+		// Ensure a rows-returning query in any position among various tags-returning
 		// statements will prefer the rows.
 		{
 			query: "SELECT 1; CREATE TEMP TABLE t (a int); DROP TABLE t",
