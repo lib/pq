@@ -15,7 +15,7 @@ import (
 // %APPDATA%/postgresql on Windows, and $HOME/.postgresql/postgresql.crt
 // everywhere else.
 //
-// Returns an empy string if no home directory was found.
+// Returns an empty string if no home directory was found.
 //
 // Matches pqGetHomeDirectory() from PostgreSQL.
 // https://github.com/postgres/postgres/blob/2b117bb/src/interfaces/libpq/fe-connect.c#L8214

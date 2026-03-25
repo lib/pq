@@ -351,7 +351,7 @@ func ExampleAs() {
 
 	_, err = db.Exec("insert into t (email) values ($1)", email)
 	if pqErr := pq.As(err, pqerror.UniqueViolation); pqErr != nil {
-		log.Fatalf("email %q already exsts", email)
+		log.Fatalf("email %q already exists", email)
 	}
 	if err != nil {
 		log.Fatalf("unknown error: %s", err)

@@ -234,7 +234,7 @@ func (e *Error) ErrorWithDetail() string {
 		if line > 1 {
 			fmt.Fprintf(b, "% 7d | %s\n", line-1, expandTab(lines[line-2]))
 		}
-		/// Expand tabs, so that the ^ is at at the correct position, but leave
+		/// Expand tabs, so that the ^ is at the correct position, but leave
 		/// "column 10-13" intact. Adjusting this to the visual column would be
 		/// better, but we don't know the tabsize of the user in their editor,
 		/// which can be 8, 4, 2, or something else. We can't know. So leaving

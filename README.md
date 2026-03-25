@@ -96,7 +96,7 @@ convert an error to `pq.Error`:
 ```go
 pqErr := pq.As(err, pqerror.UniqueViolation)
 if pqErr != nil {
-  return fmt.Errorf("email %q already exsts", email)
+  return fmt.Errorf("email %q already exists", email)
 }
 ```
 

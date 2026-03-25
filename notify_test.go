@@ -180,7 +180,7 @@ func TestListenerConnClose(t *testing.T) {
 	}
 }
 
-func TestListernerConnPing(t *testing.T) {
+func TestListenerConnPing(t *testing.T) {
 	t.Parallel()
 	l, _ := newTestListenerConn(t)
 	defer l.Close()

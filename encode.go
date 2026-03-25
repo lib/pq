@@ -317,7 +317,7 @@ func parseTS(currentLocation *time.Location, str string) (any, error) {
 // ParseTimestamp parses Postgres' text format. It returns a time.Time in
 // currentLocation iff that time's offset agrees with the offset sent from the
 // Postgres server. Otherwise, ParseTimestamp returns a time.Time with the fixed
-// offset offset provided by the Postgres server.
+// offset provided by the Postgres server.
 func ParseTimestamp(currentLocation *time.Location, str string) (time.Time, error) {
 	return pqtime.Parse(currentLocation, str)
 }
