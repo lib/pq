@@ -687,7 +687,7 @@ func (cfg *Config) fromEnv(env []string) error {
 	return cfg.setFromTag(e, "env", false)
 }
 
-// parseOpts parses the options from name and adds them to the values.
+// fromDSN parses the options from name and adds them to the values.
 //
 // The parsing code is based on conninfo_parse from libpq's fe-connect.c
 func (cfg *Config) fromDSN(dsn string) error {
