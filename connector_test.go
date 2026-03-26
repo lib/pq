@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -853,9 +852,6 @@ func TestProtocolVersion(t *testing.T) {
 
 func TestService(t *testing.T) {
 	h := pqtest.Home(t)
-	if runtime.GOOS != "windows" {
-		h = filepath.Dir(h)
-	}
 
 	// Test without ~/.pg_service.conf existing
 	t.Run("default file doesn't exist", func(t *testing.T) {

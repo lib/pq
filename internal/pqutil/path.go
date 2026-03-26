@@ -12,8 +12,7 @@ import (
 )
 
 // Home gets the PostgreSQL configuration dir in the user's home directory:
-// %APPDATA%/postgresql on Windows, and $HOME/.postgresql/postgresql.crt
-// everywhere else.
+// %APPDATA%/postgresql on Windows, and $HOME everywhere else.
 //
 // Returns an empy string if no home directory was found.
 //
@@ -40,6 +39,25 @@ func Home() string {
 		}
 		home = u.HomeDir
 	}
+	return home
+}
+
+// PostgresqlHome returns a PostgreSQL-specific "home" dir.
+// Effectively, this ensures a "...\postgresql" or ".../.postgresql" path suffix.
+//
+// This directory is mostly (only) used for SSL-related *.key/*.crt files.
+func PostgresqlHome() string {
+	home := Home()
+	if home == "" {
+		return ""
+	}
+
+	// windows "home" is already pg-specific
+	if runtime.GOOS == "windows" {
+		return home
+	}
+
+	// others need a pg-specific suffix
 	return filepath.Join(home, ".postgresql")
 }
 
