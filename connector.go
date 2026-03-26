@@ -747,7 +747,7 @@ func (cfg *Config) fromDSN(dsn string) error {
 
 		// The current character should be =
 		if r != '=' || !ok {
-			return fmt.Errorf(`missing "=" after %q in connection info string"`, string(keyRunes))
+			return fmt.Errorf(`missing "=" after %q in connection info string`, string(keyRunes))
 		}
 
 		// Skip any whitespace after the =
