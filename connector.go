@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -800,10 +799,7 @@ func (cfg *Config) fromService() error {
 	}
 
 	if !cfg.isset("PGSERVICEFILE") {
-		if home := pqutil.Home(); home != "" {
-			if runtime.GOOS != "windows" {
-				home = filepath.Dir(home) // Unlike other files this uses ~/ and not ~/.postgresql
-			}
+		if home := pqutil.Home(false); home != "" {
 			cfg.ServiceFile = filepath.Join(home, ".pg_service.conf")
 		}
 	}

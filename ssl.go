@@ -65,7 +65,7 @@ func getTLSConfigClone(key string) *tls.Config {
 // in case of sslmode=allow or prefer.
 func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 	var (
-		home = pqutil.Home()
+		home = pqutil.Home(true)
 		// Don't set defaults here, because tlsConf may be overwritten if a
 		// custom one was registered. Set it after the sslmode switch.
 		tlsConf = &tls.Config{}

@@ -89,10 +89,10 @@ func DSN(conninfo string) string {
 func Home(t *testing.T) string {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	if err := os.MkdirAll(pqutil.Home(), 0o777); err != nil {
+	if err := os.MkdirAll(pqutil.Home(true), 0o777); err != nil {
 		t.Fatal(err)
 	}
-	return pqutil.Home()
+	return pqutil.Home(true)
 }
 
 // DB connects to the test database and returns the Ping error. The connection
