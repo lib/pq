@@ -374,14 +374,14 @@ func TestSSLDefaults(t *testing.T) {
 		t.Run(tt.file, func(t *testing.T) {
 			pqtest.Home(t)
 
-			pqtest.Write(t, []byte("invalid data"), pqutil.Home(), tt.file)
+			pqtest.Write(t, []byte("invalid data"), pqutil.Home(true), tt.file)
 			if tt.file == "postgresql.crt" {
-				pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.key"), pqutil.Home(), "postgresql.key")
-				pqtest.Chmod(t, 0o600, pqutil.Home(), "postgresql.key")
+				pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.key"), pqutil.Home(true), "postgresql.key")
+				pqtest.Chmod(t, 0o600, pqutil.Home(true), "postgresql.key")
 			}
 			if tt.file == "postgresql.key" {
-				pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.crt"), pqutil.Home(), "postgresql.crt")
-				pqtest.Chmod(t, 0o600, pqutil.Home(), "postgresql.key")
+				pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.crt"), pqutil.Home(true), "postgresql.crt")
+				pqtest.Chmod(t, 0o600, pqutil.Home(true), "postgresql.key")
 			}
 
 			_, err := pqtest.DB(t, "user=pqgossl sslmode=require")
@@ -393,10 +393,10 @@ func TestSSLDefaults(t *testing.T) {
 
 	t.Run("work with default paths", func(t *testing.T) {
 		pqtest.Home(t)
-		pqtest.Write(t, pqtest.Read(t, "testdata/init/root.crt"), pqutil.Home(), "root.crt")
-		pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.crt"), pqutil.Home(), "postgresql.crt")
-		pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.key"), pqutil.Home(), "postgresql.key")
-		pqtest.Chmod(t, 0o600, pqutil.Home(), "postgresql.key")
+		pqtest.Write(t, pqtest.Read(t, "testdata/init/root.crt"), pqutil.Home(true), "root.crt")
+		pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.crt"), pqutil.Home(true), "postgresql.crt")
+		pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.key"), pqutil.Home(true), "postgresql.key")
+		pqtest.Chmod(t, 0o600, pqutil.Home(true), "postgresql.key")
 		_ = pqtest.MustDB(t, "host=postgres user=pqgosslcert sslmode=verify-ca")
 	})
 }
