@@ -38,7 +38,7 @@ var (
 	ErrSSLKeyUnknownOwnership    = pqutil.ErrSSLKeyUnknownOwnership
 	ErrSSLKeyHasWorldPermissions = pqutil.ErrSSLKeyHasWorldPermissions
 
-	errQueryInProgress = errors.New("pq: there is already a query being processed on this connection")
+	errQueryInProgress = fmt.Errorf("pq: there is already a query being processed on this connection: %w", driver.ErrBadConn)
 	errUnexpectedReady = errors.New("unexpected ReadyForQuery")
 	errNoRowsAffected  = errors.New("no RowsAffected available after the empty statement")
 	errNoLastInsertID  = errors.New("no LastInsertId available after the empty statement")
