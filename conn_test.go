@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -507,7 +508,7 @@ func TestErrorDuringStartupClosesConn(t *testing.T) {
 
 func TestBadConn(t *testing.T) {
 	t.Parallel()
-	for _, tt := range []error{io.EOF, &Error{Severity: pqerror.SeverityFatal}} {
+	for _, tt := range []error{io.EOF, &Error{Severity: pqerror.SeverityFatal}, io.ErrUnexpectedEOF} {
 		t.Run(fmt.Sprintf("%s", tt), func(t *testing.T) {
 			var cn conn
 			err := cn.handleError(tt)
@@ -519,6 +520,63 @@ func TestBadConn(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUnexpectedEOF(t *testing.T) {
+	t.Parallel()
+
+	// On the first "select truncate" it sends a correct RowDescription followed
+	// by a truncated DataRow (header declares 96 body bytes, only 5 are sent)
+	// and then close the connection. database/sql should discard the connection
+	// and retry, and subsequent queries succeed.
+	var failed atomic.Bool
+	f := pqtest.NewFake(t, func(f pqtest.Fake, cn net.Conn) {
+		f.Startup(cn, nil)
+		for {
+			code, q, ok := f.ReadMsg(cn)
+			if !ok {
+				return
+			}
+			switch code {
+			case proto.Terminate:
+				cn.Close()
+				return
+			case proto.Query:
+				switch q := string(q[:bytes.IndexByte(q, 0)]); {
+				case q == ";": // Ping()
+					f.WriteMsg(cn, proto.EmptyQueryResponse, "")
+					f.WriteMsg(cn, proto.ReadyForQuery, "I")
+				case q == "select truncate" && !failed.Swap(true):
+					f.WriteMsg(cn, proto.RowDescription, "\x00\x01truncate\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x19\xff\xff\xff\xff\xff\xff\x00\x00")
+					cn.Write([]byte("D\x00\x00\x00\x64short"))
+					cn.Close()
+					return
+				case q == "select truncate":
+					f.SimpleQuery(cn, "SELECT", "truncate", "1")
+					f.WriteMsg(cn, proto.ReadyForQuery, "I")
+				case q == "select okay":
+					f.SimpleQuery(cn, "SELECT", "okay", "1")
+					f.WriteMsg(cn, proto.ReadyForQuery, "I")
+				default:
+					panic(fmt.Sprintf("unexpected query: %q", q))
+				}
+			}
+		}
+	})
+	defer f.Close()
+
+	db := pqtest.MustDB(t, f.DSN())
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	// This should work as database/sql retries for us.
+	pqtest.QueryRow[int](t, db, `select truncate`)
+	if !failed.Load() {
+		t.Fatal("select truncate never failed")
+	}
+
+	// Make sure it doesn't break the connection.
+	pqtest.QueryRow[int](t, db, `select okay`)
 }
 
 func TestConnClose(t *testing.T) {

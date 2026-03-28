@@ -1,3 +1,12 @@
+unreleased
+----------
+
+- Treat io.ErrUnexpectedEOF as driver.ErrBadConn so database/sql discards the
+  connection. Since v1.12.0 this could result in permanently broken connections,
+  especially with CockroachDB which frequently sends partial messages ([#1299]).
+
+[#1299]: https://github.com/lib/pq/pull/1299
+
 v1.12.1 (2026-03-30)
 --------------------
 
