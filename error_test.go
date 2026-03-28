@@ -3,8 +3,10 @@ package pq
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"reflect"
@@ -259,6 +261,30 @@ func TestNetworkError(t *testing.T) {
 	err = db.Ping()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHandleErrorUnexpectedEOF(t *testing.T) {
+	cn := &conn{}
+
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"io.EOF", io.EOF},
+		{"io.ErrUnexpectedEOF", io.ErrUnexpectedEOF},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cn.err = syncErr{}
+			got := cn.handleError(tc.err)
+			if got != driver.ErrBadConn {
+				t.Fatalf("handleError(%v) = %v; want driver.ErrBadConn", tc.err, got)
+			}
+			if cn.err.get() != driver.ErrBadConn {
+				t.Fatalf("cn.err not set after handleError(%v)", tc.err)
+			}
+		})
 	}
 }
 

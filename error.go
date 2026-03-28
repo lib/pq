@@ -307,7 +307,7 @@ func (cn *conn) handleError(reported error, query ...string) error {
 			reported = driver.ErrBadConn
 		}
 	case error:
-		if err == io.EOF || err.Error() == "remote error: handshake failure" {
+		if err == io.EOF || err == io.ErrUnexpectedEOF || err.Error() == "remote error: handshake failure" {
 			reported = driver.ErrBadConn
 		}
 	default:
