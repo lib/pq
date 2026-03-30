@@ -1,3 +1,13 @@
+v1.12.1 (2026-03-30)
+--------------------
+
+- Look for pgpass file in ~/.pgpass instead of ~/.postgresql/pgpass ([#1300]).
+
+- Don't clear password if directly set on pq.Config ([#1302]).
+
+[#1300]: https://github.com/lib/pq/pull/1300
+[#1302]: https://github.com/lib/pq/pull/1302
+
 v1.12.0 (2026-03-18)
 --------------------
 
