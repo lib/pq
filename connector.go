@@ -974,6 +974,8 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 	return nil
 }
 
+// Should generally only be used from newConfig(), as it will never be set if
+// people go outside that.
 func (cfg Config) isset(name string) bool {
 	return slices.Contains(cfg.set, name)
 }

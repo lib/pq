@@ -116,8 +116,7 @@ func TestPgpass(t *testing.T) {
 		for k, v := range extra {
 			o[k] = v
 		}
-		_, pwd := o["password"]
-		have := pgpass.PasswordFromPgpass(o["passfile"], o["user"], o["password"], o["host"], o["port"], o["dbname"], pwd)
+		have := pgpass.PasswordFromPgpass(o["passfile"], o["user"], o["password"], o["host"], o["port"], o["dbname"])
 		if have != want {
 			t.Fatalf("wrong password\nhave: %q\nwant: %q", have, want)
 		}
