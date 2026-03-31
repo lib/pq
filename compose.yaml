@@ -6,7 +6,7 @@ services:
     image:    'cleanstart/pgbouncer:latest'
     ports:    ['127.0.0.1:6432:6432']
     command:  ['/init/pgbouncer.ini']
-    volumes:  ['./testdata/init:/init']
+    volumes:  ['./testdata/pgbouncer:/init', './testdata/ssl:/ssl']
     environment:
       'PGBOUNCER_DATABASE': 'pqgo'
 
@@ -14,8 +14,8 @@ services:
     profiles:   ['pgpool']
     image:      'pgpool/pgpool:4.4.3'
     ports:      ['127.0.0.1:7432:7432']
-    volumes:    ['./testdata/init:/init']
-    entrypoint: '/init/entry-pgpool.sh'
+    volumes:    ['./testdata/pgpool:/init', './testdata/ssl:/ssl']
+    entrypoint: '/init/entry.sh'
     environment:
       'PGPOOL_PARAMS_PORT':              '7432'
       'PGPOOL_PARAMS_BACKEND_HOSTNAME0': 'pg18'
@@ -24,7 +24,7 @@ services:
     image:       'postgres:18'
     ports:       ['127.0.0.1:5432:5432']
     entrypoint:  '/init/entry.sh'
-    volumes:     ['./testdata/init:/init']
+    volumes:     ['./testdata/postgres:/init', './testdata/ssl:/ssl']
     shm_size:    '128mb'
     healthcheck: {test: ['CMD-SHELL', 'pg_isready', '-U', 'pqgo', '-d', 'pqgo'], start_period: '30s', start_interval: '1s'}
     environment:
@@ -36,7 +36,7 @@ services:
     image:       'postgres:17'
     ports:       ['127.0.0.1:5432:5432']
     entrypoint:  '/init/entry.sh'
-    volumes:     ['./testdata/init:/init']
+    volumes:     ['./testdata/postgres:/init', './testdata/ssl:/ssl']
     shm_size:    '128mb'
     healthcheck: {test: ['CMD-SHELL', 'pg_isready', '-U', 'pqgo', '-d', 'pqgo'], start_period: '30s', start_interval: '1s'}
     environment:
@@ -48,7 +48,7 @@ services:
     image:       'postgres:16'
     ports:       ['127.0.0.1:5432:5432']
     entrypoint:  '/init/entry.sh'
-    volumes:     ['./testdata/init:/init']
+    volumes:     ['./testdata/postgres:/init', './testdata/ssl:/ssl']
     shm_size:    '128mb'
     healthcheck: {test: ['CMD-SHELL', 'pg_isready', '-U', 'pqgo', '-d', 'pqgo'], start_period: '30s', start_interval: '1s'}
     environment:
@@ -60,7 +60,7 @@ services:
     image:       'postgres:15'
     ports:       ['127.0.0.1:5432:5432']
     entrypoint:  '/init/entry.sh'
-    volumes:     ['./testdata/init:/init']
+    volumes:     ['./testdata/postgres:/init', './testdata/ssl:/ssl']
     shm_size:    '128mb'
     healthcheck: {test: ['CMD-SHELL', 'pg_isready', '-U', 'pqgo', '-d', 'pqgo'], start_period: '30s', start_interval: '1s'}
     environment:
@@ -72,7 +72,7 @@ services:
     image:       'postgres:14'
     ports:       ['127.0.0.1:5432:5432']
     entrypoint:  '/init/entry.sh'
-    volumes:     ['./testdata/init:/init']
+    volumes:     ['./testdata/postgres:/init', './testdata/ssl:/ssl']
     shm_size:    '128mb'
     healthcheck: {test: ['CMD-SHELL', 'pg_isready', '-U', 'pqgo', '-d', 'pqgo'], start_period: '30s', start_interval: '1s'}
     environment:
