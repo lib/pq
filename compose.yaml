@@ -26,7 +26,7 @@ services:
     entrypoint:  '/init/entry.sh'
     volumes:     ['./testdata/postgres:/init', './testdata/ssl:/ssl']
     shm_size:    '128mb'
-    healthcheck: {test: ['CMD-SHELL', 'pg_isready', '-U', 'pqgo', '-d', 'pqgo'], start_period: '30s', start_interval: '1s'}
+    healthcheck: {test: ['CMD-SHELL', 'pg_isready -U pqgo -d pqgo'], start_period: '30s', start_interval: '1s'}
     environment:
       'POSTGRES_DATABASE': 'pqgo'
       'POSTGRES_USER':     'pqgo'
@@ -38,7 +38,7 @@ services:
     entrypoint:  '/init/entry.sh'
     volumes:     ['./testdata/postgres:/init', './testdata/ssl:/ssl']
     shm_size:    '128mb'
-    healthcheck: {test: ['CMD-SHELL', 'pg_isready', '-U', 'pqgo', '-d', 'pqgo'], start_period: '30s', start_interval: '1s'}
+    healthcheck: {test: ['CMD-SHELL', 'pg_isready -U pqgo -d pqgo'], start_period: '30s', start_interval: '1s'}
     environment:
       'POSTGRES_DATABASE': 'pqgo'
       'POSTGRES_USER':     'pqgo'
@@ -50,7 +50,7 @@ services:
     entrypoint:  '/init/entry.sh'
     volumes:     ['./testdata/postgres:/init', './testdata/ssl:/ssl']
     shm_size:    '128mb'
-    healthcheck: {test: ['CMD-SHELL', 'pg_isready', '-U', 'pqgo', '-d', 'pqgo'], start_period: '30s', start_interval: '1s'}
+    healthcheck: {test: ['CMD-SHELL', 'pg_isready -U pqgo -d pqgo'], start_period: '30s', start_interval: '1s'}
     environment:
       'POSTGRES_DATABASE': 'pqgo'
       'POSTGRES_USER':     'pqgo'
@@ -62,7 +62,7 @@ services:
     entrypoint:  '/init/entry.sh'
     volumes:     ['./testdata/postgres:/init', './testdata/ssl:/ssl']
     shm_size:    '128mb'
-    healthcheck: {test: ['CMD-SHELL', 'pg_isready', '-U', 'pqgo', '-d', 'pqgo'], start_period: '30s', start_interval: '1s'}
+    healthcheck: {test: ['CMD-SHELL', 'pg_isready -U pqgo -d pqgo'], start_period: '30s', start_interval: '1s'}
     environment:
       'POSTGRES_DATABASE': 'pqgo'
       'POSTGRES_USER':     'pqgo'
@@ -74,7 +74,7 @@ services:
     entrypoint:  '/init/entry.sh'
     volumes:     ['./testdata/postgres:/init', './testdata/ssl:/ssl']
     shm_size:    '128mb'
-    healthcheck: {test: ['CMD-SHELL', 'pg_isready', '-U', 'pqgo', '-d', 'pqgo'], start_period: '30s', start_interval: '1s'}
+    healthcheck: {test: ['CMD-SHELL', 'pg_isready -U pqgo -d pqgo'], start_period: '30s', start_interval: '1s'}
     environment:
       'POSTGRES_DATABASE': 'pqgo'
       'POSTGRES_USER':     'pqgo'
