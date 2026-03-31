@@ -66,22 +66,22 @@ func TestSSLMode(t *testing.T) {
 		// sslmode=verify-ca: verify that the certificate was signed by a trusted CA
 		{"host=postgres sslmode=verify-ca user=pqgossl", "invalid-cert"},
 		{"host=postgres sslmode=verify-ca user=pqgossl sslrootcert=''", "invalid-cert"},
-		{"sslrootcert=testdata/init/root.crt sslmode=verify-ca user=pqgossl host=127.0.0.1", ""},
-		{"sslrootcert=testdata/init/root.crt sslmode=verify-ca user=pqgossl host=postgres-invalid", ""},
-		{"sslrootcert=testdata/init/root.crt sslmode=verify-ca user=pqgossl host=postgres", ""},
+		{"sslrootcert=testdata/ssl/root.crt sslmode=verify-ca user=pqgossl host=127.0.0.1", ""},
+		{"sslrootcert=testdata/ssl/root.crt sslmode=verify-ca user=pqgossl host=postgres-invalid", ""},
+		{"sslrootcert=testdata/ssl/root.crt sslmode=verify-ca user=pqgossl host=postgres", ""},
 
 		// sslmode=verify-full: verify that the certification was signed by a trusted CA and the host matches
 		{"sslmode=verify-full user=pqgossl host=postgres", "invalid-cert"},
-		{"sslrootcert=testdata/init/root.crt sslmode=verify-full user=pqgossl host=127.0.0.1", "invalid-cert"},
-		{"sslrootcert=testdata/init/root.crt sslmode=verify-full user=pqgossl host=postgres-invalid", "invalid-cert"},
-		{"sslrootcert=testdata/init/root.crt sslmode=verify-full user=pqgossl host=postgres", ""},
+		{"sslrootcert=testdata/ssl/root.crt sslmode=verify-full user=pqgossl host=127.0.0.1", "invalid-cert"},
+		{"sslrootcert=testdata/ssl/root.crt sslmode=verify-full user=pqgossl host=postgres-invalid", "invalid-cert"},
+		{"sslrootcert=testdata/ssl/root.crt sslmode=verify-full user=pqgossl host=postgres", ""},
 
 		// With root cert
-		{"sslrootcert=testdata/init/bogus_root.crt host=postgres sslmode=require user=pqgossl", "invalid-cert"},
-		{"sslrootcert=testdata/init/non_existent.crt host=127.0.0.1 sslmode=require user=pqgossl", ""},
-		{"sslrootcert=testdata/init/root.crt host=127.0.0.1 sslmode=require user=pqgossl", ""},
-		{"sslrootcert=testdata/init/root.crt host=postgres sslmode=require user=pqgossl", ""},
-		{"sslrootcert=testdata/init/root.crt host=postgres-invalid sslmode=require user=pqgossl", ""},
+		{"sslrootcert=testdata/ssl/bogus_root.crt host=postgres sslmode=require user=pqgossl", "invalid-cert"},
+		{"sslrootcert=testdata/ssl/non_existent.crt host=127.0.0.1 sslmode=require user=pqgossl", ""},
+		{"sslrootcert=testdata/ssl/root.crt host=127.0.0.1 sslmode=require user=pqgossl", ""},
+		{"sslrootcert=testdata/ssl/root.crt host=postgres sslmode=require user=pqgossl", ""},
+		{"sslrootcert=testdata/ssl/root.crt host=postgres-invalid sslmode=require user=pqgossl", ""},
 
 		// sslmode=prefer
 		{"sslmode=prefer user=pqgossl", ""},
@@ -138,7 +138,7 @@ func TestSSLClientCertificates(t *testing.T) {
 	pqtest.SkipPgbouncer(t) // TODO: can't get it to work.
 	t.Parallel()
 	startSSLTest(t, "pqgosslcert")
-	pqtest.Chmod(t, 0o600, "testdata/init/postgresql.key")
+	pqtest.Chmod(t, 0o600, "testdata/ssl/postgresql.key")
 
 	tests := []struct {
 		connect string
@@ -147,16 +147,16 @@ func TestSSLClientCertificates(t *testing.T) {
 		{"sslmode=require user=pqgosslcert", "requires a valid client certificate (28000)"},
 		{"sslmode=require user=pqgosslcert sslcert=''", "requires a valid client certificate (28000)"},
 		{"sslmode=require user=pqgosslcert sslcert=/tmp/filedoesnotexist", "requires a valid client certificate (28000)"},
-		{"sslmode=require user=pqgosslcert sslcert=testdata/init/postgresql.crt", "directory"},
-		{"sslmode=require user=pqgosslcert sslcert=testdata/init/postgresql.crt sslkey=''", "directory"},
-		{"sslmode=require user=pqgosslcert sslcert=testdata/init/postgresql.crt sslkey=/tmp/filedoesnotexist", "no such file or directory"},
-		{"sslmode=require user=pqgosslcert sslcert=testdata/init/postgresql.crt sslkey=testdata/init/postgresql.crt", "has world access"},
+		{"sslmode=require user=pqgosslcert sslcert=testdata/ssl/postgresql.crt", "directory"},
+		{"sslmode=require user=pqgosslcert sslcert=testdata/ssl/postgresql.crt sslkey=''", "directory"},
+		{"sslmode=require user=pqgosslcert sslcert=testdata/ssl/postgresql.crt sslkey=/tmp/filedoesnotexist", "no such file or directory"},
+		{"sslmode=require user=pqgosslcert sslcert=testdata/ssl/postgresql.crt sslkey=testdata/ssl/postgresql.crt", "has world access"},
 
-		{"sslmode=require user=pqgosslcert sslcert=testdata/init/postgresql.crt sslkey=testdata/init/postgresql.key", ""},
+		{"sslmode=require user=pqgosslcert sslcert=testdata/ssl/postgresql.crt sslkey=testdata/ssl/postgresql.key", ""},
 
 		{fmt.Sprintf("sslmode=require user=pqgosslcert sslinline=true sslcert='%s' sslkey='%s'",
-			pqtest.Read(t, "testdata/init/postgresql.crt"),
-			pqtest.Read(t, "testdata/init/postgresql.key")),
+			pqtest.Read(t, "testdata/ssl/postgresql.crt"),
+			pqtest.Read(t, "testdata/ssl/postgresql.key")),
 			""},
 	}
 
@@ -187,7 +187,7 @@ func TestSSLClientCertificateIntermediate(t *testing.T) {
 	pqtest.SkipPgbouncer(t) // TODO: can't get it to work.
 	t.Parallel()
 	startSSLTest(t, "pqgosslcert")
-	pqtest.Chmod(t, 0o600, "testdata/init/client_intermediate.key")
+	pqtest.Chmod(t, 0o600, "testdata/ssl/client_intermediate.key")
 
 	tests := []struct {
 		name    string
@@ -200,17 +200,17 @@ func TestSSLClientCertificateIntermediate(t *testing.T) {
 			// so sslAppendIntermediates must send the intermediate in the TLS chain.
 			name: "file certs",
 			connect: "sslmode=require user=pqgosslcert " +
-				"sslrootcert=testdata/init/root+intermediate.crt " +
-				"sslcert=testdata/init/client_intermediate.crt " +
-				"sslkey=testdata/init/client_intermediate.key",
+				"sslrootcert=testdata/ssl/root+intermediate.crt " +
+				"sslcert=testdata/ssl/client_intermediate.crt " +
+				"sslkey=testdata/ssl/client_intermediate.key",
 		},
 		{
 			name: "inline certs",
 			connect: fmt.Sprintf(
 				"sslmode=require user=pqgosslcert sslinline=true sslrootcert='%s' sslcert='%s' sslkey='%s'",
-				pqtest.Read(t, "testdata/init/root+intermediate.crt"),
-				pqtest.Read(t, "testdata/init/client_intermediate.crt"),
-				pqtest.Read(t, "testdata/init/client_intermediate.key"),
+				pqtest.Read(t, "testdata/ssl/root+intermediate.crt"),
+				pqtest.Read(t, "testdata/ssl/client_intermediate.crt"),
+				pqtest.Read(t, "testdata/ssl/client_intermediate.key"),
 			),
 		},
 		{
@@ -218,9 +218,9 @@ func TestSSLClientCertificateIntermediate(t *testing.T) {
 			// nothing to append, so the server can't verify the client cert chain.
 			name: "fails without intermediate in sslrootcert",
 			connect: "sslmode=require user=pqgosslcert " +
-				"sslrootcert=testdata/init/root.crt " +
-				"sslcert=testdata/init/client_intermediate.crt " +
-				"sslkey=testdata/init/client_intermediate.key",
+				"sslrootcert=testdata/ssl/root.crt " +
+				"sslcert=testdata/ssl/client_intermediate.crt " +
+				"sslkey=testdata/ssl/client_intermediate.key",
 			wantErr: "unknown certificate authority",
 		},
 	}
@@ -376,11 +376,11 @@ func TestSSLDefaults(t *testing.T) {
 
 			pqtest.Write(t, []byte("invalid data"), pqutil.Home(true), tt.file)
 			if tt.file == "postgresql.crt" {
-				pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.key"), pqutil.Home(true), "postgresql.key")
+				pqtest.Write(t, pqtest.Read(t, "testdata/ssl/postgresql.key"), pqutil.Home(true), "postgresql.key")
 				pqtest.Chmod(t, 0o600, pqutil.Home(true), "postgresql.key")
 			}
 			if tt.file == "postgresql.key" {
-				pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.crt"), pqutil.Home(true), "postgresql.crt")
+				pqtest.Write(t, pqtest.Read(t, "testdata/ssl/postgresql.crt"), pqutil.Home(true), "postgresql.crt")
 				pqtest.Chmod(t, 0o600, pqutil.Home(true), "postgresql.key")
 			}
 
@@ -393,9 +393,9 @@ func TestSSLDefaults(t *testing.T) {
 
 	t.Run("work with default paths", func(t *testing.T) {
 		pqtest.Home(t)
-		pqtest.Write(t, pqtest.Read(t, "testdata/init/root.crt"), pqutil.Home(true), "root.crt")
-		pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.crt"), pqutil.Home(true), "postgresql.crt")
-		pqtest.Write(t, pqtest.Read(t, "testdata/init/postgresql.key"), pqutil.Home(true), "postgresql.key")
+		pqtest.Write(t, pqtest.Read(t, "testdata/ssl/root.crt"), pqutil.Home(true), "root.crt")
+		pqtest.Write(t, pqtest.Read(t, "testdata/ssl/postgresql.crt"), pqutil.Home(true), "postgresql.crt")
+		pqtest.Write(t, pqtest.Read(t, "testdata/ssl/postgresql.key"), pqutil.Home(true), "postgresql.key")
 		pqtest.Chmod(t, 0o600, pqutil.Home(true), "postgresql.key")
 		_ = pqtest.MustDB(t, "host=postgres user=pqgosslcert sslmode=verify-ca")
 	})
@@ -411,7 +411,7 @@ func TestSSLRootCA(t *testing.T) {
 		testSystemRoots = nil
 	})
 	testSystemRoots = x509.NewCertPool()
-	if !testSystemRoots.AppendCertsFromPEM(pqtest.Read(t, "testdata/init/root.crt")) {
+	if !testSystemRoots.AppendCertsFromPEM(pqtest.Read(t, "testdata/ssl/root.crt")) {
 		t.Fatal()
 	}
 

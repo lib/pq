@@ -244,7 +244,7 @@ func ExampleConnectorWithNoticeHandler() {
 }
 
 func ExampleRegisterTLSConfig() {
-	pem, err := os.ReadFile("testdata/init/root.crt")
+	pem, err := os.ReadFile("testdata/ssl/root.crt")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func ExampleRegisterTLSConfig() {
 	root := x509.NewCertPool()
 	root.AppendCertsFromPEM(pem)
 
-	certs, err := tls.LoadX509KeyPair("testdata/init/postgresql.crt", "testdata/init/postgresql.key")
+	certs, err := tls.LoadX509KeyPair("testdata/ssl/postgresql.crt", "testdata/ssl/postgresql.key")
 	if err != nil {
 		log.Fatal(err)
 	}

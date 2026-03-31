@@ -4,15 +4,15 @@
 # directory, as that runs as the postgres user rather than root.
 set -eu
 
-mkdir -p /docker-entrypoint-initdb.d /ssl
+mkdir -p /docker-entrypoint-initdb.d /ssl2
+
+cd /ssl
+cp *.key *.crt /ssl2
+chown postgres:postgres /ssl2/*
+chmod 600 /ssl2/*
 
 cd /init
 cp ./docker-entrypoint-initdb.d/* /docker-entrypoint-initdb.d
-
-cp *.key *.crt /ssl
-chown postgres:postgres /ssl/*
-chmod 600 /ssl/*
-
 echo '127.0.0.1 postgres' >>/etc/hosts
 
 exec /usr/local/bin/docker-entrypoint.sh postgres "$@"
