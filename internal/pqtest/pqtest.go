@@ -52,6 +52,13 @@ func InvalidCertificate(err error) bool {
 	return false
 }
 
+// Unsetenv unsets the environment variable and uses Cleanup to restore the
+// value after the test.
+//
+// Because Setenv affects the whole process, it cannot be used in parallel tests
+// or tests with parallel ancestors.
+func Unsetenv(t *testing.T, k string) { t.Setenv(k, ""); os.Unsetenv(k) }
+
 // Ptr gets a pointer to any value.
 //
 // TODO(go1.26): replace with new(..) once pq requires Go 1.26.
@@ -73,6 +80,7 @@ func DSN(conninfo string) string {
 		defaultTo("PGUSER", "pqgo")
 		defaultTo("PGSSLMODE", "disable")
 		defaultTo("PGCONNECT_TIMEOUT", "20")
+		os.Setenv("PGAPPNAME", "pqgo")
 	})
 
 	if ForceBinaryParameters() &&

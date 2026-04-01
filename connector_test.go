@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -78,8 +77,7 @@ func TestNewConnector(t *testing.T) {
 		useConn(t, db)
 	})
 	t.Run("Environ", func(t *testing.T) {
-		os.Setenv("PGPASSFILE", "/tmp/.pgpass")
-		defer os.Unsetenv("PGPASSFILE")
+		t.Setenv("PGPASSFILE", "/tmp/.pgpass")
 		c, err := NewConnector("")
 		if err != nil {
 			t.Fatal(err)
@@ -102,7 +100,7 @@ func TestNewConnector(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := fmt.Sprintf(
-			`map[client_encoding:UTF8 connect_timeout:20 datestyle:ISO, MDY dbname:pqgo host:localhost max_protocol_version:3.0 min_protocol_version:3.0 port:%d search_path:foo sslmode:disable sslsni:yes user:pqgo]`,
+			`map[application_name:pqgo client_encoding:UTF8 connect_timeout:20 datestyle:ISO, MDY dbname:pqgo host:localhost max_protocol_version:3.0 min_protocol_version:3.0 port:%d search_path:foo sslmode:disable sslsni:yes user:pqgo]`,
 			cfg.Port)
 		if have := fmt.Sprintf("%v", c.cfg.tomap()); have != want {
 			t.Errorf("\nhave: %s\nwant: %s", have, want)
@@ -229,6 +227,7 @@ func TestRuntimeParameters(t *testing.T) {
 		{"fallback_application_name=bar", "application_name", "bar", "", false},
 	}
 
+	pqtest.Unsetenv(t, "PGAPPNAME")
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			if tt.skipPgbouncer {
@@ -905,11 +904,7 @@ func TestService(t *testing.T) {
 		[svc5]
 	`), h, ".pg_service.conf")
 
-	// pgbouncer sets PGPORT; not really used to just unset.
-	// TODO: might want to add pqtest.Clearenv() or the like.
-	t.Setenv("PGPORT", "")
-	os.Unsetenv("PGPORT")
-
+	pqtest.Unsetenv(t, "PGPORT")
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			for k, v := range tt.env {
