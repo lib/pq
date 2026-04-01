@@ -45,10 +45,11 @@ func TestCopyInError(t *testing.T) {
 
 func TestCopyInErrorWrongType(t *testing.T) {
 	t.Parallel()
-	tx := pqtest.Begin(t, pqtest.MustDB(t))
+	db := pqtest.MustDB(t)
+	tx := pqtest.Begin(t, db)
 	pqtest.Exec(t, tx, `create temp table tbl (num integer)`)
 
-	stmt := pqtest.Prepare(t, tx, `copy tbl (num) from stdin`)
+	stmt := pqtest.Prepare(t, tx, `copy tbl (num) from stdin`, db)
 	stmt.MustExec(t, "Héllö\n ☃!\r\t\\")
 	_, err := stmt.Exec()
 	mustAs(t, err, pqerror.InvalidTextRepresentation)
@@ -66,10 +67,11 @@ func TestCopyInErrorOutsideTransaction(t *testing.T) {
 
 func TestCopyInQueryWhileCopy(t *testing.T) {
 	t.Parallel()
-	tx := pqtest.Begin(t, pqtest.MustDB(t))
+	db := pqtest.MustDB(t)
+	tx := pqtest.Begin(t, db)
 	pqtest.Exec(t, tx, `create temp table tbl (i int primary key)`)
 
-	pqtest.Prepare(t, tx, "copy tbl (i) from stdin")
+	pqtest.Prepare(t, tx, "copy tbl (i) from stdin", db)
 	_, err := tx.Query(`select 1`)
 	if !errors.Is(err, errQueryInProgress) {
 		t.Errorf("wrong error:\nhave: %s\nwant: %s", err, errQueryInProgress)
@@ -97,10 +99,11 @@ func TestCopyInNull(t *testing.T) {
 		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
-			tx := pqtest.Begin(t, pqtest.MustDB(t))
+			db := pqtest.MustDB(t)
+			tx := pqtest.Begin(t, db)
 
 			pqtest.Exec(t, tx, `create temp table tbl (i int, t text)`)
-			stmt := pqtest.Prepare(t, tx, tt.copy)
+			stmt := pqtest.Prepare(t, tx, tt.copy, db)
 			stmt.MustExec(t, 42, "forty-two")
 			stmt.MustExec(t, tt.null, tt.null)
 			stmt.MustExec(t)
@@ -130,10 +133,11 @@ func TestCopyInMultipleValues(t *testing.T) {
 		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
-			tx := pqtest.Begin(t, pqtest.MustDB(t))
+			db := pqtest.MustDB(t)
+			tx := pqtest.Begin(t, db)
 			pqtest.Exec(t, tx, `create temp table tbl (a int, b varchar)`)
 
-			stmt := pqtest.Prepare(t, tx, tt.query)
+			stmt := pqtest.Prepare(t, tx, tt.query, db)
 			for i := 0; i < 500; i++ {
 				stmt.MustExec(t, int64(i), strings.Repeat("#", 500))
 			}
@@ -161,7 +165,8 @@ func TestCopyInMultipleValues(t *testing.T) {
 
 func TestCopyInRaiseStmtTrigger(t *testing.T) {
 	t.Parallel()
-	tx := pqtest.Begin(t, pqtest.MustDB(t))
+	db := pqtest.MustDB(t)
+	tx := pqtest.Begin(t, db)
 	pqtest.Exec(t, tx, `create temp table tbl (a int, b varchar)`)
 	pqtest.Exec(t, tx, `
 		create or replace function pg_temp.temptest()
@@ -178,7 +183,7 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 		for each row execute procedure pg_temp.temptest()
 	`)
 
-	stmt := pqtest.Prepare(t, tx, `copy tbl (a, b) from stdin`)
+	stmt := pqtest.Prepare(t, tx, `copy tbl (a, b) from stdin`, db)
 	stmt.MustExec(t, int64(1), strings.Repeat("#", 500))
 	stmt.MustExec(t)
 	stmt.MustClose(t)
@@ -195,10 +200,11 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 
 func TestCopyInTypes(t *testing.T) {
 	t.Parallel()
-	tx := pqtest.Begin(t, pqtest.MustDB(t))
+	db := pqtest.MustDB(t)
+	tx := pqtest.Begin(t, db)
 	pqtest.Exec(t, tx, `create temp table tbl (num integer, text varchar, blob bytea, nothing varchar)`)
 
-	stmt := pqtest.Prepare(t, tx, `copy tbl (num, text, blob, nothing) from stdin`)
+	stmt := pqtest.Prepare(t, tx, `copy tbl (num, text, blob, nothing) from stdin`, db)
 	stmt.MustExec(t, int64(1234567890), "Héllö\n ☃!\r\t\\", []byte{0, 255, 9, 10, 13}, nil)
 	stmt.MustExec(t)
 	stmt.MustClose(t)
@@ -241,7 +247,7 @@ func TestCopyInRespLoopConnectionError(t *testing.T) {
 
 	pid := pqtest.Query[int64](t, tx, `select pg_backend_pid() as pid`)
 	pqtest.Exec(t, tx, "create temp table tbl (a int)")
-	stmt := pqtest.Prepare(t, tx, `copy tbl (a) from stdin`)
+	stmt := pqtest.Prepare(t, tx, `copy tbl (a) from stdin`, db)
 	pqtest.Exec(t, db, `select pg_terminate_backend($1)`, pid[0]["pid"])
 
 	var err error
@@ -271,10 +277,11 @@ func TestCopyInRespLoopConnectionError(t *testing.T) {
 }
 
 func BenchmarkCopyIn(b *testing.B) {
-	tx := pqtest.Begin(b, pqtest.MustDB(b))
+	db := pqtest.MustDB(b)
+	tx := pqtest.Begin(b, db)
 
 	pqtest.Exec(b, tx, `create temp table tbl (a int, b varchar)`)
-	stmt := pqtest.Prepare(b, tx, `copy tbl (a, b) from stdin`)
+	stmt := pqtest.Prepare(b, tx, `copy tbl (a, b) from stdin`, db)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

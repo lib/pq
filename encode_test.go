@@ -334,7 +334,7 @@ func TestByteaOutputFormats(t *testing.T) {
 			}
 
 			{ // Same but with Prepare
-				stmt := pqtest.Prepare(t, tx, `select decode('5c7800ff6162630108', 'hex')`)
+				stmt := pqtest.Prepare(t, tx, `select decode('5c7800ff6162630108', 'hex')`, db)
 				rows, err := stmt.Query()
 				if err != nil {
 					t.Fatal(err)

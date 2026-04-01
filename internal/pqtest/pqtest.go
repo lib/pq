@@ -102,6 +102,11 @@ func Home(t *testing.T) string {
 	return pqutil.Home(true)
 }
 
+var (
+	mu       sync.Mutex
+	cleanups = make(map[*sql.DB][]func())
+)
+
 // DB connects to the test database and returns the Ping error. The connection
 // is closed in t.Cleanup().
 func DB(t testing.TB, conninfo ...string) (*sql.DB, error) {
@@ -110,7 +115,15 @@ func DB(t testing.TB, conninfo ...string) (*sql.DB, error) {
 	if err != nil {
 		t.Fatalf("pqtest.DB: %s", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for i := len(cleanups[db]) - 1; i >= 0; i-- {
+			cleanups[db][i]()
+		}
+		delete(cleanups, db)
+		db.Close()
+	})
 	return db, db.Ping()
 }
 
@@ -132,10 +145,9 @@ func Begin(t testing.TB, db *sql.DB) *sql.Tx {
 	if err != nil {
 		t.Fatalf("pqtest.Begin: %s", err)
 	}
-	// We can't call t.Cleanup here as that will race with the t.Cleanup from
-	// MustDB (it's called in "last added, first called", so the tx.Rollback
-	// gets called after db.Close)
-	// t.Cleanup(func() { tx.Rollback() })
+	mu.Lock()
+	defer mu.Unlock()
+	cleanups[db] = append(cleanups[db], func() { tx.Rollback() })
 	return tx
 }
 
@@ -163,12 +175,25 @@ func (s *Stmt) MustClose(t testing.TB) {
 // Prepare a new statement, calling t.Fatal() if this fails.
 func Prepare(t testing.TB, db interface {
 	Prepare(string) (*sql.Stmt, error)
-}, q string) *Stmt {
+}, q string, sqldb ...*sql.DB) *Stmt {
 	t.Helper()
 	stmt, err := db.Prepare(q)
 	if err != nil {
 		t.Fatalf("pqtest.Prepare: %s", err)
 	}
+
+	if len(sqldb) == 0 {
+		sqldb = make([]*sql.DB, 1)
+		var ok bool
+		sqldb[0], ok = db.(*sql.DB)
+		if !ok {
+			t.Fatalf("pqtest.Prepare: must pass sql.DB when using transaction")
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	cleanups[sqldb[0]] = append(cleanups[sqldb[0]], func() { stmt.Close() })
+
 	return &Stmt{stmt}
 }
 

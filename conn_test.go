@@ -1073,6 +1073,7 @@ func TestStmtQueryContext(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer stmt.Close()
 			_, err = stmt.QueryContext(ctx)
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
@@ -1116,6 +1117,7 @@ func TestStmtExecContext(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer stmt.Close()
 			_, err = stmt.ExecContext(ctx)
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
@@ -1745,7 +1747,6 @@ func BenchmarkSelect(b *testing.B) {
 func BenchmarkPreparedSelect(b *testing.B) {
 	run := func(b *testing.B, result any, query string) {
 		stmt := pqtest.Prepare(b, pqtest.MustDB(b), query).Stmt
-		defer stmt.Close()
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -1808,6 +1809,7 @@ func BenchmarkPreparedSelect(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
+			defer stmt.Close()
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -1828,6 +1830,7 @@ func BenchmarkPreparedSelect(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
+			defer stmt.Close()
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
