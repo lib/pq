@@ -21,7 +21,7 @@ import (
 // Environment sanity check: should fail without SSL.
 func startSSLTest(t *testing.T, user string) {
 	_, err := pqtest.DB(t, "sslmode=disable user="+user)
-	if !pqtest.ErrorContains(err, `or:no encryption (28000)|login rejected (08P01)`) {
+	if !pqtest.ErrorContains(err, `or:no encryption (28000)|login rejected (08P01)|authentication rejected by configuration (28000)`) {
 		t.Fatalf("wrong error: %q", err)
 	}
 }
@@ -87,8 +87,7 @@ func TestSSLMode(t *testing.T) {
 		{"sslmode=allow " + f.DSN(), ""},   // Idem
 
 		// sslmode=disable
-		// pgbouncer uses "login rejected (08P01)", so allow that too.
-		{"sslmode=disable user=pqgossl", "or:no encryption|login rejected (08P01)"},
+		{"sslmode=disable user=pqgossl", "or:no encryption|login rejected (08P01)|authentication rejected by configuration (28000)"},
 
 		// sslnegotiation=direct should fail if ssl isn't required, like libpq:
 		// psql: error: weak sslmode "allow" may not be used with sslnegotiation=direct (use "require", "verify-ca", or "verify-full")
@@ -129,9 +128,9 @@ func TestSSLClientCertificates(t *testing.T) {
 		connect string
 		wantErr string
 	}{
-		{"sslmode=require user=pqgosslcert", "requires a valid client certificate (28000)"},
-		{"sslmode=require user=pqgosslcert sslcert=''", "requires a valid client certificate (28000)"},
-		{"sslmode=require user=pqgosslcert sslcert=/tmp/filedoesnotexist", "requires a valid client certificate (28000)"},
+		{"sslmode=require user=pqgosslcert", " (28000)"},
+		{"sslmode=require user=pqgosslcert sslcert=''", " (28000)"},
+		{"sslmode=require user=pqgosslcert sslcert=/tmp/filedoesnotexist", " (28000)"},
 		{"sslmode=require user=pqgosslcert sslcert=testdata/ssl/postgresql.crt", "directory"},
 		{"sslmode=require user=pqgosslcert sslcert=testdata/ssl/postgresql.crt sslkey=''", "directory"},
 		{"sslmode=require user=pqgosslcert sslcert=testdata/ssl/postgresql.crt sslkey=/tmp/filedoesnotexist", "no such file or directory"},

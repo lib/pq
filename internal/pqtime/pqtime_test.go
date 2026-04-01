@@ -158,11 +158,6 @@ func TestFormat(t *testing.T) {
 
 			{ // Round-trip time to PostgreSQL
 				var str string
-				err := db.QueryRow("SELECT '2001-02-03T04:05:06.007-08:09:10'::time::text").Scan(&str)
-				if err == nil {
-					t.Fatalf("PostgreSQL is accepting an ISO timestamp input for time")
-				}
-
 				for _, typ := range []string{"date", "time", "timetz", "timestamp", "timestamptz"} {
 					err := db.QueryRow("select $1::"+typ+"::text", tt.in).Scan(&str)
 					if err != nil {

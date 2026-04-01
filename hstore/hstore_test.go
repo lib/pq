@@ -11,6 +11,8 @@ import (
 )
 
 func TestHstore(t *testing.T) {
+	pqtest.SkipCockroach(t) // "unimplemented: extension "hstore" is not yet supported (0A000)"
+
 	tr := strings.NewReplacer("\t", "", "\n", "", `\n`, "\n", `\t`, "\t")
 	tests := []struct {
 		in   string

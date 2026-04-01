@@ -15,6 +15,7 @@ import (
 
 func Pgbouncer() bool { return os.Getenv("PGPORT") == "6432" }
 func Pgpool() bool    { return os.Getenv("PGPORT") == "7432" }
+func Cockroach() bool { return os.Getenv("PGPORT") == "26257" }
 func SkipPgbouncer(t testing.TB) {
 	t.Helper()
 	if Pgbouncer() {
@@ -25,6 +26,12 @@ func SkipPgpool(t testing.TB) {
 	t.Helper()
 	if Pgpool() {
 		t.Skip("skipped for pgpool (PGPORT=7432)")
+	}
+}
+func SkipCockroach(t testing.TB) {
+	t.Helper()
+	if Cockroach() {
+		t.Skip("skipped for cockroach (PGPORT=26257)")
 	}
 }
 

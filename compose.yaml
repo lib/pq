@@ -20,6 +20,14 @@ services:
       'PGPOOL_PARAMS_PORT':              '7432'
       'PGPOOL_PARAMS_BACKEND_HOSTNAME0': 'pg18'
 
+  cockroach:
+    profiles:    ['cockroach']
+    image:       'cockroachdb/cockroach:latest-v26.1'
+    ports:       ['127.0.0.1:26257:26257']
+    volumes:     ['./testdata/cockroach:/docker-entrypoint-initdb.d', './testdata/ssl:/ssl']
+    command:     ['start-single-node', '--accept-sql-without-tls', '--certs-dir=/ssl2']
+    healthcheck: {test: ['CMD-SHELL', '/cockroach/cockroach node status --insecure --user=pqgo'], start_period: '30s', start_interval: '1s'}
+
   pg18:
     image:       'postgres:18'
     ports:       ['127.0.0.1:5432:5432']

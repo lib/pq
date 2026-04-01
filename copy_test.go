@@ -21,7 +21,7 @@ func TestCopyInError(t *testing.T) {
 	}{
 		{`copy tbl (num) from stdin with binary`, `only text format supported for COPY`},
 		{"-- comment\n  /* comment */  copy tbl (num) to stdout", `COPY TO is not supported`},
-		{`copy syntax error`, `syntax error at or near "error" at column 13`},
+		{`copy syntax error`, `or:syntax error at or near "error" at column 13|at or near "error": syntax error`},
 	}
 
 	for _, tt := range tests {
@@ -164,6 +164,7 @@ func TestCopyInMultipleValues(t *testing.T) {
 }
 
 func TestCopyInRaiseStmtTrigger(t *testing.T) {
+	pqtest.SkipCockroach(t) // "unimplemented: cannot create user-defined functions under a temporary schema"
 	t.Parallel()
 	db := pqtest.MustDB(t)
 	tx := pqtest.Begin(t, db)
@@ -199,6 +200,7 @@ func TestCopyInRaiseStmtTrigger(t *testing.T) {
 }
 
 func TestCopyInTypes(t *testing.T) {
+	pqtest.SkipCockroach(t) // https://github.com/cockroachdb/cockroach/issues/167309
 	t.Parallel()
 	db := pqtest.MustDB(t)
 	tx := pqtest.Begin(t, db)
@@ -223,6 +225,8 @@ func TestCopyInTypes(t *testing.T) {
 
 // Tests for connection errors in copyin.resploop()
 func TestCopyInRespLoopConnectionError(t *testing.T) {
+	pqtest.SkipCockroach(t) // Doesn't implement pg_terminate_backend()
+
 	// Executes f in a backoff loop until it doesn't return an error. If this
 	// doesn't happen within duration, t.Fatal is called with the latest error.
 	retry := func(t *testing.T, duration time.Duration, f func() error) {
