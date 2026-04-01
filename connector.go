@@ -1043,6 +1043,9 @@ func (cfg Config) string() string {
 				continue
 			}
 		}
+		if k == "application_name" && m[k] == "pqgo" {
+			continue
+		}
 		if k == "host" && len(cfg.multiHost) > 0 {
 			m[k] += "," + strings.Join(cfg.multiHost, ",")
 		}

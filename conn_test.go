@@ -132,8 +132,7 @@ func TestPgpass(t *testing.T) {
 	assertPassword("pass_C", map[string]string{"host": "/tmp", "passfile": file, "user": "some_user"})
 
 	// Connection parameter takes precedence
-	os.Setenv("PGPASSFILE", "/tmp")
-	defer os.Unsetenv("PGPASSFILE")
+	t.Setenv("PGPASSFILE", "/tmp")
 	assertPassword("pass_A", map[string]string{"host": "server", "passfile": file, "dbname": "some_db", "user": "some_user"})
 	if warnbuf.String() != "" {
 		t.Errorf("warnbuf not empty: %s", warnbuf)
