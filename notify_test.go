@@ -9,7 +9,7 @@ import (
 	"math/big"
 	"net"
 	"runtime"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -181,24 +181,23 @@ func TestListenerConnExecDeadlock(t *testing.T) {
 	l, _ := newTestListenerConn(t)
 	defer l.Close()
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+	var done atomic.Int32
 	go func() {
 		l.ExecSimpleQuery("select pg_sleep(0.2)")
-		wg.Done()
+		done.Add(1)
 	}()
 	runtime.Gosched()
 	go func() {
 		l.ExecSimpleQuery("select 1")
-		wg.Done()
+		done.Add(1)
 	}()
-	// give the two goroutines some time to get into position
-	runtime.Gosched()
-	// calls Close on the net.Conn; equivalent to a network failure
-	l.Close()
+	runtime.Gosched() // Give the above goroutine some time to get into position.
+	l.Close()         // Calls Close on the net.Conn; equivalent to a network failure.
 
-	defer time.AfterFunc(200*time.Millisecond, func() { panic("timed out") }).Stop()
-	wg.Wait()
+	time.Sleep(200 * time.Millisecond)
+	if done.Load() != 2 {
+		t.Fatal("timed out")
+	}
 }
 
 // Test for ListenerConn being closed while a slow query is executing
@@ -207,29 +206,26 @@ func TestListenerConnCloseWhileQueryIsExecuting(t *testing.T) {
 	l, _ := newTestListenerConn(t)
 	defer l.Close()
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-
+	var done atomic.Int32
 	go func() {
 		sent, err := l.ExecSimpleQuery("select pg_sleep(0.2)")
 		if sent {
 			panic("expected sent=false")
 		}
-		// could be any of a number of errors
-		if err == nil {
+		if err == nil { // Could be any of a number of errors.
 			panic("expected error")
 		}
-		wg.Done()
+		done.Add(1)
 	}()
-	// give the above goroutine some time to get into position
-	runtime.Gosched()
-	err := l.Close()
-	if err != nil {
+	runtime.Gosched() // Give the above goroutine some time to get into position.
+	if err := l.Close(); err != nil {
 		t.Fatal(err)
 	}
 
-	defer time.AfterFunc(200*time.Millisecond, func() { panic("timed out") }).Stop()
-	wg.Wait()
+	time.Sleep(200 * time.Millisecond)
+	if done.Load() != 1 {
+		t.Fatal("timed out")
+	}
 }
 
 func TestListenerNotifyExtra(t *testing.T) {

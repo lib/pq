@@ -142,6 +142,7 @@ func Example_copyFromStdin() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer stmt.Close()
 
 	// Insert rows.
 	users := []struct {
