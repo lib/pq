@@ -3,9 +3,11 @@
 package pqtest
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -15,11 +17,33 @@ import (
 //
 // This is safe when have is nil. Use an empty string for want if you want to
 // test that err is nil.
+//
+// Uses a regexp match if want starts with "re:".
+//
+// Matches several strings if wants starts with "or:". For example
+// "or:one|two|three" matches any error which contains "one", "two", or "three".
+// This is similar to "re:(one|two|three)" except that it's not required to
+// escape regexp meta characters. It's not possible to escape | with or:
 func ErrorContains(have error, want string) bool {
 	if have == nil {
 		return want == ""
 	}
 	if want == "" {
+		return false
+	}
+	if strings.HasPrefix(want, "re:") {
+		m, err := regexp.MatchString(want[3:], have.Error())
+		if err != nil {
+			panic(fmt.Errorf("pqtest.ErrorContains: %w", err))
+		}
+		return m
+	}
+	if strings.HasPrefix(want, "or:") {
+		for _, w := range strings.Split(want[3:], "|") {
+			if strings.Contains(have.Error(), w) {
+				return true
+			}
+		}
 		return false
 	}
 	return strings.Contains(have.Error(), want)

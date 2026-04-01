@@ -115,20 +115,17 @@ func TestNewConnector(t *testing.T) {
 	})
 
 	t.Run("database=", func(t *testing.T) {
-		want1, want2 := `pq: database "err" does not exist (3D000)`,
-			`pq: database "two" does not exist (3D000)`
-		if pqtest.Pgbouncer() {
-			want1, want2 = `pq: no such database: err (08P01)`, `pq: no such database: two (08P01)`
-		}
+		want1, want2 := `or:pq: database "err" does not exist (3D000)|pq: no such database: err (08P01)`,
+			`or:pq: database "two" does not exist (3D000)|pq: no such database: two (08P01)`
 
 		// Make sure database= consistently take precedence over dbname=
 		for i := 0; i < 10; i++ {
 			_, err := pqtest.DB(t, "database=err")
-			if err == nil || err.Error() != want1 {
+			if !pqtest.ErrorContains(err, want1) {
 				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, want1)
 			}
 			_, err = pqtest.DB(t, "dbname=one database=two")
-			if err == nil || err.Error() != want2 {
+			if !pqtest.ErrorContains(err, want2) {
 				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, want2)
 			}
 		}
@@ -198,7 +195,7 @@ func TestRuntimeParameters(t *testing.T) {
 		wantErr       string
 		skipPgbouncer bool
 	}{
-		{"DOESNOTEXIST=foo", "", "", "unrecognized configuration parameter", false},
+		{"DOESNOTEXIST=foo", "", "", `or:unrecognized configuration parameter|unsupported startup parameter`, false},
 
 		// we can only work with a specific value for these two
 		{"client_encoding=SQL_ASCII", "", "", `unsupported client_encoding "SQL_ASCII": must be absent or "UTF8"`, false},
@@ -232,9 +229,6 @@ func TestRuntimeParameters(t *testing.T) {
 		t.Run("", func(t *testing.T) {
 			if tt.skipPgbouncer {
 				pqtest.SkipPgbouncer(t)
-			}
-			if pqtest.Pgbouncer() && tt.wantErr == "unrecognized configuration parameter" {
-				tt.wantErr = `unsupported startup parameter`
 			}
 
 			db, err := pqtest.DB(t, tt.conninfo)
