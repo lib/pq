@@ -115,6 +115,11 @@ func TestNewConnector(t *testing.T) {
 	})
 
 	t.Run("database=", func(t *testing.T) {
+		// Cockroach allows connecting to any database name, although it does
+		// give an error on DDL statements (but not "select;" / Ping()). Pretty
+		// weird, but not really important to run this test there so whatever.
+		pqtest.SkipCockroach(t)
+
 		want1, want2 := `or:pq: database "err" does not exist (3D000)|pq: no such database: err (08P01)`,
 			`or:pq: database "two" does not exist (3D000)|pq: no such database: two (08P01)`
 
@@ -194,34 +199,36 @@ func TestRuntimeParameters(t *testing.T) {
 		want          string
 		wantErr       string
 		skipPgbouncer bool
+		skipCockroach bool
 	}{
-		{"DOESNOTEXIST=foo", "", "", `or:unrecognized configuration parameter|unsupported startup parameter`, false},
+		// cockroach does not error on unknown config options.
+		{"DOESNOTEXIST=foo", "", "", `or:unrecognized configuration parameter|unsupported startup parameter`, false, true},
 
 		// we can only work with a specific value for these two
-		{"client_encoding=SQL_ASCII", "", "", `unsupported client_encoding "SQL_ASCII": must be absent or "UTF8"`, false},
-		{"datestyle='ISO, YDM'", "", "", `unsupported datestyle "ISO, YDM": must be absent or "ISO, MDY"`, false},
+		{"client_encoding=SQL_ASCII", "", "", `unsupported client_encoding "SQL_ASCII": must be absent or "UTF8"`, false, false},
+		{"datestyle='ISO, YDM'", "", "", `unsupported datestyle "ISO, YDM": must be absent or "ISO, MDY"`, false, false},
 
 		// "options" should work exactly as it does in libpq
 		// Skipped on pgbouncer as it errors with:
 		//   pq: unsupported startup parameter in options: search_path
-		{"options='-c search_path=pqgotest'", "search_path", "pqgotest", "", true},
+		{"options='-c search_path=pqgotest'", "search_path", "pqgotest", "", true, false},
 
 		// pq should override client_encoding in this case
 		// TODO: not set consistently with pgbouncer
-		{"options='-c client_encoding=SQL_ASCII'", "client_encoding", "UTF8", "", true},
+		{"options='-c client_encoding=SQL_ASCII'", "client_encoding", "UTF8", "", true, false},
 
 		// allow client_encoding to be set explicitly
-		{"client_encoding=UTF8", "client_encoding", "UTF8", "", false},
+		{"client_encoding=UTF8", "client_encoding", "UTF8", "", false, false},
 
 		// test a runtime parameter not supported by libpq
 		// Skipped on pgbouncer as it errors with:
-		//   pq: unsupported startup parameter: work_mem
-		{"work_mem='139kB'", "work_mem", "139kB", "", true},
+		//   pq: unsupported startup parameter: search_path (08P01)
+		{"search_path='a, b'", "search_path", "a, b", "", true, false},
 
 		// test fallback_application_name
-		{"application_name=foo fallback_application_name=bar", "application_name", "foo", "", false},
-		{"application_name='' fallback_application_name=bar", "application_name", "", "", false},
-		{"fallback_application_name=bar", "application_name", "bar", "", false},
+		{"application_name=foo fallback_application_name=bar", "application_name", "foo", "", false, false},
+		{"application_name='' fallback_application_name=bar", "application_name", "", "", false, false},
+		{"fallback_application_name=bar", "application_name", "bar", "", false, false},
 	}
 
 	pqtest.Unsetenv(t, "PGAPPNAME")
@@ -229,6 +236,9 @@ func TestRuntimeParameters(t *testing.T) {
 		t.Run("", func(t *testing.T) {
 			if tt.skipPgbouncer {
 				pqtest.SkipPgbouncer(t)
+			}
+			if tt.skipCockroach {
+				pqtest.SkipCockroach(t)
 			}
 
 			db, err := pqtest.DB(t, tt.conninfo)

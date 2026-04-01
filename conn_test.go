@@ -28,6 +28,7 @@ import (
 )
 
 func TestReconnect(t *testing.T) {
+	pqtest.SkipCockroach(t) // Doesn't implement pg_terminate_backend()
 	t.Parallel()
 	db := pqtest.MustDB(t)
 	tx := pqtest.Begin(t, db)
@@ -655,6 +656,7 @@ func TestErrorOnQueryRowSimpleQuery(t *testing.T) {
 
 // Test the QueryRow bug workarounds in stmt.exec() and simpleQuery()
 func TestQueryRowBugWorkaround(t *testing.T) {
+	pqtest.SkipCockroach(t) // check_function_bodies=false doesn't really work
 	db := pqtest.MustDB(t)
 
 	pqtest.Exec(t, db, "create temp table notnulltemp (a varchar(10) not null)")
@@ -805,7 +807,7 @@ func TestExecNoData(t *testing.T) { // See #186
 
 	// Exec() a query which returns results
 	pqtest.Exec(t, db, "values (1), (2), (3)")
-	pqtest.Exec(t, db, "values ($1), ($2), ($3)", 1, 2, 3)
+	pqtest.Exec(t, db, "values ($1::int), ($2::int), ($3::int)", 1, 2, 3)
 
 	// Query() a query which doesn't return any results
 	tx := pqtest.Begin(t, db)
@@ -816,11 +818,13 @@ func TestExecNoData(t *testing.T) { // See #186
 		t.Errorf("\nhave: %#v\nwant: %#v", have, want)
 	}
 
-	// Get NoData from a parameterized query.
-	pqtest.Exec(t, tx, `create rule nodata as on insert to foo do instead nothing`)
-	have = pqtest.QueryRow[any](t, tx, `insert into foo values ($1)`, 1)
-	if !reflect.DeepEqual(have, want) {
-		t.Errorf("\nhave: %#v\nwant: %#v", have, want)
+	if !pqtest.Cockroach() { // "unimplemented: this syntax (0A000)"
+		// Get NoData from a parameterized query.
+		pqtest.Exec(t, tx, `create rule nodata as on insert to foo do instead nothing`)
+		have = pqtest.QueryRow[any](t, tx, `insert into foo values ($1)`, 1)
+		if !reflect.DeepEqual(have, want) {
+			t.Errorf("\nhave: %#v\nwant: %#v", have, want)
+		}
 	}
 }
 
@@ -841,11 +845,18 @@ func TestIssue282(t *testing.T) {
 }
 
 func TestFloatPrecision(t *testing.T) { // See #196
+	// encode() sends float32 as a float64, which adds extra precision: 0.10000122338533401
+	// This is done by driver.DefaultParameterConverter(); we can maybe fix it,
+	// but it's really a cockroach bug.
+	// https://github.com/cockroachdb/cockroach/issues/73743
+	// https://github.com/cockroachdb/cockroach/issues/84326
+	pqtest.SkipCockroach(t)
+
 	t.Parallel()
 	db := pqtest.MustDB(t)
 
-	have := pqtest.Query[bool](t, db, `select '0.10000122'::float4 = $1 as f4, '35.03554004971999'::float8 = $2 as f8`,
-		float32(0.10000122), float64(35.03554004971999))[0]
+	have := pqtest.QueryRow[bool](t, db, `select '0.10000122'::float4 = $1::float4 as f4, '35.03554004971999'::float8 = $2 as f8`,
+		float32(0.10000122), float64(35.03554004971999))
 	want := map[string]bool{"f4": true, "f8": true}
 	if !reflect.DeepEqual(have, want) {
 		t.Errorf("\nhave: %#v\nwant: %#v", have, want)
@@ -1106,7 +1117,7 @@ func TestStmtQueryContext(t *testing.T) {
 			func() (context.Context, context.CancelFunc) {
 				return context.WithTimeout(context.Background(), 50*time.Millisecond)
 			},
-			`pq: canceling statement due to user request (57014)`,
+			`or:pq: canceling statement due to user request (57014)|pq: query execution canceled (57014)`,
 		},
 		{"select pg_sleep(0.05)",
 			func() (context.Context, context.CancelFunc) {
@@ -1150,7 +1161,7 @@ func TestStmtExecContext(t *testing.T) {
 			func() (context.Context, context.CancelFunc) {
 				return context.WithTimeout(context.Background(), 50*time.Millisecond)
 			},
-			`pq: canceling statement due to user request (57014)`,
+			`or:pq: canceling statement due to user request (57014)|pq: query execution canceled (57014)`,
 		},
 		{"select pg_sleep(0.05)",
 			func() (context.Context, context.CancelFunc) {
@@ -1361,6 +1372,12 @@ func TestTxOptions(t *testing.T) {
 	// go18_test.go:306: read/[write,only] not set: true != off for level serializable
 	// go18_test.go:296: wrong isolation level: read committed != serializable
 	pqtest.SkipPgpool(t)
+	// TODO: fails with:
+	// conn_test.go:1724: wrong isolation level: read committed != read uncommitted
+	// conn_test.go:1724: wrong isolation level: read committed != read uncommitted
+	// conn_test.go:1724: wrong isolation level: serializable != repeatable read
+	// conn_test.go:1724: wrong isolation level: serializable != repeatable read
+	pqtest.SkipCockroach(t)
 
 	db := pqtest.MustDB(t)
 	ctx := context.Background()
@@ -1424,7 +1441,8 @@ func TestTxOptions(t *testing.T) {
 
 func TestPing(t *testing.T) {
 	t.Parallel()
-	pqtest.SkipPgpool(t) // TODO: hangs forever?
+	pqtest.SkipPgpool(t)    // TODO: hangs forever?
+	pqtest.SkipCockroach(t) // Doesn't implement pg_terminate_backend()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1534,19 +1552,19 @@ func TestAuth(t *testing.T) {
 		tests := []struct {
 			conn, wantErr string
 		}{
-			{"user=pqgomd5", `password authentication failed for user "pqgomd5"`},
-			{"user=pqgopassword", `empty password returned by client`},
-			{"user=pqgoscram", `password authentication failed for user "pqgoscram"`},
+			{"user=pqgomd5", `re:password authentication failed for user "?pqgomd5"?`},
+			{"user=pqgopassword", `or:empty password returned by client|password authentication failed for user pqgopassword`},
+			{"user=pqgoscram", `re:password authentication failed for user "?pqgoscram"?`},
 
-			{"user=pqgomd5 password=wrong", `password authentication failed for user "pqgomd5"`},
-			{"user=pqgopassword password=wrong", `password authentication failed for user "pqgopassword"`},
-			{"user=pqgoscram    password=wrong", `password authentication failed for user "pqgoscram"`},
+			{"user=pqgomd5 password=wrong", `re:password authentication failed for user "?pqgomd5"?`},
+			{"user=pqgopassword password=wrong", `re:password authentication failed for user "?pqgopassword"?`},
+			{"user=pqgoscram    password=wrong", `re:password authentication failed for user "?pqgoscram"?`},
 
 			{"user=pqgomd5 password=wordpass", ``},
 			{"user=pqgopassword password=wordpass", ``},
 			{"user=pqgoscram password=wordpass", ``},
 
-			{"user=pqgounknown password=wordpass", `role "pqgounknown" does not exist`},
+			{"user=pqgounknown password=wordpass", `or:role "pqgounknown" does not exist|password authentication failed for user pqgounknown`},
 		}
 
 		for _, tt := range tests {
@@ -1603,6 +1621,10 @@ func TestBytea(t *testing.T) {
 }
 
 func TestJSONRawMessage(t *testing.T) {
+	if pqtest.ForceBinaryParameters() {
+		// "expected JSONB version 1 (08P01)" – looks like it always expects jsonb (instead of json)?
+		pqtest.SkipCockroach(t) // TODO: can probably fix
+	}
 	db := pqtest.MustDB(t)
 
 	pqtest.Exec(t, db, `create temp table tbl (j json)`)
@@ -1611,10 +1633,11 @@ func TestJSONRawMessage(t *testing.T) {
 	// not converted to a PostgreSQL array. This was a bug in CheckNamedValue
 	// where named byte slice types would hit the reflect.Slice case and get
 	// incorrectly converted to a PostgreSQL array.
-	data := json.RawMessage(`{"key":"value"}`)
+	data := json.RawMessage(`{"key": "value"}`)
 	pqtest.Exec(t, db, `insert into tbl values ($1)`, data)
 
 	have := pqtest.QueryRow[json.RawMessage](t, db, `select j from tbl`)
+	have["j"] = bytes.ReplaceAll(have["j"], []byte(`":"`), []byte(`": "`)) // Cockroach adds a space
 	want := map[string]json.RawMessage{"j": data}
 	if !reflect.DeepEqual(have, want) {
 		t.Errorf("\nhave: %#v\nwant: %#v", have, want)

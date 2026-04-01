@@ -47,6 +47,7 @@ func wantEvent(t *testing.T, ch <-chan ListenerEventType, want ListenerEventType
 }
 func newTestListenerConn(t *testing.T) (*ListenerConn, <-chan *Notification) {
 	t.Helper()
+	pqtest.SkipCockroach(t) // Not supported
 
 	ch := make(chan *Notification)
 	l, err := NewListenerConn("", ch)
@@ -56,6 +57,7 @@ func newTestListenerConn(t *testing.T) (*ListenerConn, <-chan *Notification) {
 	return l, ch
 }
 func newTestListenerTimeout(t *testing.T, min time.Duration, max time.Duration) (*Listener, <-chan ListenerEventType) {
+	pqtest.SkipCockroach(t) // Not supported
 	t.Helper()
 	var (
 		ch = make(chan ListenerEventType, 16)
@@ -410,6 +412,8 @@ func TestListenerPing(t *testing.T) {
 }
 
 func TestConnectorWithNotificationHandler_Simple(t *testing.T) {
+	pqtest.SkipCockroach(t) // Not supported
+
 	b, err := NewConnector("")
 	if err != nil {
 		t.Fatal(err)

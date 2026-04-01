@@ -131,7 +131,7 @@ func TestDataTypePrecisionScale(t *testing.T) {
 
 func TestRowsColumnTypes(t *testing.T) {
 	rows, err := pqtest.MustDB(t).Query(`select
-		1 as a,
+		1::int4 as a,
 		text 'bar' as bar,
 		1.28::numeric(9, 2) as dec,
 		3.1415::float8 as f,
