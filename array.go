@@ -76,6 +76,14 @@ type ArrayDelimiter interface {
 // BoolArray represents a one-dimensional array of the PostgreSQL boolean type.
 type BoolArray []bool
 
+// String implements the fmt.Stringer interface.
+func (a *BoolArray) String() string {
+	if a == nil {
+		return "<nil>"
+	}
+	return fmt.Sprint(*a)
+}
+
 // Scan implements the sql.Scanner interface.
 func (a *BoolArray) Scan(src any) error {
 	switch src := src.(type) {
@@ -150,6 +158,14 @@ func (a BoolArray) Value() (driver.Value, error) {
 // ByteaArray represents a one-dimensional array of the PostgreSQL bytea type.
 type ByteaArray [][]byte
 
+// String implements the fmt.Stringer interface.
+func (a *ByteaArray) String() string {
+	if a == nil {
+		return "<nil>"
+	}
+	return fmt.Sprint(*a)
+}
+
 // Scan implements the sql.Scanner interface.
 func (a *ByteaArray) Scan(src any) error {
 	switch src := src.(type) {
@@ -222,6 +238,14 @@ func (a ByteaArray) Value() (driver.Value, error) {
 // precision type.
 type Float64Array []float64
 
+// String implements the fmt.Stringer interface.
+func (a *Float64Array) String() string {
+	if a == nil {
+		return "<nil>"
+	}
+	return fmt.Sprint(*a)
+}
+
 // Scan implements the sql.Scanner interface.
 func (a *Float64Array) Scan(src any) error {
 	switch src := src.(type) {
@@ -284,6 +308,14 @@ func (a Float64Array) Value() (driver.Value, error) {
 // Float32Array represents a one-dimensional array of the PostgreSQL double
 // precision type.
 type Float32Array []float32
+
+// String implements the fmt.Stringer interface.
+func (a *Float32Array) String() string {
+	if a == nil {
+		return "<nil>"
+	}
+	return fmt.Sprint(*a)
+}
 
 // Scan implements the sql.Scanner interface.
 func (a *Float32Array) Scan(src any) error {
@@ -348,6 +380,11 @@ func (a Float32Array) Value() (driver.Value, error) {
 // GenericArray implements the driver.Valuer and sql.Scanner interfaces for
 // an array or slice of any dimension.
 type GenericArray struct{ A any }
+
+// String implements the fmt.Stringer interface.
+func (a GenericArray) String() string {
+	return fmt.Sprint(a.A)
+}
 
 func (GenericArray) evaluateDestination(rt reflect.Type) (reflect.Type, func([]byte, reflect.Value) error, string) {
 	var assign func([]byte, reflect.Value) error
@@ -504,6 +541,14 @@ func (a GenericArray) Value() (driver.Value, error) {
 // Int64Array represents a one-dimensional array of the PostgreSQL integer types.
 type Int64Array []int64
 
+// String implements the fmt.Stringer interface.
+func (a *Int64Array) String() string {
+	if a == nil {
+		return "<nil>"
+	}
+	return fmt.Sprint(*a)
+}
+
 // Scan implements the sql.Scanner interface.
 func (a *Int64Array) Scan(src any) error {
 	switch src := src.(type) {
@@ -565,6 +610,14 @@ func (a Int64Array) Value() (driver.Value, error) {
 
 // Int32Array represents a one-dimensional array of the PostgreSQL integer types.
 type Int32Array []int32
+
+// String implements the fmt.Stringer interface.
+func (a *Int32Array) String() string {
+	if a == nil {
+		return "<nil>"
+	}
+	return fmt.Sprint(*a)
+}
 
 // Scan implements the sql.Scanner interface.
 func (a *Int32Array) Scan(src any) error {
@@ -628,6 +681,14 @@ func (a Int32Array) Value() (driver.Value, error) {
 
 // StringArray represents a one-dimensional array of the PostgreSQL character types.
 type StringArray []string
+
+// String implements the fmt.Stringer interface.
+func (a *StringArray) String() string {
+	if a == nil {
+		return "<nil>"
+	}
+	return fmt.Sprint(*a)
+}
 
 // Scan implements the sql.Scanner interface.
 func (a *StringArray) Scan(src any) error {

@@ -555,6 +555,62 @@ func TestArrayValueBackend(t *testing.T) {
 	}
 }
 
+func TestArrayString(t *testing.T) {
+	tests := []struct {
+		in   any
+		want string
+	}{
+		{(*[]bool)(nil), "<nil>"},
+		{[]bool(nil), "[]"},
+		{[]bool{}, "[]"},
+		{[]bool{true, false, true}, "[true false true]"},
+
+		{(*[][]byte)(nil), "<nil>"},
+		{[][]byte(nil), "[]"},
+		{[][]byte{}, "[]"},
+		{[][]byte{{1, 2}, {3, 4}}, "[[1 2] [3 4]]"},
+
+		{(*[]float64)(nil), "<nil>"},
+		{[]float64(nil), "[]"},
+		{[]float64{}, "[]"},
+		{[]float64{1.5, 2.5, 3.5}, "[1.5 2.5 3.5]"},
+
+		{(*[]float32)(nil), "<nil>"},
+		{[]float32(nil), "[]"},
+		{[]float32{}, "[]"},
+		{[]float32{1.5, 2.5, 3.5}, "[1.5 2.5 3.5]"},
+
+		{(*[]int64)(nil), "<nil>"},
+		{[]int64(nil), "[]"},
+		{[]int64{}, "[]"},
+		{[]int64{1, 2, 3}, "[1 2 3]"},
+
+		{(*[]int32)(nil), "<nil>"},
+		{[]int32(nil), "[]"},
+		{[]int32{}, "[]"},
+		{[]int32{1, 2, 3}, "[1 2 3]"},
+
+		{(*[]string)(nil), "<nil>"},
+		{[]string(nil), "[]"},
+		{[]string{}, "[]"},
+		{[]string{"a", "b", "c"}, "[a b c]"},
+
+		{[]any(nil), "[]"},
+		{[]any{true, 1, "a"}, "[true 1 a]"},
+	}
+
+	t.Parallel()
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%T", tt.in), func(t *testing.T) {
+			arr := Array(tt.in)
+			have := fmt.Sprint(arr)
+			if have != tt.want {
+				t.Errorf("\nhave: %q\nwant: %q", have, tt.want)
+			}
+		})
+	}
+}
+
 func BenchmarkArray(b *testing.B) {
 	tests := []struct {
 		arr interface {
