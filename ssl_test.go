@@ -20,16 +20,9 @@ import (
 
 // Environment sanity check: should fail without SSL.
 func startSSLTest(t *testing.T, user string) {
-	wantErr := `invalid_authorization_specification`
-	if pqtest.Pgbouncer() {
-		wantErr = "protocol_violation"
-	} else if pqtest.Pgpool() {
-		wantErr = "internal_error"
-	}
 	_, err := pqtest.DB(t, "sslmode=disable user="+user)
-	pqErr := mustAs(t, err)
-	if pqErr.Code.Name() != wantErr {
-		t.Fatalf("wrong error code %q", pqErr.Code.Name())
+	if !pqtest.ErrorContains(err, `or:no encryption (28000)|login rejected (08P01)`) {
+		t.Fatalf("wrong error: %q", err)
 	}
 }
 
@@ -94,7 +87,8 @@ func TestSSLMode(t *testing.T) {
 		{"sslmode=allow " + f.DSN(), ""},   // Idem
 
 		// sslmode=disable
-		{"sslmode=disable user=pqgossl", "no encryption"},
+		// pgbouncer uses "login rejected (08P01)", so allow that too.
+		{"sslmode=disable user=pqgossl", "or:no encryption|login rejected (08P01)"},
 
 		// sslnegotiation=direct should fail if ssl isn't required, like libpq:
 		// psql: error: weak sslmode "allow" may not be used with sslnegotiation=direct (use "require", "verify-ca", or "verify-full")
@@ -107,15 +101,6 @@ func TestSSLMode(t *testing.T) {
 		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
-
-			if tt.wantErr == "no encryption" && pqtest.Pgbouncer() {
-				// PostgreSQL repsonds with:
-				//   pq: pg_hba.conf rejects connection for host "172.18.0.1", user "pqgossl", database "pqgo", no encryption (28000)
-				//
-				// But pgbouncer has a different message and code:
-				//   pq: login rejected (08P01)
-				tt.wantErr = "login rejected"
-			}
 
 			_, err := pqtest.DB(t, tt.connect)
 			switch {

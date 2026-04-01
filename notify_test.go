@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
-	"io"
 	"math/big"
 	"net"
 	"runtime"
@@ -360,23 +359,15 @@ func TestListenerReconnect(t *testing.T) {
 	wantNotification(t, l.Notify, n, "")
 
 	// Kill the connection and make sure it comes back up.
-	ok, err := l.cn.ExecSimpleQuery("SELECT pg_terminate_backend(pg_backend_pid())")
+	ok, err := l.cn.ExecSimpleQuery("select pg_terminate_backend(pg_backend_pid())")
 	if ok {
 		t.Fatalf("could not kill the connection: %v", err)
 	}
-	if pqtest.Pgbouncer() {
-		if !pqtest.ErrorContains(err, "server conn crashed") {
-			t.Fatalf("unexpected error %T: %[1]s", err)
-		}
-	} else if pqtest.Pgpool() {
-		if !pqtest.ErrorContains(err, "unable to forward message to frontend") {
-			t.Fatalf("unexpected error %T: %[1]s", err)
-		}
-	} else {
-		if err != io.EOF {
-			t.Fatalf("unexpected error %T: %[1]s", err)
-		}
+	// PostgreSQL, pgbouncer, and pgpool all use different errors.
+	if !pqtest.ErrorContains(err, `or:EOF|pq: server conn crashed? (08P01)|pq: unable to forward message to frontend (XX000)`) {
+		t.Fatalf("unexpected error %T: %[1]s", err)
 	}
+
 	wantEvent(t, ch, ListenerEventDisconnected)
 	wantEvent(t, ch, ListenerEventReconnected)
 
