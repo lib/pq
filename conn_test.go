@@ -1607,18 +1607,18 @@ func TestCommitInFailedTransactionWithCancelContext(t *testing.T) {
 
 func TestAuth(t *testing.T) {
 	tests := []struct {
-		buf     readBuf
+		code    proto.AuthCode
 		wantErr string
 	}{
-		{readBuf{0, 0, 0, 9}, `pq: unsupported authentication method: SSPI (9)`},
-		{readBuf{0, 0, 0, 99}, `unknown authentication response: <unknown> (99)`},
+		{proto.AuthCode(9), `pq: unsupported authentication method: SSPI (9)`},
+		{proto.AuthCode(99), `unknown authentication response: <unknown> (99)`},
 	}
 
 	t.Parallel()
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			t.Run("unsupported auth", func(t *testing.T) {
-				err := (&conn{}).auth(&tt.buf, Config{})
+				err := (&conn{}).auth(tt.code, &readBuf{}, Config{})
 				if !pqtest.ErrorContains(err, tt.wantErr) {
 					t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
 				}
@@ -1646,10 +1646,34 @@ func TestAuth(t *testing.T) {
 			{"user=pqgoscram password=wordpass", ``},
 
 			{"user=pqgounknown password=wordpass", `or:role "pqgounknown" does not exist|password authentication failed for user pqgounknown`},
+			{"user=pqgounknown password=wordpass require_auth=md5", `or:role "pqgounknown" does not exist|password authentication failed for user pqgounknown`},
+
+			// require_auth
+			{"user=pqgomd5 password=wordpass require_auth=md5,password", ``},
+			{"user=pqgopassword password=wordpass require_auth=md5,password", ``},
+			{"user=pqgoscram password=wordpass require_auth=md5,password,scram-sha-256", ``},
+			{"user=pqgomd5 password=wordpass require_auth=!none", ``},
+			{"user=pqgopassword password=wordpass require_auth=!none", ``},
+			{"user=pqgoscram password=wordpass require_auth=!none", ``},
+
+			{"user=pqgomd5 password=wordpass require_auth=password", `"password" failed: server requested "md5"`},
+			{"user=pqgopassword password=wordpass require_auth=md5", `"md5" failed: server requested "password"`},
+			{"user=pqgoscram password=wordpass require_auth=md5,password", `authentication method requirement "md5,password" failed: server requested "scram-sha-256"`},
+			{"user=pqgomd5 password=wordpass require_auth=!md5,!password", `"!md5,!password" failed: server requested "md5"`},
+			{"user=pqgopassword password=wordpass require_auth=!md5,!password", `"!md5,!password" failed: server requested "password"`},
+			{"user=pqgoscram password=wordpass require_auth=!md5,!password,!scram-sha-256", `"!md5,!password,!scram-sha-256" failed: server requested "scram-sha-256"`},
+			{"user=pqgomd5 password=wordpass require_auth=password", `"password" failed: server requested "md5"`},
+
+			{"user=pqgo password=unused require_auth=none", ``},
+			{"user=pqgo password=unused require_auth=!none", `"!none" failed: server did not perform any authentication`},
+			{"user=pqgo password=unused require_auth=md5,password,scram-sha-256", `"md5,password,scram-sha-256" failed: server did not perform any authentication`},
 		}
 
 		for _, tt := range tests {
 			t.Run(tt.conn, func(t *testing.T) {
+				if strings.Contains(tt.conn, "md5") {
+					pqtest.SkipCockroach(t) // md5 not supported
+				}
 				_, err := pqtest.DB(t, tt.conn)
 				if !pqtest.ErrorContains(err, tt.wantErr) {
 					t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)

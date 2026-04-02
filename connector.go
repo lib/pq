@@ -45,6 +45,12 @@ type (
 	// SSLProtocolVersion is a ssl_min_protocol_version or
 	// ssl_max_protocol_version setting.
 	SSLProtocolVersion string
+
+	// RequireAuth is a require_auth setting.
+	RequireAuth string
+
+	// RequireAuths is a require_auth setting.
+	RequireAuths []RequireAuth
 )
 
 // Values for [SSLMode] that pq supports.
@@ -177,6 +183,41 @@ func (s SSLProtocolVersion) tlsconf() uint16 {
 	default:
 		return 0
 	}
+}
+
+// Values for [RequireAuth] that pq supports.
+const (
+	RequireAuthNone           = RequireAuth("none")
+	RequireAuthPassword       = RequireAuth("password")
+	RequireAuthMD5            = RequireAuth("md5")
+	RequireAuthGSS            = RequireAuth("gss")
+	RequireAuthScramSHA256    = RequireAuth("scram-sha-256")
+	RequireAuthAny            = RequireAuth("!none")
+	RequireAuthNotPassword    = RequireAuth("!password")
+	RequireAuthNotMD5         = RequireAuth("!md5")
+	RequireAuthNotGSS         = RequireAuth("!gss")
+	RequireAuthNotScramSHA256 = RequireAuth("!scram-sha-256")
+
+	// Not (yet) supported by pq
+	// RequireAuthSSPI           = "sspi"
+	// RequireAuthOAuth          = "oauth"
+	// RequireAuthNotSSPI        = "!sspi"
+	// RequireAuthNotOAuth       = "!oauth"
+)
+
+var requireAuths = []RequireAuth{RequireAuthNone, RequireAuthPassword, RequireAuthMD5,
+	RequireAuthGSS, RequireAuthScramSHA256, RequireAuthAny, RequireAuthNotPassword,
+	RequireAuthNotMD5, RequireAuthNotGSS, RequireAuthNotScramSHA256}
+
+func (r RequireAuths) String() string {
+	var b strings.Builder
+	for i, rr := range r {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(string(rr))
+	}
+	return b.String()
 }
 
 // Connector represents a fixed configuration for the pq driver with a given
@@ -341,14 +382,14 @@ type Config struct {
 	//
 	// The default is determined by [tls.Config.MinVersion], which is TLSv1.2 at
 	// the time of writing.
-	SSLMinProtocolVersion SSLProtocolVersion `postgres:"ssl_min_protocol_version" env:"SSLPGMINPROTOCOLVERSION"`
+	SSLMinProtocolVersion SSLProtocolVersion `postgres:"ssl_min_protocol_version" env:"PGSSLMINPROTOCOLVERSION"`
 
 	// Maximum SSL/TLS protocol version to allow for the connection. If not set,
 	// this parameter is ignored and the connection will use the maximum bound
 	// defined by the backend, if set. Setting the maximum protocol version is
 	// mainly useful for testing or if some component has issues working with a
 	// newer protocol.
-	SSLMaxProtocolVersion SSLProtocolVersion `postgres:"ssl_max_protocol_version" env:"SSLPGMAXPROTOCOLVERSION"`
+	SSLMaxProtocolVersion SSLProtocolVersion `postgres:"ssl_max_protocol_version" env:"PGSSLMAXPROTOCOLVERSION"`
 
 	// Interpert sslcert and sslkey as PEM encoded data, rather than a path to a
 	// PEM file. This is a pq extension, not supported in libpq.
@@ -430,6 +471,25 @@ type Config struct {
 
 	// Path to connection service file. Defaults to ~/.pg_service.conf.
 	ServiceFile string `postgres:"-" env:"PGSERVICEFILE"`
+
+	// Require an authentication method from the server and refuse to connect if
+	// the server does not use the requested method.
+	//
+	// This accepts a comma-separated list.
+	//
+	// Methods may be negated with a ! prefix, in which case the server must
+	// *not* attempt the listed method, and the server is free not to
+	// authenticate the client at all. Negated and non-negated forms may not be
+	// combined in the same setting with a comma-separated list.
+	//
+	// As a special case the "none" method requires the server not to use an
+	// authentication challenge. This does not prohibit client certificate
+	// authentication via TLS or GSS authentication via its encrypted transport.
+	// This can be negated to require some form of authentication.
+	//
+	// By default any authentication method is accepted and the server is free
+	// to skip authentication altogether.
+	RequireAuth RequireAuths `postgres:"require_auth" env:"PGREQUIREAUTH"`
 
 	// Runtime parameters: any unrecognized parameter in the DSN will be added
 	// to this and sent to PostgreSQL during startup.
@@ -517,7 +577,8 @@ func NewConfig(dsn string) (Config, error) {
 // Clone returns a copy of the [Config].
 func (cfg Config) Clone() Config {
 	c := cfg
-	c.Runtime, c.Multi, c.set = maps.Clone(cfg.Runtime), slices.Clone(cfg.Multi), slices.Clone(cfg.set)
+	c.Runtime, c.Multi, c.RequireAuth, c.set = maps.Clone(cfg.Runtime), slices.Clone(cfg.Multi),
+		slices.Clone(cfg.RequireAuth), slices.Clone(cfg.set)
 	return c
 }
 
@@ -672,8 +733,8 @@ func (cfg *Config) fromEnv(env []string) error {
 		switch k {
 		case "PGREQUIRESSL", "PGSSLCOMPRESSION", // Deprecated.
 			"PGREALM", "PGGSSENCMODE", "PGGSSDELEGATION", "PGGSSLIB", // krb stuff
-			"PGREQUIREAUTH", "PGCHANNELBINDING",
-			"PGSSLCERTMODE", "PGSSLCRL", "PGSSLCRLDIR", "PGREQUIREPEER":
+			"PGCHANNELBINDING", "PGSSLCRL", "PGSSLCRLDIR",
+			"PGSSLCERTMODE", "PGREQUIREPEER":
 			return fmt.Errorf("pq: environment variable $%s is not supported", k)
 		case "PGKRBSRVNAME":
 			if newGss == nil {
@@ -833,8 +894,9 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 			loadbalancehosts      = (tag == "postgres" && k == "load_balance_hosts") || (tag == "env" && k == "PGLOADBALANCEHOSTS")
 			minprotocolversion    = (tag == "postgres" && k == "min_protocol_version") || (tag == "env" && k == "PGMINPROTOCOLVERSION")
 			maxprotocolversion    = (tag == "postgres" && k == "max_protocol_version") || (tag == "env" && k == "PGMAXPROTOCOLVERSION")
-			sslminprotocolversion = (tag == "postgres" && k == "ssl_min_protocol_version") || (tag == "env" && k == "SSLPGMINPROTOCOLVERSION")
-			sslmaxprotocolversion = (tag == "postgres" && k == "ssl_max_protocol_version") || (tag == "env" && k == "SSLPGMAXPROTOCOLVERSION")
+			sslminprotocolversion = (tag == "postgres" && k == "ssl_min_protocol_version") || (tag == "env" && k == "PGSSLMINPROTOCOLVERSION")
+			sslmaxprotocolversion = (tag == "postgres" && k == "ssl_max_protocol_version") || (tag == "env" && k == "PGSSLMAXPROTOCOLVERSION")
+			requireauth           = (tag == "postgres" && k == "require_auth") || (tag == "env" && k == "PGREQUIREAUTH")
 		)
 		if k == "" || k == "-" {
 			continue
@@ -908,6 +970,31 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 					cfg.multiHost = append(cfg.multiHost, vv[1:]...)
 				}
 				rv.SetString(v)
+			case reflect.Slice:
+				if requireauth {
+					if v == "" {
+						rv.Set(reflect.ValueOf((RequireAuths)(nil)))
+						continue
+					}
+					var (
+						vv  = strings.Split(v, ",")
+						s   = make(RequireAuths, len(vv))
+						neg = len(vv) > 0 && strings.HasPrefix(vv[0], "!")
+					)
+					for i := range vv {
+						if !slices.Contains(requireAuths, RequireAuth(vv[i])) {
+							return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, vv[i], pqutil.Join(requireAuths))
+						}
+						if neg && !strings.HasPrefix(vv[i], "!") {
+							return fmt.Errorf(f+`require_auth method %q cannot be mixed with negative methods`, k, vv[i])
+						}
+						if !neg && strings.HasPrefix(vv[i], "!") {
+							return fmt.Errorf(f+`negative require_auth method %q cannot be mixed with non-negative methods`, k, vv[i])
+						}
+						s[i] = RequireAuth(vv[i])
+					}
+					rv.Set(reflect.ValueOf(s))
+				}
 			case reflect.Int64:
 				n, err := strconv.ParseInt(v, 10, 64)
 				if err != nil {
