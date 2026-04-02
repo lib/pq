@@ -9,11 +9,17 @@ unreleased
 
 ### Features
 
+- Implement `require_auth` connection parameter ([#1310]).
+
 ### Fixes
 
 - Add Redshift-specific OID mappings ([#1291], [#1317]).
 
+- Use correct environment variable name for `PGSSLMINPROTOCOLVERSION` and
+  `PGSSLMAXPROTOCOLVERSION` ([#1310]).
+
 [#1291]: https://github.com/lib/pq/pull/1291
+[#1310]: https://github.com/lib/pq/pull/1310
 [#1317]: https://github.com/lib/pq/pull/1317
 
 

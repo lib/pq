@@ -435,6 +435,15 @@ func TestNewConfig(t *testing.T) {
 		{"", []string{"PGMINPROTOCOLVERSION=bogus"}, "", `pq: wrong value for $PGMINPROTOCOLVERSION: "bogus" is not supported`},
 		{"", []string{"PGMAXPROTOCOLVERSION=bogus"}, "", `pq: wrong value for $PGMAXPROTOCOLVERSION: "bogus" is not supported`},
 		{"min_protocol_version=3.2 max_protocol_version=3.0", nil, "", `min_protocol_version "3.2" cannot be greater than max_protocol_version "3.0"`},
+
+		// requireauth
+		{"require_auth=", nil, "require_auth=''", ``},
+		{"require_auth=none", nil, "require_auth=none", ""},
+		{"require_auth=md5,scram-sha-256", nil, "require_auth=md5,scram-sha-256", ""},
+		{"require_auth=md5,scram-sha256", nil, "", `wrong value for "require_auth": "scram-sha256" is not supported`},
+		{"require_auth=!md5,!scram-sha-256", nil, "require_auth=!md5,!scram-sha-256", ""},
+		{"require_auth=md5,!password", nil, "", `negative require_auth method "!password" cannot be mixed with non-negative methods`},
+		{"require_auth=!md5,password", nil, "", `require_auth method "password" cannot be mixed with negative methods`},
 	}
 
 	t.Parallel()

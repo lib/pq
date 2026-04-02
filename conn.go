@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1255,6 +1256,7 @@ func (cn *conn) startup(cfg Config) error {
 		return err
 	}
 
+	var didauth bool
 	for {
 		t, r, err := cn.recv()
 		if err != nil {
@@ -1271,7 +1273,11 @@ func (cn *conn) startup(cfg Config) error {
 		case proto.ParameterStatus:
 			cn.processParameterStatus(r)
 		case proto.AuthenticationRequest:
-			err := cn.auth(r, cfg)
+			code := proto.AuthCode(r.int32())
+			if code != proto.AuthReqOk {
+				didauth = true
+			}
+			err := cn.auth(code, r, cfg)
 			if err != nil {
 				return err
 			}
@@ -1282,6 +1288,9 @@ func (cn *conn) startup(cfg Config) error {
 				return fmt.Errorf("pq: protocol version mismatch: min_protocol_version=%s; server supports up to 3.%d", cfg.MinProtocolVersion, newestMinor)
 			}
 		case proto.ReadyForQuery:
+			if len(cn.cfg.RequireAuth) > 0 && !didauth && !slices.Contains(cn.cfg.RequireAuth, RequireAuthNone) {
+				return fmt.Errorf("pq: authentication method requirement %q failed: server did not perform any authentication", cn.cfg.RequireAuth)
+			}
 			cn.processReadyForQuery(r)
 			return nil
 		default:
@@ -1290,8 +1299,8 @@ func (cn *conn) startup(cfg Config) error {
 	}
 }
 
-func (cn *conn) auth(r *readBuf, cfg Config) error {
-	switch code := proto.AuthCode(r.int32()); code {
+func (cn *conn) auth(code proto.AuthCode, r *readBuf, cfg Config) error {
+	switch code {
 	default:
 		return fmt.Errorf("pq: unknown authentication response: %s", code)
 	case proto.AuthReqKrb4, proto.AuthReqKrb5, proto.AuthReqCrypt, proto.AuthReqSSPI:
@@ -1300,6 +1309,9 @@ func (cn *conn) auth(r *readBuf, cfg Config) error {
 		return nil
 
 	case proto.AuthReqPassword:
+		if len(cn.cfg.RequireAuth) > 0 && !slices.Contains(cn.cfg.RequireAuth, RequireAuthPassword) && !slices.Contains(cn.cfg.RequireAuth, RequireAuthAny) {
+			return fmt.Errorf("pq: authentication method requirement %q failed: server requested %q", cn.cfg.RequireAuth, RequireAuthPassword)
+		}
 		w := cn.writeBuf(proto.PasswordMessage)
 		w.string(cfg.Password)
 		// Don't need to check AuthOk response here; auth() is called in a loop,
@@ -1307,6 +1319,9 @@ func (cn *conn) auth(r *readBuf, cfg Config) error {
 		return cn.send(w)
 
 	case proto.AuthReqMD5:
+		if len(cn.cfg.RequireAuth) > 0 && !slices.Contains(cn.cfg.RequireAuth, RequireAuthMD5) && !slices.Contains(cn.cfg.RequireAuth, RequireAuthAny) {
+			return fmt.Errorf("pq: authentication method requirement %q failed: server requested %q", cn.cfg.RequireAuth, RequireAuthMD5)
+		}
 		s := string(r.next(4))
 		w := cn.writeBuf(proto.PasswordMessage)
 		w.string("md5" + md5s(md5s(cfg.Password+cfg.User)+s))
@@ -1369,6 +1384,9 @@ func (cn *conn) auth(r *readBuf, cfg Config) error {
 		return nil
 
 	case proto.AuthReqSASL:
+		if len(cn.cfg.RequireAuth) > 0 && !slices.Contains(cn.cfg.RequireAuth, RequireAuthScramSHA256) && !slices.Contains(cn.cfg.RequireAuth, RequireAuthAny) {
+			return fmt.Errorf("pq: authentication method requirement %q failed: server requested %q", cn.cfg.RequireAuth, RequireAuthScramSHA256)
+		}
 		sc := scram.NewClient(sha256.New, cfg.User, cfg.Password)
 		sc.Step(nil)
 		if sc.Err() != nil {
