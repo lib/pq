@@ -1037,17 +1037,102 @@ func TestMultipleResult(t *testing.T) {
 	}
 }
 
-func TestMultipleResultEmpty(t *testing.T) {
-	t.Parallel()
+func TestMultipleResultError(t *testing.T) {
+	db := pqtest.MustDB(t)
 
-	have := pqtest.QueryRow[int](t, pqtest.MustDB(t), `select 1 where false; select 2`)
-	want := map[string]int{"(rs 1) ?column?": 2}
-	if !reflect.DeepEqual(have, want) {
-		t.Errorf("\nhave: %#v\nwant: %#v", have, want)
+	tests := []struct {
+		query       string
+		wantErr     string
+		wantRowsErr string
+	}{
+		{`select nonexistent; select 1;`, `column "nonexistent" does not exist`, ``},
+		{`select 1; select nonexistent;`, ``, `column "nonexistent" does not exist`},
+		{`select 1; select 2; select 3; select nonexistent; select 4;`, ``, `column "nonexistent" does not exist`},
+	}
+
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			rows, err := db.Query(tt.query)
+			if !pqtest.ErrorContains(err, tt.wantErr) {
+				t.Fatalf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
+			}
+			if err == nil {
+				defer rows.Close()
+				for rows.Next() {
+				}
+				for rows.NextResultSet() {
+				}
+				if !pqtest.ErrorContains(rows.Err(), tt.wantRowsErr) {
+					t.Fatalf("wrong error:\nhave: %s\nwant: %s", rows.Err(), tt.wantRowsErr)
+				}
+			}
+		})
 	}
 }
 
-func TestMultipleSimpleQuery(t *testing.T) {
+func TestMultipleResultEmpty(t *testing.T) {
+	t.Parallel()
+
+	db := pqtest.MustDB(t)
+	pqtest.Exec(t, db, `create temp table tbl (i int, t text)`)
+	pqtest.Exec(t, db, `insert into tbl values (7, $1), (8, $2), (9, $3)`, "aa", "bb", "cc")
+
+	rows, err := db.Query(`
+		select 1 as first   where false;
+		select 2 as second  where false;
+		select * from tbl;
+		select 4 as fourth  where false;
+		select * from tbl   where i = 8;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	var (
+		have = new(strings.Builder)
+		rs   int
+	)
+	read := func() {
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(have, "rs %d: %v\n", rs, cols)
+		for rows.Next() {
+			args, argsp := make([]any, len(cols)), make([]any, len(cols))
+			for i := range args {
+				argsp[i] = &args[i]
+			}
+			err := rows.Scan(argsp...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fmt.Fprintf(have, "ROW: %v\n", args)
+		}
+		rs++
+	}
+	read()
+	for rows.NextResultSet() {
+		read()
+	}
+	want := strings.ReplaceAll(`
+		rs 0: [first]
+		rs 1: [second]
+		rs 2: [i t]
+		ROW: [7 aa]
+		ROW: [8 bb]
+		ROW: [9 cc]
+		rs 3: [fourth]
+		rs 4: [i t]
+		ROW: [8 bb]
+	`[1:], "\t", "")
+	if have.String() != want {
+		t.Errorf("\nhave:\n%s\nwant:\n%s", have, want)
+	}
+}
+
+func TestMultipleResultSimpleQuery(t *testing.T) {
 	t.Parallel()
 	db := pqtest.MustDB(t)
 
