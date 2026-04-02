@@ -1,6 +1,10 @@
 unreleased
 ----------
 
+
+v1.12.2 (2026-04-02)
+--------------------
+
 - Treat io.ErrUnexpectedEOF as driver.ErrBadConn so database/sql discards the
   connection. Since v1.12.0 this could result in permanently broken connections,
   especially with CockroachDB which frequently sends partial messages ([#1299]).
