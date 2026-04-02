@@ -436,14 +436,14 @@ func BenchmarkDecode(b *testing.B) {
 		x := []byte("2013-09-17 22:15:32.360754-07")
 		f := func(wg *sync.WaitGroup, loops int) {
 			defer wg.Done()
-			for i := 0; i < loops; i++ {
+			for range loops {
 				decode(&parameterStatus{}, x, oid.T_timestamptz, formatText)
 			}
 		}
 
 		wg := &sync.WaitGroup{}
 		b.ResetTimer()
-		for j := 0; j < 10; j++ {
+		for range 10 {
 			wg.Add(1)
 			go f(wg, b.N/10)
 		}

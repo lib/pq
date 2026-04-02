@@ -1,6 +1,7 @@
 package pq
 
 import (
+	"database/sql"
 	"errors"
 	"math"
 	"reflect"
@@ -163,8 +164,8 @@ func TestRowsColumnTypes(t *testing.T) {
 	type h struct {
 		name        string
 		typeName    string
-		length      pqtest.Null[int64]
-		decimalSize pqtest.Null[[2]int64]
+		length      sql.Null[int64]
+		decimalSize sql.Null[[2]int64]
 		scanType    reflect.Type
 	}
 
@@ -176,8 +177,8 @@ func TestRowsColumnTypes(t *testing.T) {
 			name:        c.Name(),
 			typeName:    c.DatabaseTypeName(),
 			scanType:    c.ScanType(),
-			length:      pqtest.Null[int64]{V: l, Valid: lok},
-			decimalSize: pqtest.Null[[2]int64]{V: [2]int64{prec, scale}, Valid: dok},
+			length:      sql.Null[int64]{V: l, Valid: lok},
+			decimalSize: sql.Null[[2]int64]{V: [2]int64{prec, scale}, Valid: dok},
 		})
 	}
 
@@ -185,36 +186,36 @@ func TestRowsColumnTypes(t *testing.T) {
 		{
 			name:     "a",
 			typeName: "INT4",
-			scanType: reflect.TypeOf(int32(0)),
+			scanType: reflect.TypeFor[int32](),
 		},
 		{
 			name:     "bar",
 			typeName: "TEXT",
-			length:   pqtest.Null[int64]{V: math.MaxInt64, Valid: true},
-			scanType: reflect.TypeOf(""),
+			length:   sql.Null[int64]{V: math.MaxInt64, Valid: true},
+			scanType: reflect.TypeFor[string](),
 		},
 		{
 			name:        "dec",
 			typeName:    "NUMERIC",
-			decimalSize: pqtest.Null[[2]int64]{V: [2]int64{9, 2}, Valid: true},
-			scanType:    reflect.TypeOf(new(any)).Elem(),
+			decimalSize: sql.Null[[2]int64]{V: [2]int64{9, 2}, Valid: true},
+			scanType:    reflect.TypeFor[any](),
 		},
 		{
 			name:     "f",
 			typeName: "FLOAT8",
-			scanType: reflect.TypeOf(float64(0)),
+			scanType: reflect.TypeFor[float64](),
 		},
 		{
 			name:     "bit4",
 			typeName: "BIT",
-			length:   pqtest.Null[int64]{V: 4, Valid: true},
-			scanType: reflect.TypeOf(""),
+			length:   sql.Null[int64]{V: 4, Valid: true},
+			scanType: reflect.TypeFor[string](),
 		},
 		{
 			name:     "varbit10",
 			typeName: "VARBIT",
-			length:   pqtest.Null[int64]{V: 10, Valid: true},
-			scanType: reflect.TypeOf(""),
+			length:   sql.Null[int64]{V: 10, Valid: true},
+			scanType: reflect.TypeFor[string](),
 		},
 	}
 
@@ -282,7 +283,7 @@ func TestRowsConcurrentUse(t *testing.T) {
 	db := pqtest.MustDB(t, "")
 
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

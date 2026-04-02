@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net"
 	"os"
@@ -69,7 +70,6 @@ func TestOpen(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.dsn, func(t *testing.T) {
 			t.Parallel()
 			_, err := pqtest.DB(t, tt.dsn)
@@ -96,9 +96,7 @@ func TestPgpass(t *testing.T) {
 			"client_encoding": "UTF8",
 			"datestyle":       "ISO, MDY",
 		}
-		for k, v := range extra {
-			o[k] = v
-		}
+		maps.Copy(o, extra)
 		have := pgpass.PasswordFromPgpass(o["passfile"], o["user"], o["password"], o["host"], o["port"], o["dbname"])
 		if have != want {
 			t.Fatalf("wrong password\nhave: %q\nwant: %q", have, want)
@@ -1212,7 +1210,6 @@ func TestStmtQueryContext(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run("", func(t *testing.T) {
 			if !pqtest.Pgpool() {
 				t.Parallel()
@@ -1256,7 +1253,6 @@ func TestStmtExecContext(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run("", func(t *testing.T) {
 			if !pqtest.Pgpool() {
 				t.Parallel()
@@ -1301,7 +1297,7 @@ func TestContextCancelExec(t *testing.T) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		func() {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -1337,7 +1333,7 @@ func TestContextCancelQuery(t *testing.T) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		func() {
 			ctx, cancel := context.WithCancel(context.Background())
 			rows, err := db.QueryContext(ctx, "select 1")
@@ -1364,7 +1360,7 @@ func TestIssue617(t *testing.T) {
 	const N = 10
 
 	numGoroutineStart := runtime.NumGoroutine()
-	for i := 0; i < N; i++ {
+	for range N {
 		func() {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -1379,7 +1375,7 @@ func TestIssue617(t *testing.T) {
 	iterations := int(waitTime / delayTime)
 
 	var numGoroutineFinish int
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		time.Sleep(delayTime)
 
 		numGoroutineFinish = runtime.NumGoroutine()
@@ -1426,7 +1422,7 @@ func TestContextCancelBegin(t *testing.T) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		func() {
 			ctx, cancel := context.WithCancel(context.Background())
 			tx, err := db.BeginTx(ctx, nil)
@@ -1692,7 +1688,6 @@ func TestBytea(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run("", func(t *testing.T) {
 			db := pqtest.MustDB(t)
 			pqtest.Exec(t, db, `create temp table tbl (b bytea)`)
@@ -1743,7 +1738,6 @@ func TestPreProtocolError(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
 			f := pqtest.NewFake(t, func(f pqtest.Fake, cn net.Conn) {

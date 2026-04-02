@@ -73,7 +73,7 @@ func channelName() string {
 	b := []byte("pqtest")
 	sel := "abcdefghjkmnpqrstuvwxyz"
 	m := big.NewInt(int64(len(sel)))
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		n, _ := rand.Int(rand.Reader, m)
 		b = append(b, sel[n.Int64()])
 	}

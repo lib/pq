@@ -79,7 +79,6 @@ func TestParse(t *testing.T) {
 	db := pqtest.MustDB(t, "timezone='Etc/UTC'")
 	t.Parallel()
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.str, func(t *testing.T) {
 			{ // Parse()
 				have, err := Parse(nil, tt.str)
@@ -139,7 +138,6 @@ func TestFormat(t *testing.T) {
 	db := pqtest.MustDB(t)
 	t.Parallel()
 	for _, tt := range tests {
-		tt := tt
 		t.Run("", func(t *testing.T) {
 			{ // Format()
 				have := string(Format(tt.in))

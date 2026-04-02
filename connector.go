@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"database/sql/driver"
 	"fmt"
+	"maps"
 	"math/rand"
 	"net"
 	"net/netip"
@@ -515,9 +516,7 @@ func NewConfig(dsn string) (Config, error) {
 // Clone returns a copy of the [Config].
 func (cfg Config) Clone() Config {
 	rt := make(map[string]string)
-	for k, v := range cfg.Runtime {
-		rt[k] = v
-	}
+	maps.Copy(rt, cfg.Runtime)
 	c := cfg
 	c.Runtime = rt
 	c.set = append([]string{}, cfg.set...)
@@ -817,7 +816,7 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 		f = "pq: wrong value for $%s: "
 	}
 	var (
-		types  = reflect.TypeOf(cfg).Elem()
+		types  = reflect.TypeFor[Config]()
 		values = reflect.ValueOf(cfg).Elem()
 	)
 	for i := 0; i < types.NumField(); i++ {
@@ -856,7 +855,7 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 			default:
 				return fmt.Errorf("don't know how to set %s: unknown type %s", rt.Name, rt.Type.Kind())
 			case reflect.Struct:
-				if rt.Type == reflect.TypeOf(netip.Addr{}) {
+				if rt.Type == reflect.TypeFor[netip.Addr]() {
 					if hostaddr {
 						vv := strings.Split(v, ",")
 						v = vv[0]
@@ -949,21 +948,16 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 		}
 	}
 
+	// Set run-time; we delete map keys as they're set in the struct. For the
+	// service file we don't support extra parameters and error out.
 	if service && len(o) > 0 {
-		// TODO(go1.23): use maps.Keys once we require Go 1.23.
 		var key string
-		for k := range o {
-			key = k
-			break
-		}
+		maps.Keys(o)(func(k string) bool { key = k; return false })
 		return fmt.Errorf("pq: unknown setting %q in service file for service %q", key, cfg.Service)
 	}
-
-	// Set run-time; we delete map keys as they're set in the struct.
 	if !service && tag == "postgres" {
 		// Make sure database= sets dbname=, as that previously worked (kind of
-		// by accident).
-		// TODO(v2): remove
+		// by accident). TODO(v2): remove
 		if d, ok := o["database"]; ok {
 			cfg.Database = d
 			delete(o, "database")
@@ -985,7 +979,7 @@ func (cfg Config) tomap() map[string]string {
 	var (
 		o      = make(map[string]string)
 		values = reflect.ValueOf(cfg)
-		types  = reflect.TypeOf(cfg)
+		types  = reflect.TypeFor[Config]()
 	)
 	for i := 0; i < types.NumField(); i++ {
 		var (
@@ -1022,9 +1016,7 @@ func (cfg Config) tomap() map[string]string {
 			}
 		}
 	}
-	for k, v := range cfg.Runtime {
-		o[k] = v
-	}
+	maps.Copy(o, cfg.Runtime)
 	return o
 }
 

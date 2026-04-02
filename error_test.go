@@ -234,7 +234,7 @@ func TestRetryError(t *testing.T) {
 	})
 
 	// Make write fail once so that safeRetryError{} is used.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		os.Setenv("PQTEST_FAILNUM", "1")
 		tx, err := db.Begin()
 		if err != nil {

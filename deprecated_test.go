@@ -14,7 +14,6 @@ func TestCopyInStmt(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
 			have := CopyIn(tt.inTable, tt.inCols...)
@@ -43,7 +42,6 @@ func TestCopyInSchemaStmt(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
 			have := CopyInSchema(tt.inSchema, tt.inTable, tt.inCols...)

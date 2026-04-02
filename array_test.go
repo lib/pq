@@ -578,7 +578,7 @@ func BenchmarkArray(b *testing.B) {
 		byts   = make([][]byte, 10)
 		strs   = make([]string, 10)
 	)
-	for i := 0; i < len(bools); i++ {
+	for i := range bools {
 		bools[i] = rnd.Intn(2) == 0
 		floats[i] = rnd.NormFloat64()
 		ints[i] = rnd.Int63()
