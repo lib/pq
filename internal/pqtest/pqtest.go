@@ -290,11 +290,3 @@ func QueryRow[T any](t testing.TB, db interface {
 	}
 	return nil
 }
-
-// Null represents a value that may be null.
-//
-// TODO(go1.22): replace with sql.Null
-type Null[T any] struct {
-	V     T
-	Valid bool
-}

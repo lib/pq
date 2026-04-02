@@ -97,7 +97,6 @@ func TestSSLMode(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
 
@@ -145,7 +144,6 @@ func TestSSLClientCertificates(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
 			db, err := pqtest.DB(t, tt.connect)
@@ -210,7 +208,6 @@ func TestSSLClientCertificateIntermediate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			db, err := pqtest.DB(t, tt.connect)
@@ -287,7 +284,6 @@ func TestSSLSNI(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 

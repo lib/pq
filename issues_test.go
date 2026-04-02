@@ -44,7 +44,7 @@ func TestQueryRowContextBad(t *testing.T) {
 	db := pqtest.MustDB(t)
 
 	// Ensure that cancelling a QueryRowContext does not result in an ErrBadConn.
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		ctx, cancel := context.WithCancel(context.Background())
 		go cancel()
 		row := db.QueryRowContext(ctx, "select 1")

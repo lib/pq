@@ -198,25 +198,25 @@ type fieldDesc struct {
 func (fd fieldDesc) Type() reflect.Type {
 	switch fd.OID {
 	case oid.T_int8:
-		return reflect.TypeOf(int64(0))
+		return reflect.TypeFor[int64]()
 	case oid.T_int4:
-		return reflect.TypeOf(int32(0))
+		return reflect.TypeFor[int32]()
 	case oid.T_int2:
-		return reflect.TypeOf(int16(0))
+		return reflect.TypeFor[int16]()
 	case oid.T_float8:
-		return reflect.TypeOf(float64(0))
+		return reflect.TypeFor[float64]()
 	case oid.T_float4:
-		return reflect.TypeOf(float32(0))
+		return reflect.TypeFor[float32]()
 	case oid.T_varchar, oid.T_text, oid.T_varbit, oid.T_bit:
-		return reflect.TypeOf("")
+		return reflect.TypeFor[string]()
 	case oid.T_bool:
-		return reflect.TypeOf(false)
+		return reflect.TypeFor[bool]()
 	case oid.T_date, oid.T_time, oid.T_timetz, oid.T_timestamp, oid.T_timestamptz:
-		return reflect.TypeOf(time.Time{})
+		return reflect.TypeFor[time.Time]()
 	case oid.T_bytea:
-		return reflect.TypeOf([]byte(nil))
+		return reflect.TypeFor[[]byte]()
 	default:
-		return reflect.TypeOf(new(any)).Elem()
+		return reflect.TypeFor[any]()
 	}
 }
 

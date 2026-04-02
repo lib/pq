@@ -9,7 +9,7 @@ jobs:
   staticcheck:
     name:    'staticcheck'
     runs-on: 'ubuntu-latest'
-    env:     {cache: 'staticcheck-${{ github.ref }}'}
+    env:     {cache: 'staticcheck'}
     steps:
       # Setup
       - uses: 'actions/checkout@v6'
@@ -18,7 +18,7 @@ jobs:
       - id:   'cache-restore'
         uses: 'actions/cache/restore@v5'
         with:
-          key: '${{ env.cache }}'
+          key: 'staticcheck'
           path: |
             ${{ runner.temp }}/staticcheck
             /home/runner/.cache/go-build
@@ -28,7 +28,7 @@ jobs:
         with: {go-version: 'stable'}
       - uses: 'actions/cache@v5'
         with:
-          key: '${{ runner.os }}-staticcheck'
+          key: 'staticcheck'
           path: |
             ${{ runner.temp }}/staticcheck
             ${{ steps.install_go.outputs.GOCACHE || '' }}

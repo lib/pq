@@ -22,14 +22,14 @@ func BenchmarkLocationCacheMultiThread(b *testing.B) {
 
 	f := func(wg *sync.WaitGroup, loops int) {
 		defer wg.Done()
-		for i := 0; i < loops; i++ {
+		for range loops {
 			globalLocationCache.getLocation(rand.Intn(10000))
 		}
 	}
 
 	wg := &sync.WaitGroup{}
 	b.ResetTimer()
-	for j := 0; j < 10; j++ {
+	for range 10 {
 		wg.Add(1)
 		go f(wg, b.N/10)
 	}

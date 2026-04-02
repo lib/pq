@@ -25,7 +25,6 @@ func TestCopyInError(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
 			tx := pqtest.Begin(t, pqtest.MustDB(t))
@@ -96,7 +95,6 @@ func TestCopyInNull(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
 			db := pqtest.MustDB(t)
@@ -130,7 +128,6 @@ func TestCopyInMultipleValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
 			db := pqtest.MustDB(t)
@@ -138,7 +135,7 @@ func TestCopyInMultipleValues(t *testing.T) {
 			pqtest.Exec(t, tx, `create temp table tbl (a int, b varchar)`)
 
 			stmt := pqtest.Prepare(t, tx, tt.query, db)
-			for i := 0; i < 500; i++ {
+			for i := range 500 {
 				stmt.MustExec(t, int64(i), strings.Repeat("#", 500))
 			}
 
