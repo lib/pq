@@ -2,6 +2,13 @@ unreleased
 ----------
 
 
+v1.12.3 (2026-04-03)
+--------------------
+- Send datestyle startup parameter, improving compatbility with database engines
+  that use a different default datestyle such as EnterpriseDB ([#1312]).
+
+[#1312]: https://github.com/lib/pq/pull/1312
+
 v1.12.2 (2026-04-02)
 --------------------
 
