@@ -447,6 +447,7 @@ type Config struct {
 	// awkward to use.
 	set []string `env:"set"`
 
+	// Only used in newConfig() and tests; joined in the Multi field at the end.
 	multiHost     []string
 	multiHostaddr []netip.Addr
 	multiPort     []uint16
@@ -515,11 +516,8 @@ func NewConfig(dsn string) (Config, error) {
 
 // Clone returns a copy of the [Config].
 func (cfg Config) Clone() Config {
-	rt := make(map[string]string)
-	maps.Copy(rt, cfg.Runtime)
 	c := cfg
-	c.Runtime = rt
-	c.set = append([]string{}, cfg.set...)
+	c.Runtime, c.Multi, c.set = maps.Clone(cfg.Runtime), slices.Clone(cfg.Multi), slices.Clone(cfg.set)
 	return c
 }
 
