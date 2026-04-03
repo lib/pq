@@ -1237,6 +1237,10 @@ func (cn *conn) startup(cfg Config) error {
 		w.string("client_encoding")
 		w.string(cfg.ClientEncoding)
 	}
+	if cfg.Datestyle != "" {
+		w.string("datestyle")
+		w.string(cfg.Datestyle)
+	}
 	for k, v := range cfg.Runtime {
 		w.string(k)
 		w.string(v)
