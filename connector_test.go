@@ -113,28 +113,6 @@ func TestNewConnector(t *testing.T) {
 		defer db.Close()
 		useConn(t, db)
 	})
-
-	t.Run("database=", func(t *testing.T) {
-		// Cockroach allows connecting to any database name, although it does
-		// give an error on DDL statements (but not "select;" / Ping()). Pretty
-		// weird, but not really important to run this test there so whatever.
-		pqtest.SkipCockroach(t)
-
-		want1, want2 := `or:pq: database "err" does not exist (3D000)|pq: no such database: err (08P01)`,
-			`or:pq: database "two" does not exist (3D000)|pq: no such database: two (08P01)`
-
-		// Make sure database= consistently take precedence over dbname=
-		for i := 0; i < 10; i++ {
-			_, err := pqtest.DB(t, "database=err")
-			if !pqtest.ErrorContains(err, want1) {
-				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, want1)
-			}
-			_, err = pqtest.DB(t, "dbname=one database=two")
-			if !pqtest.ErrorContains(err, want2) {
-				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, want2)
-			}
-		}
-	})
 }
 
 // TODO: this can be merged with TestNewConfig, I think?
@@ -753,6 +731,57 @@ func TestConnectionTargetSessionAttrs(t *testing.T) {
 			_, err := pqtest.DB(t, f.DSN()+" "+tt.dsn)
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Errorf("\nhave: %v\nwant: %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestStartupParameters(t *testing.T) {
+	tests := []struct {
+		dsn  string
+		want map[string]string
+	}{
+		{"", map[string]string{"client_encoding": "UTF8", "database": "pqgo", "datestyle": "ISO, MDY", "user": "pqgo"}},
+
+		// Make sure database= works, and takes pre secede over dbname=
+		{"dbname=A", map[string]string{"client_encoding": "UTF8", "database": "A", "datestyle": "ISO, MDY", "user": "pqgo"}},
+		{"database=B", map[string]string{"client_encoding": "UTF8", "database": "B", "datestyle": "ISO, MDY", "user": "pqgo"}},
+		{"dbname=A database=B", map[string]string{"client_encoding": "UTF8", "database": "B", "datestyle": "ISO, MDY", "user": "pqgo"}},
+	}
+
+	pqtest.Unsetenv(t, "PGAPPNAME")
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			var have map[string]string
+			f := pqtest.NewFake(t, func(f pqtest.Fake, cn net.Conn) {
+				_, params, ok := f.ReadStartup(cn)
+				if !ok {
+					return
+				}
+				have = params
+
+				f.WriteMsg(cn, proto.AuthenticationRequest, "\x00\x00\x00\x00")
+				f.WriteMsg(cn, proto.ReadyForQuery, "I")
+				for {
+					code, _, ok := f.ReadMsg(cn)
+					if !ok {
+						return
+					}
+					switch code {
+					case proto.Query:
+						f.WriteMsg(cn, proto.EmptyQueryResponse, "")
+						f.WriteMsg(cn, proto.ReadyForQuery, "I")
+					case proto.Terminate:
+						cn.Close()
+						return
+					}
+				}
+			})
+			defer f.Close()
+
+			pqtest.MustDB(t, f.DSN()+" "+tt.dsn).Close()
+			if !reflect.DeepEqual(have, tt.want) {
+				t.Errorf("\nhave: %#v\nwant: %#v", have, tt.want)
 			}
 		})
 	}
