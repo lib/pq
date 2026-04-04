@@ -97,39 +97,42 @@ func TestArrayParseError(t *testing.T) {
 
 func TestArrayFunc(t *testing.T) {
 	tests := []struct {
-		in   any
-		want any
+		in           any
+		want         any
+		scan         string
+		wantScanErr  string
+		wantValueErr string
 	}{
-		{[]bool{}, &BoolArray{}},
-		{[]float64{}, &Float64Array{}},
-		{[]int64{}, &Int64Array{}},
-		{[]float32{}, &Float32Array{}},
-		{[]int32{}, &Int32Array{}},
-		{[]string{}, &StringArray{}},
-		{[][]byte{}, &ByteaArray{}},
-		{nil, GenericArray{nil}},
-		{[]driver.Value{}, GenericArray{[]driver.Value{}}},
-		{[][]bool{}, GenericArray{[][]bool{}}},
-		{[][]float64{}, GenericArray{[][]float64{}}},
-		{[][]int64{}, GenericArray{[][]int64{}}},
-		{[][]float32{}, GenericArray{[][]float32{}}},
-		{[][]int32{}, GenericArray{[][]int32{}}},
-		{[][]string{}, GenericArray{[][]string{}}},
+		{[]bool{}, &BoolArray{}, `{f,t}`, ``, ``},
+		{[]float64{}, &Float64Array{}, `{1.1,1.2}`, ``, ``},
+		{[]int64{}, &Int64Array{}, `{2,3}`, ``, ``},
+		{[]float32{}, &Float32Array{}, `{1.1,1.2}`, ``, ``},
+		{[]int32{}, &Int32Array{}, `{2,3}`, ``, ``},
+		{[]string{}, &StringArray{}, `{"a","b"}`, ``, ``},
+		{[][]byte{}, &ByteaArray{}, `{"\\x10","\\x11"}`, ``, ``},
+		{nil, GenericArray{nil}, `{}`, `pq: destination <nil> is not a pointer to array or slice`, ``},
+		{[]driver.Value{}, GenericArray{[]driver.Value{}}, `{}`, `[]driver.Value is not a pointer`, ``},
+		{[][]bool{}, GenericArray{[][]bool{}}, `{}`, `[][]bool is not a pointer`, ``},
+		{[][]float64{}, GenericArray{[][]float64{}}, `{}`, `[][]float64 is not a pointer`, ``},
+		{[][]int64{}, GenericArray{[][]int64{}}, `{}`, `[][]int64 is not a pointer`, ``},
+		{[][]float32{}, GenericArray{[][]float32{}}, `{}`, `[][]float32 is not a pointer`, ``},
+		{[][]int32{}, GenericArray{[][]int32{}}, `{}`, `[][]int32 is not a pointer`, ``},
+		{[][]string{}, GenericArray{[][]string{}}, `{}`, `[][]string is not a pointer`, ``},
 
-		{&[]bool{}, &BoolArray{}},
-		{&[]float64{}, &Float64Array{}},
-		{&[]int64{}, &Int64Array{}},
-		{&[]float32{}, &Float32Array{}},
-		{&[]int32{}, &Int32Array{}},
-		{&[]string{}, &StringArray{}},
-		{&[][]byte{}, &ByteaArray{}},
-		{&[]sql.Scanner{}, GenericArray{&[]sql.Scanner{}}},
-		{&[][]bool{}, GenericArray{&[][]bool{}}},
-		{&[][]float64{}, GenericArray{&[][]float64{}}},
-		{&[][]int64{}, GenericArray{&[][]int64{}}},
-		{&[][]float32{}, GenericArray{&[][]float32{}}},
-		{&[][]int32{}, GenericArray{&[][]int32{}}},
-		{&[][]string{}, GenericArray{&[][]string{}}},
+		{&[]bool{}, &BoolArray{}, `{f,t}`, ``, ``},
+		{&[]float64{}, &Float64Array{}, `{1.1,1.2}`, ``, ``},
+		{&[]int64{}, &Int64Array{}, `{1,2}`, ``, ``},
+		{&[]float32{}, &Float32Array{}, `{1.1,1.2}`, ``, ``},
+		{&[]int32{}, &Int32Array{}, `{1,2}`, ``, ``},
+		{&[]string{}, &StringArray{}, `{"a","b"}`, ``, ``},
+		{&[][]byte{}, &ByteaArray{}, `{"\\x10","\\x11"}`, ``, ``},
+		{&[]sql.Scanner{}, GenericArray{&[]sql.Scanner{}}, `{}`, ``, `pq: unable to convert *[]sql.Scanner to array`},
+		{&[][]bool{}, GenericArray{&[][]bool{}}, `{}`, ``, `*[][]bool to array`},
+		{&[][]float64{}, GenericArray{&[][]float64{}}, `{}`, ``, `*[][]float64 to array`},
+		{&[][]int64{}, GenericArray{&[][]int64{}}, `{}`, ``, `*[][]int64 to array`},
+		{&[][]float32{}, GenericArray{&[][]float32{}}, `{}`, ``, `*[][]float32 to array`},
+		{&[][]int32{}, GenericArray{&[][]int32{}}, `{}`, ``, `*[][]int32 to array`},
+		{&[][]string{}, GenericArray{&[][]string{}}, `{}`, ``, `*[][]string to array`},
 	}
 
 	for _, tt := range tests {
@@ -138,11 +141,23 @@ func TestArrayFunc(t *testing.T) {
 			if !reflect.DeepEqual(have, tt.want) {
 				t.Errorf("\nhave: %#v\nwant: %#v", have, tt.want)
 			}
-			if _, ok := have.(sql.Scanner); !ok {
-				t.Error("not a sql.Scanner")
+			sv, ok := have.(interface {
+				sql.Scanner
+				driver.Valuer
+			})
+			if !ok {
+				t.Error("not a sql.Scanner pr driver.Valuer")
 			}
-			if _, ok := have.(driver.Valuer); !ok {
-				t.Error("not a driver.Valuer")
+			err := sv.Scan(tt.scan)
+			if !pqtest.ErrorContains(err, tt.wantScanErr) {
+				t.Errorf("wrong Scan() error:\nhave: %s\nwant: %s", err, tt.wantScanErr)
+			}
+			v, err := sv.Value()
+			if !pqtest.ErrorContains(err, tt.wantValueErr) {
+				t.Errorf("wrong Value() error:\nhave: %s\nwant: %s", err, tt.wantValueErr)
+			}
+			if tt.wantScanErr == "" && tt.wantValueErr == "" && v != tt.scan {
+				t.Errorf("not equal after Scan()/Value()\nhave: %v\nwant: %v", v, tt.scan)
 			}
 		})
 	}
