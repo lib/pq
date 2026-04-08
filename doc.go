@@ -11,7 +11,7 @@ directly. For example:
 	)
 
 	func main() {
-		dsn := "user=pqgo dbname=pqgo sslmode=verify-full"
+		dsn := "user=pqgo dbname=pqgo sslmode=verify-full connect_timeout=5"
 		db, err := sql.Open("postgres", dsn)
 		if err != nil {
 			log.Fatal(err)
@@ -24,7 +24,7 @@ directly. For example:
 
 You can also connect with an URL:
 
-	dsn := "postgres://pqgo:password@localhost/pqgo?sslmode=verify-full"
+	dsn := "postgres://pqgo:password@localhost/pqgo?sslmode=verify-full&connect_timeout=5"
 	db, err := sql.Open("postgres", dsn)
 
 # Connection String Parameters

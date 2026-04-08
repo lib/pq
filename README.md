@@ -22,7 +22,7 @@ import (
 
 func main() {
     // Or as URL: postgresql://localhost/pqgo
-    db, err := sql.Open("postgres", "host=localhost dbname=pqgo")
+    db, err := sql.Open("postgres", "host=localhost dbname=pqgo connect_timeout=5")
     if err != nil {
         log.Fatal(err)
     }
@@ -42,9 +42,10 @@ You can also use the `pq.Config` struct:
 
 ```go
 cfg := pq.Config{
-    Host: "localhost",
-    Port: 5432,
-    User: "pqgo",
+	Host:           "localhost",
+	Port:           5432,
+	User:           "pqgo",
+	ConnectTimeout: 5 * time.Second,
 }
 // Or: create a new Config from the defaults, environment, and DSN.
 // cfg, err := pq.NewConfig("host=postgres dbname=pqgo")
@@ -84,6 +85,10 @@ For example:
 The libpq way (which also works in pq) is to use `options='-c k=v'` like so:
 
     sql.Open("postgres", "dbname=pqgo options='-c work_mem=100kB -c search_path=xyz'")
+
+It's recommended to add `connect_timeout` to the DSN – database/sql may open new
+connections asynchronously so it doesn't use the context from QueryContext(),
+PingContext(), etc. The default is to wait indefinitely.
 
 [Config struct]: https://pkg.go.dev/github.com/lib/pq#Config
 [run-time parameter]: http://www.postgresql.org/docs/current/static/runtime-config.html
