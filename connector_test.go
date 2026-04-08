@@ -34,8 +34,8 @@ func TestNewConnector(t *testing.T) {
 				t.Fatal(err)
 			}
 			tx.Rollback()
-		case driver.Conn:
-			tx, err := db.Begin() //lint:ignore SA1019 x
+		case driver.ConnBeginTx:
+			tx, err := db.BeginTx(context.Background(), driver.TxOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}

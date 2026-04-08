@@ -3,9 +3,16 @@ package pq
 import (
 	"bytes"
 	"database/sql"
+	"database/sql/driver"
 
 	"github.com/lib/pq/pqerror"
 )
+
+// Never called, but need to retain them for interface compatibility.
+func (cn *conn) Prepare(q string) (driver.Stmt, error)             { panic("conn.Prepare") }
+func (cn *conn) Begin() (driver.Tx, error)                         { panic("conn.Begin") }
+func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) { panic("stmt.Query") }
+func (st *stmt) Exec(v []driver.Value) (driver.Result, error)      { panic("stmt.Exec") }
 
 // [pq.Error.Severity] values.
 //

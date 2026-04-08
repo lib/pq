@@ -62,27 +62,39 @@ func (st *stmt) Close() error {
 	return nil
 }
 
-func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) {
-	return st.query(toNamedValue(v))
-}
-
-func (st *stmt) query(v []driver.NamedValue) (*rows, error) {
+// Implement [driver.StmtQueryContext].
+func (st *stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	finish := st.cn.watchCancel(ctx, true)
 	if err := st.cn.err.get(); err != nil {
 		return nil, err
 	}
 
-	err := st.exec(v)
+	err := st.exec(args)
 	if err != nil {
+		finish()
 		return nil, st.cn.handleError(err)
 	}
+
 	return &rows{
 		cn:         st.cn,
 		rowsHeader: st.rowsHeader,
+		finish:     finish,
 	}, nil
 }
 
-func (st *stmt) Exec(v []driver.Value) (driver.Result, error) {
-	return st.ExecContext(context.Background(), toNamedValue(v))
+// Implement [driver.StmtExecContext].
+func (st *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	defer st.cn.watchCancel(ctx, true)()
+	if err := st.cn.err.get(); err != nil {
+		return nil, err
+	}
+
+	err := st.exec(args)
+	if err != nil {
+		return nil, st.cn.handleError(err)
+	}
+	res, _, err := st.cn.readExecuteResponse("simple query")
+	return res, st.cn.handleError(err)
 }
 
 func (st *stmt) exec(v []driver.NamedValue) error {
