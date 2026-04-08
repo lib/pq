@@ -41,8 +41,8 @@ type (
 )
 
 func (rs *rows) Close() error {
-	if finish := rs.finish; finish != nil {
-		defer finish()
+	if rs.finish != nil {
+		defer rs.finish()
 	}
 	// no need to look at cn.bad as Next() will
 	for {

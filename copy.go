@@ -281,9 +281,7 @@ func (ci *copyin) CopyData(ctx context.Context, line string) (driver.Result, err
 	if ci.closed {
 		return nil, errCopyInClosed
 	}
-	if finish := ci.cn.watchCancel(ctx); finish != nil {
-		defer finish()
-	}
+	defer ci.cn.watchCancel(ctx, false)()
 	if err := ci.getBad(); err != nil {
 		return nil, err
 	}
