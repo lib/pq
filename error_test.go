@@ -228,14 +228,10 @@ func TestRetryError(t *testing.T) {
 	if err := db.Ping(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		os.Unsetenv("PQTEST_FAILNUM")
-		os.Unsetenv("PQTEST_FAILNET")
-	})
 
 	// Make write fail once so that safeRetryError{} is used.
 	for range 10 {
-		os.Setenv("PQTEST_FAILNUM", "1")
+		t.Setenv("PQTEST_FAILNUM", "1")
 		tx, err := db.Begin()
 		if err != nil {
 			t.Fatal(err)
@@ -246,7 +242,7 @@ func TestRetryError(t *testing.T) {
 	}
 
 	// Should fail if it returns ErrBadConn too often.
-	os.Setenv("PQTEST_FAILNUM", "5")
+	t.Setenv("PQTEST_FAILNUM", "5")
 	if _, err := db.Begin(); err == nil {
 		t.Fatal("no error?")
 	}
@@ -265,13 +261,9 @@ func TestNetworkError(t *testing.T) {
 	if err := db.Ping(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		os.Unsetenv("PQTEST_FAILNUM")
-		os.Unsetenv("PQTEST_FAILNET")
-	})
 
-	os.Setenv("PQTEST_FAILNUM", "1")
-	os.Setenv("PQTEST_FAILNET", "1")
+	t.Setenv("PQTEST_FAILNUM", "1")
+	t.Setenv("PQTEST_FAILNET", "1")
 	_, err = db.Begin()
 	if err == nil || !errors.As(err, new(*net.OpError)) {
 		t.Fatalf("wrong error %T: %[1]s", err)
