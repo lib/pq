@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -576,6 +577,71 @@ func TestUnexpectedEOF(t *testing.T) {
 
 	// Make sure it doesn't break the connection.
 	pqtest.QueryRow[int](t, db, `select okay`)
+}
+
+func TestPoolerErrorResponseWithoutReadyForQuery(t *testing.T) {
+	t.Parallel()
+
+	// On any Parse the fake emits a non-fatal ErrorResponse and closes the
+	// connection without sending a trailing ReadyForQuery — the byte sequence
+	// pgbouncer emits via disconnect_server(false, ...) -> send_pooler_error
+	// (severity ERROR, SQLSTATE 08P01, no RFQ).
+	//
+	// Inside readParseResponse, the trailing readReadyForQuery() returns
+	// io.EOF; that EOF must be routed through handleError so cn.err is set
+	// to driver.ErrBadConn. Otherwise the broken conn re-enters the *sql.DB
+	// pool with inProgress stuck at true, and the next call on it short-
+	// circuits to errQueryInProgress instead of running the query.
+	var triggered atomic.Bool
+	f := pqtest.NewFake(t, func(f pqtest.Fake, cn net.Conn) {
+		f.Startup(cn, nil)
+		for {
+			code, _, ok := f.ReadMsg(cn)
+			if !ok {
+				return
+			}
+			switch code {
+			case proto.Terminate:
+				cn.Close()
+				return
+			case proto.Query:
+				// Ping(): empty simple query.
+				f.WriteMsg(cn, proto.EmptyQueryResponse, "")
+				f.WriteMsg(cn, proto.ReadyForQuery, "I")
+			case proto.Parse:
+				triggered.Store(true)
+				f.WriteMsg(cn, proto.ErrorResponse,
+					"SERROR\x00C08P01\x00Mserver conn crashed?\x00\x00")
+				cn.Close()
+				return
+			}
+		}
+	})
+	defer f.Close()
+
+	db := pqtest.MustDB(t, f.DSN())
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	if _, err := db.Exec("select $1::int", 1); err == nil {
+		t.Fatal("first Exec: want non-nil error from pooler fault, got nil")
+	}
+	if !triggered.Load() {
+		t.Fatal("server-side fault was never triggered")
+	}
+
+	// The next Exec must not short-circuit to errQueryInProgress. Without the
+	// fix the poisoned conn stays in the pool with inProgress=true and is
+	// reused here; with the fix it was evicted, *sql.DB opens a fresh conn
+	// and we get a proper *pq.Error from the new fault — not the "there is
+	// already a query being processed" guard.
+	_, err := db.Exec("select $1::int", 1)
+	if err == nil {
+		t.Fatal("second Exec: want non-nil error, got nil")
+	}
+	if errors.Is(err, errQueryInProgress) {
+		t.Fatalf("second Exec: poisoned conn was reused from pool: %v", err)
+	}
 }
 
 func TestConnClose(t *testing.T) {

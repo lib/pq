@@ -1760,7 +1760,7 @@ func (cn *conn) readParseResponse() error {
 		return nil
 	case proto.ErrorResponse:
 		err := parseError(r, "")
-		_ = cn.readReadyForQuery()
+		_ = cn.handleError(cn.readReadyForQuery())
 		return err
 	default:
 		cn.err.set(driver.ErrBadConn)
@@ -1788,7 +1788,7 @@ func (cn *conn) readStatementDescribeResponse() (paramTyps []oid.Oid, colNames [
 			return paramTyps, colNames, colTyps, nil
 		case proto.ErrorResponse:
 			err := parseError(r, "")
-			_ = cn.readReadyForQuery()
+			_ = cn.handleError(cn.readReadyForQuery())
 			return nil, nil, nil, err
 		default:
 			cn.err.set(driver.ErrBadConn)
@@ -1809,7 +1809,7 @@ func (cn *conn) readPortalDescribeResponse() (rowsHeader, error) {
 		return rowsHeader{}, nil
 	case proto.ErrorResponse:
 		err := parseError(r, "")
-		_ = cn.readReadyForQuery()
+		_ = cn.handleError(cn.readReadyForQuery())
 		return rowsHeader{}, err
 	default:
 		cn.err.set(driver.ErrBadConn)
@@ -1827,7 +1827,7 @@ func (cn *conn) readBindResponse() error {
 		return nil
 	case proto.ErrorResponse:
 		err := parseError(r, "")
-		_ = cn.readReadyForQuery()
+		_ = cn.handleError(cn.readReadyForQuery())
 		return err
 	default:
 		cn.err.set(driver.ErrBadConn)
@@ -1853,7 +1853,7 @@ func (cn *conn) postExecuteWorkaround() error {
 		switch t {
 		case proto.ErrorResponse:
 			err := parseError(r, "")
-			_ = cn.readReadyForQuery()
+			_ = cn.handleError(cn.readReadyForQuery())
 			return err
 		case proto.CommandComplete, proto.DataRow, proto.EmptyQueryResponse:
 			// the query didn't fail, but we can't process this message
