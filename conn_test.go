@@ -580,7 +580,7 @@ func TestUnexpectedEOF(t *testing.T) {
 }
 
 // #1320
-func TestCloseWithoutReadyForQuery(t *testing.T) {
+func TestUnexpectedClose(t *testing.T) {
 	t.Parallel()
 
 	// Emit non-fatal ErrorResponse and close the connection on any Parse.
