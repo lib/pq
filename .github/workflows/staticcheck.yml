@@ -1,0 +1,64 @@
+name: 'staticcheck'
+on:
+  pull_request:
+    paths: ['**.go', 'go.mod', '.github/workflows/*']
+  push:
+    branches: ['main', 'master']
+
+jobs:
+  staticcheck:
+    name:    'staticcheck'
+    runs-on: 'ubuntu-latest'
+    env:     {cache: 'staticcheck'}
+    steps:
+      # Setup
+      - uses: 'actions/checkout@v6'
+
+      # Store and restore staticcheck only from master branch.
+      - id:   'cache-restore'
+        uses: 'actions/cache/restore@v5'
+        with:
+          key: 'staticcheck'
+          path: |
+            ${{ runner.temp }}/staticcheck
+            /home/runner/.cache/go-build
+          restore-keys: |
+            staticcheck
+      - uses: 'actions/setup-go@v6'
+        with: {go-version: 'stable'}
+      - uses: 'actions/cache@v5'
+        with:
+          key: 'staticcheck'
+          path: |
+            ${{ runner.temp }}/staticcheck
+            ${{ steps.install_go.outputs.GOCACHE || '' }}
+
+      # Run
+      - run: |
+          export STATICCHECK_CACHE="${{ runner.temp }}/staticcheck"
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+
+          fail=0
+          for a in $(go tool dist list); do
+            export GOOS=${a%%/*}
+            export GOARCH=${a#*/}
+
+            case "$GOOS" in
+              (android|ios)  continue ;; # Requires cgo to link.
+            esac
+
+            f=
+            echo "==> $a"
+            go vet ./...      || fail=1
+            staticcheck ./... || fail=1
+          done
+          exit $fail
+
+      # Store cache, only on master branch
+      - uses: 'actions/cache/save@v5'
+        if:   "github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'"
+        with:
+          key: 'staticcheck'
+          path: |
+            ${{ runner.temp }}/staticcheck
+            /home/runner/.cache/go-build

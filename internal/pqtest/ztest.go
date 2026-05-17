@@ -1,0 +1,133 @@
+// Copied from https://github.com/arp242/zstd/tree/main/ztest
+
+package pqtest
+
+import (
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+)
+
+// ErrorContains checks if the error message in have contains the text in
+// want.
+//
+// This is safe when have is nil. Use an empty string for want if you want to
+// test that err is nil.
+//
+// Uses a regexp match if want starts with "re:".
+//
+// Matches several strings if wants starts with "or:". For example
+// "or:one|two|three" matches any error which contains "one", "two", or "three".
+// This is similar to "re:(one|two|three)" except that it's not required to
+// escape regexp meta characters. It's not possible to escape | with or:
+func ErrorContains(have error, want string) bool {
+	if have == nil {
+		return want == ""
+	}
+	if want == "" {
+		return false
+	}
+	if strings.HasPrefix(want, "re:") {
+		m, err := regexp.MatchString(want[3:], have.Error())
+		if err != nil {
+			panic(fmt.Errorf("pqtest.ErrorContains: %w", err))
+		}
+		return m
+	}
+	if strings.HasPrefix(want, "or:") {
+		for _, w := range strings.Split(want[3:], "|") {
+			if strings.Contains(have.Error(), w) {
+				return true
+			}
+		}
+		return false
+	}
+	return strings.Contains(have.Error(), want)
+}
+
+// Read data from a file.
+func Read(t *testing.T, paths ...string) []byte {
+	t.Helper()
+	path := filepath.Join(paths...)
+	file, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ztest.Read: cannot read %v: %v", path, err)
+	}
+	return file
+}
+
+// Write data to a file.
+func Write(t *testing.T, data []byte, paths ...string) {
+	t.Helper()
+	path := filepath.Join(paths...)
+	if err := os.WriteFile(path, data, 0o777); err != nil {
+		t.Fatalf("ztest.Write: cannot write to %v: %v", path, err)
+	}
+}
+
+// Chmod a file
+func Chmod(t *testing.T, mode fs.FileMode, paths ...string) {
+	t.Helper()
+	path := filepath.Join(paths...)
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatalf("ztest.Chmod(%q): %s", path, err)
+	}
+}
+
+// TempFile creates a new temporary file and returns the path.
+func TempFile(t *testing.T, name, data string) string {
+	t.Helper()
+	if name == "" {
+		name = "ztest"
+	}
+	name = filepath.Join(t.TempDir(), name)
+	tempFile(t, name, data)
+	return name
+}
+
+func tempFile(t *testing.T, path, data string) {
+	t.Helper()
+	err := os.WriteFile(path, []byte(data), 0o666)
+	if err != nil {
+		t.Fatalf("ztest.TempFile: %s", err)
+	}
+}
+
+// NormalizeIndent removes tab indentation from every line.
+//
+// This is useful for "inline" multiline strings:
+//
+//	  cases := []struct {
+//	      string in
+//	  }{
+//	      `
+//		 	    Hello,
+//		 	    world!
+//	      `,
+//	  }
+//
+// This is nice and readable, but the downside is that every line will now have
+// two extra tabs. This will remove those two tabs from every line.
+//
+// The amount of tabs to remove is based only on the first line, any further
+// tabs will be preserved.
+func NormalizeIndent(in string) string {
+	indent := 0
+	for _, c := range strings.TrimLeft(in, "\n") {
+		if c != '\t' {
+			break
+		}
+		indent++
+	}
+
+	var r strings.Builder
+	for _, line := range strings.Split(in, "\n") {
+		r.WriteString(strings.Replace(line, "\t", "", indent) + "\n")
+	}
+
+	return strings.TrimSpace(r.String())
+}

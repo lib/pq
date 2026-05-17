@@ -1,413 +1,257 @@
 package pq
 
 import (
-	"bytes"
-	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"net"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lib/pq/internal/pqtest"
+	"github.com/lib/pq/pqerror"
 )
 
-func TestCopyInStmt(t *testing.T) {
-	stmt := CopyIn("table name")
-	if stmt != `COPY "table name" () FROM STDIN` {
-		t.Fatal(stmt)
+func TestCopyInError(t *testing.T) {
+	tests := []struct {
+		query   string
+		wantErr string
+	}{
+		{`copy tbl (num) from stdin with binary`, `only text format supported for COPY`},
+		{"-- comment\n  /* comment */  copy tbl (num) to stdout", `COPY TO is not supported`},
+		{`copy syntax error`, `or:syntax error at or near "error" at column 13|at or near "error": syntax error`},
 	}
 
-	stmt = CopyIn("table name", "column 1", "column 2")
-	if stmt != `COPY "table name" ("column 1", "column 2") FROM STDIN` {
-		t.Fatal(stmt)
-	}
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			t.Parallel()
+			tx := pqtest.Begin(t, pqtest.MustDB(t))
+			pqtest.Exec(t, tx, `create temp table tbl (num integer)`)
 
-	stmt = CopyIn(`table " name """`, `co"lumn""`)
-	if stmt != `COPY "table "" name """"""" ("co""lumn""""") FROM STDIN` {
-		t.Fatal(stmt)
+			_, err := tx.Prepare(tt.query)
+			if !pqtest.ErrorContains(err, tt.wantErr) {
+				t.Errorf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
+			}
+			// Check that the protocol is in a valid state
+			if err := tx.Rollback(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
-func TestCopyInSchemaStmt(t *testing.T) {
-	stmt := CopyInSchema("schema name", "table name")
-	if stmt != `COPY "schema name"."table name" () FROM STDIN` {
-		t.Fatal(stmt)
+func TestCopyInErrorWrongType(t *testing.T) {
+	t.Parallel()
+	db := pqtest.MustDB(t)
+	tx := pqtest.Begin(t, db)
+	pqtest.Exec(t, tx, `create temp table tbl (num integer)`)
+
+	stmt := pqtest.Prepare(t, tx, `copy tbl (num) from stdin`, db)
+	stmt.MustExec(t, "Héllö\n ☃!\r\t\\")
+	_, err := stmt.Exec()
+	mustAs(t, err, pqerror.InvalidTextRepresentation)
+}
+
+func TestCopyInErrorOutsideTransaction(t *testing.T) {
+	t.Parallel()
+	db := pqtest.MustDB(t)
+
+	_, err := db.Prepare(`copy tbl (num) from stdin`)
+	if err != errCopyNotSupportedOutsideTxn {
+		t.Errorf("wrong error: %v", err)
+	}
+}
+
+func TestCopyInQueryWhileCopy(t *testing.T) {
+	t.Parallel()
+	db := pqtest.MustDB(t)
+	tx := pqtest.Begin(t, db)
+	pqtest.Exec(t, tx, `create temp table tbl (i int primary key)`)
+
+	pqtest.Prepare(t, tx, "copy tbl (i) from stdin", db)
+	_, err := tx.Query(`select 1`)
+	if !errors.Is(err, errQueryInProgress) {
+		t.Errorf("wrong error:\nhave: %s\nwant: %s", err, errQueryInProgress)
+	}
+}
+
+func TestCopyInNull(t *testing.T) {
+	tests := []struct {
+		null any
+		copy string
+	}{
+		{nil, `copy tbl (i, t) from stdin`},
+		{`NULL`, `copy tbl (i, t) from stdin with null 'NULL'`},
+		{``, `copy tbl (i, t) from stdin with null ''`},
+		{`\N`, `copy tbl (i, t) from stdin with null '\\N'`},
+
+		// The default doesn't work as copyin.Exec() calls appendEncodedText(),
+		// which escapes \N to \\N. To fix it we need to read query, see if
+		// "WITH NULL" was passed, and don't escape that text (of the default of
+		// \N).
+		//{`\N`, `copy tbl (i, t) from stdin`},
 	}
 
-	stmt = CopyInSchema("schema name", "table name", "column 1", "column 2")
-	if stmt != `COPY "schema name"."table name" ("column 1", "column 2") FROM STDIN` {
-		t.Fatal(stmt)
-	}
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			t.Parallel()
+			db := pqtest.MustDB(t)
+			tx := pqtest.Begin(t, db)
 
-	stmt = CopyInSchema(`schema " name """`, `table " name """`, `co"lumn""`)
-	if stmt != `COPY "schema "" name """"""".`+
-		`"table "" name """"""" ("co""lumn""""") FROM STDIN` {
-		t.Fatal(stmt)
+			pqtest.Exec(t, tx, `create temp table tbl (i int, t text)`)
+			stmt := pqtest.Prepare(t, tx, tt.copy, db)
+			stmt.MustExec(t, 42, "forty-two")
+			stmt.MustExec(t, tt.null, tt.null)
+			stmt.MustExec(t)
+			stmt.MustClose(t)
+
+			rows := pqtest.Query[any](t, tx, `select * from tbl`)
+			want := []map[string]any{
+				{"i": int64(42), "t": "forty-two"},
+				{"i": nil, "t": nil},
+			}
+			if !reflect.DeepEqual(rows, want) {
+				t.Errorf("\nhave: %#v\nwant: %#v", rows, want)
+			}
+		})
 	}
 }
 
 func TestCopyInMultipleValues(t *testing.T) {
-	db := openTestConn(t)
-	defer db.Close()
-
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer txn.Rollback()
-
-	_, err = txn.Exec("CREATE TEMP TABLE temp (a int, b varchar)")
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		query string
+	}{
+		{`copy tbl (a, b) from stdin`},
+		{`copy tbl from stdin`},
 	}
 
-	stmt, err := txn.Prepare(CopyIn("temp", "a", "b"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			t.Parallel()
+			db := pqtest.MustDB(t)
+			tx := pqtest.Begin(t, db)
+			pqtest.Exec(t, tx, `create temp table tbl (a int, b varchar)`)
 
-	longString := strings.Repeat("#", 500)
+			stmt := pqtest.Prepare(t, tx, tt.query, db)
+			for i := range 500 {
+				stmt.MustExec(t, int64(i), strings.Repeat("#", 500))
+			}
 
-	for i := 0; i < 500; i++ {
-		_, err = stmt.Exec(int64(i), longString)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
+			res := stmt.MustExec(t)
+			rows, err := res.RowsAffected()
+			if err != nil || rows != 500 {
+				t.Fatalf("\nerr: %v\nrows: %v", err, rows)
+			}
 
-	result, err := stmt.Exec()
-	if err != nil {
-		t.Fatal(err)
-	}
+			n, err := res.LastInsertId()
+			if n != 0 || err == nil || err.Error() != `LastInsertId is not supported by this driver` {
+				t.Errorf("n=%d; err=%v", n, err)
+			}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		t.Fatal(err)
-	}
+			stmt.MustClose(t)
 
-	if rowsAffected != 500 {
-		t.Fatalf("expected 500 rows affected, not %d", rowsAffected)
-	}
-
-	err = stmt.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var num int
-	err = txn.QueryRow("SELECT COUNT(*) FROM temp").Scan(&num)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if num != 500 {
-		t.Fatalf("expected 500 items, not %d", num)
+			num := pqtest.Query[int](t, tx, `select count(*) from tbl`)[0]["count"]
+			if num != 500 {
+				t.Fatalf("expected 500 items, not %d", num)
+			}
+		})
 	}
 }
 
 func TestCopyInRaiseStmtTrigger(t *testing.T) {
-	db := openTestConn(t)
-	defer db.Close()
+	pqtest.SkipCockroach(t) // "unimplemented: cannot create user-defined functions under a temporary schema"
+	t.Parallel()
+	db := pqtest.MustDB(t)
+	tx := pqtest.Begin(t, db)
+	pqtest.Exec(t, tx, `create temp table tbl (a int, b varchar)`)
+	pqtest.Exec(t, tx, `
+		create or replace function pg_temp.temptest()
+		returns trigger as
+		$BODY$ begin
+			raise notice 'Hello world';
+			return new;
+		end $BODY$
+		language plpgsql
+	`)
+	pqtest.Exec(t, tx, `
+		create trigger temptest_trigger
+		before insert on tbl
+		for each row execute procedure pg_temp.temptest()
+	`)
 
-	if getServerVersion(t, db) < 90000 {
-		var exists int
-		err := db.QueryRow("SELECT 1 FROM pg_language WHERE lanname = 'plpgsql'").Scan(&exists)
-		if err == sql.ErrNoRows {
-			t.Skip("language PL/PgSQL does not exist; skipping TestCopyInRaiseStmtTrigger")
-		} else if err != nil {
-			t.Fatal(err)
-		}
-	}
+	stmt := pqtest.Prepare(t, tx, `copy tbl (a, b) from stdin`, db)
+	stmt.MustExec(t, int64(1), strings.Repeat("#", 500))
+	stmt.MustExec(t)
+	stmt.MustClose(t)
 
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer txn.Rollback()
-
-	_, err = txn.Exec("CREATE TEMP TABLE temp (a int, b varchar)")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = txn.Exec(`
-			CREATE OR REPLACE FUNCTION pg_temp.temptest()
-			RETURNS trigger AS
-			$BODY$ begin
-				raise notice 'Hello world';
-				return new;
-			end $BODY$
-			LANGUAGE plpgsql`)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = txn.Exec(`
-			CREATE TRIGGER temptest_trigger
-			BEFORE INSERT
-			ON temp
-			FOR EACH ROW
-			EXECUTE PROCEDURE pg_temp.temptest()`)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	stmt, err := txn.Prepare(CopyIn("temp", "a", "b"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	longString := strings.Repeat("#", 500)
-
-	_, err = stmt.Exec(int64(1), longString)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = stmt.Exec()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = stmt.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var num int
-	err = txn.QueryRow("SELECT COUNT(*) FROM temp").Scan(&num)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if num != 1 {
-		t.Fatalf("expected 1 items, not %d", num)
+	rows := pqtest.Query[any](t, tx, `select * from tbl`)
+	want := []map[string]any{{
+		"a": int64(1),
+		"b": strings.Repeat("#", 500),
+	}}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("\nhave: %#v\nwant: %#v", rows, want)
 	}
 }
 
 func TestCopyInTypes(t *testing.T) {
-	db := openTestConn(t)
-	defer db.Close()
+	pqtest.SkipCockroach(t) // https://github.com/cockroachdb/cockroach/issues/167309
+	t.Parallel()
+	db := pqtest.MustDB(t)
+	tx := pqtest.Begin(t, db)
+	pqtest.Exec(t, tx, `create temp table tbl (num integer, text varchar, blob bytea, nothing varchar)`)
 
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer txn.Rollback()
+	stmt := pqtest.Prepare(t, tx, `copy tbl (num, text, blob, nothing) from stdin`, db)
+	stmt.MustExec(t, int64(1234567890), "Héllö\n ☃!\r\t\\", []byte{0, 255, 9, 10, 13}, nil)
+	stmt.MustExec(t)
+	stmt.MustClose(t)
 
-	_, err = txn.Exec("CREATE TEMP TABLE temp (num INTEGER, text VARCHAR, blob BYTEA, nothing VARCHAR)")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	stmt, err := txn.Prepare(CopyIn("temp", "num", "text", "blob", "nothing"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = stmt.Exec(int64(1234567890), "Héllö\n ☃!\r\t\\", []byte{0, 255, 9, 10, 13}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = stmt.Exec()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = stmt.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var num int
-	var text string
-	var blob []byte
-	var nothing sql.NullString
-
-	err = txn.QueryRow("SELECT * FROM temp").Scan(&num, &text, &blob, &nothing)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if num != 1234567890 {
-		t.Fatal("unexpected result", num)
-	}
-	if text != "Héllö\n ☃!\r\t\\" {
-		t.Fatal("unexpected result", text)
-	}
-	if !bytes.Equal(blob, []byte{0, 255, 9, 10, 13}) {
-		t.Fatal("unexpected result", blob)
-	}
-	if nothing.Valid {
-		t.Fatal("unexpected result", nothing.String)
-	}
-}
-
-func TestCopyInWrongType(t *testing.T) {
-	db := openTestConn(t)
-	defer db.Close()
-
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer txn.Rollback()
-
-	_, err = txn.Exec("CREATE TEMP TABLE temp (num INTEGER)")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	stmt, err := txn.Prepare(CopyIn("temp", "num"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stmt.Close()
-
-	_, err = stmt.Exec("Héllö\n ☃!\r\t\\")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = stmt.Exec()
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if pge := err.(*Error); pge.Code.Name() != "invalid_text_representation" {
-		t.Fatalf("expected 'invalid input syntax for integer' error, got %s (%+v)", pge.Code.Name(), pge)
-	}
-}
-
-func TestCopyOutsideOfTxnError(t *testing.T) {
-	db := openTestConn(t)
-	defer db.Close()
-
-	_, err := db.Prepare(CopyIn("temp", "num"))
-	if err == nil {
-		t.Fatal("COPY outside of transaction did not return an error")
-	}
-	if err != errCopyNotSupportedOutsideTxn {
-		t.Fatalf("expected %s, got %s", err, err.Error())
-	}
-}
-
-func TestCopyInBinaryError(t *testing.T) {
-	db := openTestConn(t)
-	defer db.Close()
-
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer txn.Rollback()
-
-	_, err = txn.Exec("CREATE TEMP TABLE temp (num INTEGER)")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = txn.Prepare("COPY temp (num) FROM STDIN WITH binary")
-	if err != errBinaryCopyNotSupported {
-		t.Fatalf("expected %s, got %+v", errBinaryCopyNotSupported, err)
-	}
-	// check that the protocol is in a valid state
-	err = txn.Rollback()
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestCopyFromError(t *testing.T) {
-	db := openTestConn(t)
-	defer db.Close()
-
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer txn.Rollback()
-
-	_, err = txn.Exec("CREATE TEMP TABLE temp (num INTEGER)")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = txn.Prepare("COPY temp (num) TO STDOUT")
-	if err != errCopyToNotSupported {
-		t.Fatalf("expected %s, got %+v", errCopyToNotSupported, err)
-	}
-	// check that the protocol is in a valid state
-	err = txn.Rollback()
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestCopySyntaxError(t *testing.T) {
-	db := openTestConn(t)
-	defer db.Close()
-
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer txn.Rollback()
-
-	_, err = txn.Prepare("COPY ")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if pge := err.(*Error); pge.Code.Name() != "syntax_error" {
-		t.Fatalf("expected syntax error, got %s (%+v)", pge.Code.Name(), pge)
-	}
-	// check that the protocol is in a valid state
-	err = txn.Rollback()
-	if err != nil {
-		t.Fatal(err)
+	rows := pqtest.Query[any](t, tx, `select * from tbl`)
+	want := []map[string]any{{
+		"num":     int64(1234567890),
+		"text":    "Héllö\n ☃!\r\t\\",
+		"blob":    []byte{0, 255, 9, 10, 13},
+		"nothing": nil,
+	}}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("\nhave: %#v\nwant: %#v", rows, want)
 	}
 }
 
 // Tests for connection errors in copyin.resploop()
-func TestCopyRespLoopConnectionError(t *testing.T) {
-	db := openTestConn(t)
-	defer db.Close()
+func TestCopyInRespLoopConnectionError(t *testing.T) {
+	pqtest.SkipCockroach(t) // Doesn't implement pg_terminate_backend()
 
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer txn.Rollback()
-
-	var pid int
-	err = txn.QueryRow("SELECT pg_backend_pid()").Scan(&pid)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = txn.Exec("CREATE TEMP TABLE temp (a int)")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	stmt, err := txn.Prepare(CopyIn("temp", "a"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stmt.Close()
-
-	_, err = db.Exec("SELECT pg_terminate_backend($1)", pid)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if getServerVersion(t, db) < 90500 {
-		// We have to try and send something over, since postgres before
-		// version 9.5 won't process SIGTERMs while it's waiting for
-		// CopyData/CopyEnd messages; see tcop/postgres.c.
-		_, err = stmt.Exec(1)
-		if err != nil {
-			t.Fatal(err)
+	// Executes f in a backoff loop until it doesn't return an error. If this
+	// doesn't happen within duration, t.Fatal is called with the latest error.
+	retry := func(t *testing.T, duration time.Duration, f func() error) {
+		start := time.Now()
+		next := time.Millisecond * 100
+		for {
+			err := f()
+			if err == nil {
+				return
+			}
+			if time.Since(start) > duration {
+				t.Fatal(err)
+			}
+			time.Sleep(next)
+			next *= 2
 		}
 	}
+
+	t.Parallel()
+	db := pqtest.MustDB(t)
+	tx := pqtest.Begin(t, db)
+
+	pid := pqtest.Query[int64](t, tx, `select pg_backend_pid() as pid`)
+	pqtest.Exec(t, tx, "create temp table tbl (a int)")
+	stmt := pqtest.Prepare(t, tx, `copy tbl (a) from stdin`, db)
+	pqtest.Exec(t, db, `select pg_terminate_backend($1)`, pid[0]["pid"])
+
+	var err error
 	retry(t, time.Second*5, func() error {
 		_, err = stmt.Exec()
 		if err == nil {
@@ -428,83 +272,28 @@ func TestCopyRespLoopConnectionError(t *testing.T) {
 		} else if err == errCopyInClosed {
 			// ignore
 		} else {
-			t.Fatalf("unexpected error, got %+#v", err)
+			t.Fatalf("unexpected error: %v", err)
 		}
-	}
-
-	_ = stmt.Close()
-}
-
-// retry executes f in a backoff loop until it doesn't return an error. If this
-// doesn't happen within duration, t.Fatal is called with the latest error.
-func retry(t *testing.T, duration time.Duration, f func() error) {
-	start := time.Now()
-	next := time.Millisecond * 100
-	for {
-		err := f()
-		if err == nil {
-			return
-		}
-		if time.Since(start) > duration {
-			t.Fatal(err)
-		}
-		time.Sleep(next)
-		next *= 2
 	}
 }
 
 func BenchmarkCopyIn(b *testing.B) {
-	db := openTestConn(b)
-	defer db.Close()
+	db := pqtest.MustDB(b)
+	tx := pqtest.Begin(b, db)
 
-	txn, err := db.Begin()
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer txn.Rollback()
+	pqtest.Exec(b, tx, `create temp table tbl (a int, b varchar)`)
+	stmt := pqtest.Prepare(b, tx, `copy tbl (a, b) from stdin`, db)
 
-	_, err = txn.Exec("CREATE TEMP TABLE temp (a int, b varchar)")
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	stmt, err := txn.Prepare(CopyIn("temp", "a", "b"))
-	if err != nil {
-		b.Fatal(err)
-	}
-
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err = stmt.Exec(int64(i), "hello world!")
-		if err != nil {
-			b.Fatal(err)
-		}
+		stmt.MustExec(b, int64(i), "hello world!")
 	}
 
-	_, err = stmt.Exec()
-	if err != nil {
-		b.Fatal(err)
-	}
+	stmt.MustExec(b)
+	stmt.MustClose(b)
 
-	err = stmt.Close()
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	var num int
-	err = txn.QueryRow("SELECT COUNT(*) FROM temp").Scan(&num)
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	if num != b.N {
-		b.Fatalf("expected %d items, not %d", b.N, num)
-	}
-}
-
-var bigTableColumns = []string{"ABIOGENETICALLY", "ABORIGINALITIES", "ABSORBABILITIES", "ABSORBEFACIENTS", "ABSORPTIOMETERS", "ABSTRACTIONISMS", "ABSTRACTIONISTS", "ACANTHOCEPHALAN", "ACCEPTABILITIES", "ACCEPTINGNESSES", "ACCESSARINESSES", "ACCESSIBILITIES", "ACCESSORINESSES", "ACCIDENTALITIES", "ACCIDENTOLOGIES", "ACCLIMATISATION", "ACCLIMATIZATION", "ACCOMMODATINGLY", "ACCOMMODATIONAL", "ACCOMPLISHMENTS", "ACCOUNTABLENESS", "ACCOUNTANTSHIPS", "ACCULTURATIONAL", "ACETOPHENETIDIN", "ACETYLSALICYLIC", "ACHONDROPLASIAS", "ACHONDROPLASTIC", "ACHROMATICITIES", "ACHROMATISATION", "ACHROMATIZATION", "ACIDIMETRICALLY", "ACKNOWLEDGEABLE", "ACKNOWLEDGEABLY", "ACKNOWLEDGEMENT", "ACKNOWLEDGMENTS", "ACQUIRABILITIES", "ACQUISITIVENESS", "ACRIMONIOUSNESS", "ACROPARESTHESIA", "ACTINOBIOLOGIES", "ACTINOCHEMISTRY", "ACTINOTHERAPIES", "ADAPTABLENESSES", "ADDITIONALITIES", "ADENOCARCINOMAS", "ADENOHYPOPHYSES", "ADENOHYPOPHYSIS", "ADENOIDECTOMIES", "ADIATHERMANCIES", "ADJUSTABILITIES", "ADMINISTRATIONS", "ADMIRABLENESSES", "ADMISSIBILITIES", "ADRENALECTOMIES", "ADSORBABILITIES", "ADVENTUROUSNESS", "ADVERSARINESSES", "ADVISABLENESSES", "AERODYNAMICALLY", "AERODYNAMICISTS", "AEROELASTICIANS", "AEROHYDROPLANES", "AEROLITHOLOGIES", "AEROSOLISATIONS", "AEROSOLIZATIONS", "AFFECTABILITIES", "AFFECTIVENESSES", "AFFORDABILITIES", "AFFRANCHISEMENT", "AFTERSENSATIONS", "AGGLUTINABILITY", "AGGRANDISEMENTS", "AGGRANDIZEMENTS", "AGGREGATENESSES", "AGRANULOCYTOSES", "AGRANULOCYTOSIS", "AGREEABLENESSES", "AGRIBUSINESSMAN", "AGRIBUSINESSMEN", "AGRICULTURALIST", "AIRWORTHINESSES", "ALCOHOLISATIONS", "ALCOHOLIZATIONS", "ALCOHOLOMETRIES", "ALEXIPHARMAKONS", "ALGORITHMICALLY", "ALKALINISATIONS", "ALKALINIZATIONS", "ALLEGORICALNESS", "ALLEGORISATIONS", "ALLEGORIZATIONS", "ALLELOMORPHISMS", "ALLERGENICITIES", "ALLOTETRAPLOIDS", "ALLOTETRAPLOIDY", "ALLOTRIOMORPHIC", "ALLOWABLENESSES", "ALPHABETISATION", "ALPHABETIZATION", "ALTERNATIVENESS", "ALTITUDINARIANS", "ALUMINOSILICATE", "ALUMINOTHERMIES", "AMARYLLIDACEOUS", "AMBASSADORSHIPS", "AMBIDEXTERITIES", "AMBIGUOUSNESSES", "AMBISEXUALITIES", "AMBITIOUSNESSES", "AMINOPEPTIDASES", "AMINOPHENAZONES", "AMMONIFICATIONS", "AMORPHOUSNESSES", "AMPHIDIPLOIDIES", "AMPHITHEATRICAL", "ANACOLUTHICALLY", "ANACREONTICALLY", "ANAESTHESIOLOGY", "ANAESTHETICALLY", "ANAGRAMMATISING", "ANAGRAMMATIZING", "ANALOGOUSNESSES", "ANALYZABILITIES", "ANAMORPHOSCOPES", "ANCYLOSTOMIASES", "ANCYLOSTOMIASIS", "ANDROGYNOPHORES", "ANDROMEDOTOXINS", "ANDROMONOECIOUS", "ANDROMONOECISMS", "ANESTHETIZATION", "ANFRACTUOSITIES", "ANGUSTIROSTRATE", "ANIMATRONICALLY", "ANISOTROPICALLY", "ANKYLOSTOMIASES", "ANKYLOSTOMIASIS", "ANNIHILATIONISM", "ANOMALISTICALLY", "ANOMALOUSNESSES", "ANONYMOUSNESSES", "ANSWERABILITIES", "ANTAGONISATIONS", "ANTAGONIZATIONS", "ANTAPHRODISIACS", "ANTEPENULTIMATE", "ANTHROPOBIOLOGY", "ANTHROPOCENTRIC", "ANTHROPOGENESES", "ANTHROPOGENESIS", "ANTHROPOGENETIC", "ANTHROPOLATRIES", "ANTHROPOLOGICAL", "ANTHROPOLOGISTS", "ANTHROPOMETRIES", "ANTHROPOMETRIST", "ANTHROPOMORPHIC", "ANTHROPOPATHIES", "ANTHROPOPATHISM", "ANTHROPOPHAGIES", "ANTHROPOPHAGITE", "ANTHROPOPHAGOUS", "ANTHROPOPHOBIAS", "ANTHROPOPHOBICS", "ANTHROPOPHUISMS", "ANTHROPOPSYCHIC", "ANTHROPOSOPHIES", "ANTHROPOSOPHIST", "ANTIABORTIONIST", "ANTIALCOHOLISMS", "ANTIAPHRODISIAC", "ANTIARRHYTHMICS", "ANTICAPITALISMS", "ANTICAPITALISTS", "ANTICARCINOGENS", "ANTICHOLESTEROL", "ANTICHOLINERGIC", "ANTICHRISTIANLY", "ANTICLERICALISM", "ANTICLIMACTICAL", "ANTICOINCIDENCE", "ANTICOLONIALISM", "ANTICOLONIALIST", "ANTICOMPETITIVE", "ANTICONVULSANTS", "ANTICONVULSIVES", "ANTIDEPRESSANTS", "ANTIDERIVATIVES", "ANTIDEVELOPMENT", "ANTIEDUCATIONAL", "ANTIEGALITARIAN", "ANTIFASHIONABLE", "ANTIFEDERALISTS", "ANTIFERROMAGNET", "ANTIFORECLOSURE", "ANTIHELMINTHICS", "ANTIHISTAMINICS", "ANTILIBERALISMS", "ANTILIBERTARIAN", "ANTILOGARITHMIC", "ANTIMATERIALISM", "ANTIMATERIALIST", "ANTIMETABOLITES", "ANTIMILITARISMS", "ANTIMILITARISTS", "ANTIMONARCHICAL", "ANTIMONARCHISTS", "ANTIMONOPOLISTS", "ANTINATIONALIST", "ANTINUCLEARISTS", "ANTIODONTALGICS", "ANTIPERISTALSES", "ANTIPERISTALSIS", "ANTIPERISTALTIC", "ANTIPERSPIRANTS", "ANTIPHLOGISTICS", "ANTIPORNOGRAPHY", "ANTIPROGRESSIVE", "ANTIQUARIANISMS", "ANTIRADICALISMS", "ANTIRATIONALISM", "ANTIRATIONALIST", "ANTIRATIONALITY", "ANTIREPUBLICANS", "ANTIROMANTICISM", "ANTISEGREGATION", "ANTISENTIMENTAL", "ANTISEPARATISTS", "ANTISEPTICISING", "ANTISEPTICIZING", "ANTISEXUALITIES", "ANTISHOPLIFTING", "ANTISOCIALITIES", "ANTISPECULATION", "ANTISPECULATIVE", "ANTISYPHILITICS", "ANTITHEORETICAL", "ANTITHROMBOTICS", "ANTITRADITIONAL", "ANTITRANSPIRANT", "ANTITRINITARIAN", "ANTITUBERCULOUS", "ANTIVIVISECTION", "APHELIOTROPISMS", "APOCALYPTICALLY", "APOCALYPTICISMS", "APOLIPOPROTEINS", "APOLITICALITIES", "APOPHTHEGMATISE", "APOPHTHEGMATIST", "APOPHTHEGMATIZE", "APOTHEGMATISING", "APOTHEGMATIZING", "APPEALABILITIES", "APPEALINGNESSES", "APPENDICULARIAN", "APPLICABILITIES", "APPRENTICEHOODS", "APPRENTICEMENTS", "APPRENTICESHIPS", "APPROACHABILITY", "APPROPINQUATING", "APPROPINQUATION", "APPROPINQUITIES", "APPROPRIATENESS", "ARACHNOIDITISES", "ARBITRARINESSES", "ARBORICULTURIST", "ARCHAEBACTERIUM", "ARCHAEOBOTANIES", "ARCHAEOBOTANIST", "ARCHAEOMETRISTS", "ARCHAEOPTERYXES", "ARCHAEZOOLOGIES", "ARCHEOASTRONOMY", "ARCHEOBOTANISTS", "ARCHEOLOGICALLY", "ARCHEOMAGNETISM", "ARCHEOZOOLOGIES", "ARCHEOZOOLOGIST", "ARCHGENETHLIACS", "ARCHIDIACONATES", "ARCHIEPISCOPACY", "ARCHIEPISCOPATE", "ARCHITECTURALLY", "ARCHPRIESTHOODS", "ARCHPRIESTSHIPS", "ARGUMENTATIVELY", "ARIBOFLAVINOSES", "ARIBOFLAVINOSIS", "AROMATHERAPISTS", "ARRONDISSEMENTS", "ARTERIALISATION", "ARTERIALIZATION", "ARTERIOGRAPHIES", "ARTIFICIALISING", "ARTIFICIALITIES", "ARTIFICIALIZING", "ASCLEPIADACEOUS", "ASSENTIVENESSES"}
-
-func BenchmarkCopy(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		CopyIn("temp", bigTableColumns...)
+	rows := pqtest.Query[int](b, tx, `select count(*) from tbl`)
+	if rows[0]["count"] != b.N {
+		b.Fatalf("expected %d items, not %d", b.N, rows[0]["count"])
 	}
 }
