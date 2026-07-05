@@ -1101,7 +1101,14 @@ func (cn *conn) saveMessage(typ proto.ResponseCode, buf *readBuf) error {
 
 // recvMessage receives any message from the backend, or returns an error if
 // a problem occurred while reading the message.
-func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
+//
+// startup must only be true for callers reading messages during the
+// connection-startup sequence (see [conn.recv]). It is never appropriate for
+// steady-state message parsing: a v3 ErrorResponse is a normal, properly
+// length-prefixed message post-handshake, and treating a large one as plain
+// text (see the comment below) desynchronizes the wire and leaves inProgress
+// stuck, poisoning the connection.
+func (cn *conn) recvMessage(r *readBuf, startup bool) (proto.ResponseCode, error) {
 	// workaround for a QueryRow bug, see exec
 	if cn.saveMessageType != 0 {
 		t := cn.saveMessageType
@@ -1127,11 +1134,16 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 
 	// When PostgreSQL cannot start a backend (e.g., an external process limit),
 	// it sends plain text like "Ecould not fork new process [..]", which
-	// doesn't use the standard encoding for the Error message.
+	// doesn't use the standard encoding for the Error message. This can only
+	// happen before the protocol handshake completes: libpq only applies this
+	// heuristic while awaiting the startup response (fe-connect.c,
+	// PQconnectPoll), and once the protocol is established, an ErrorResponse
+	// is explicitly allowed to exceed MaxErrlen (fe-protocol3.c,
+	// VALID_LONG_MESSAGE_TYPE) since it's a normal, properly framed message.
 	//
 	// libpq checks "if ErrorResponse && (msgLength < 8 || msgLength > MAX_ERRLEN)",
 	// but check < 4 since n represents bytes remaining to be read after length.
-	if t == proto.ErrorResponse && (n < 4 || n > proto.MaxErrlen) {
+	if startup && t == proto.ErrorResponse && (n < 4 || n > proto.MaxErrlen) {
 		msg, _ := cn.buf.ReadString('\x00')
 		return 0, fmt.Errorf("pq: server error: %s%s", string(x[1:]), strings.TrimSuffix(msg, "\x00"))
 	}
@@ -1160,7 +1172,7 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 func (cn *conn) recv() (proto.ResponseCode, *readBuf, error) {
 	for {
 		r := new(readBuf)
-		t, err := cn.recvMessage(r)
+		t, err := cn.recvMessage(r, true)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -1185,7 +1197,7 @@ func (cn *conn) recv() (proto.ResponseCode, *readBuf, error) {
 // the caller to avoid an allocation.
 func (cn *conn) recv1Buf(r *readBuf) (proto.ResponseCode, error) {
 	for {
-		t, err := cn.recvMessage(r)
+		t, err := cn.recvMessage(r, false)
 		if err != nil {
 			return 0, err
 		}

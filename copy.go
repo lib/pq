@@ -133,7 +133,7 @@ func (ci *copyin) flush(buf []byte) error {
 func (ci *copyin) resploop() {
 	for {
 		var r readBuf
-		t, err := ci.cn.recvMessage(&r)
+		t, err := ci.cn.recvMessage(&r, false)
 		if err != nil {
 			ci.setBad(driver.ErrBadConn)
 			ci.setError(err)

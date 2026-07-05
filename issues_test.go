@@ -3,10 +3,14 @@ package pq
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"net"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/lib/pq/internal/pqtest"
+	"github.com/lib/pq/internal/proto"
 	"github.com/lib/pq/pqerror"
 )
 
@@ -132,4 +136,70 @@ func TestQueryCancelledReused(t *testing.T) {
 
 	// get a connection: it must be valid
 	connIsValid(t, db)
+}
+
+// #1324: an ErrorResponse larger than proto.MaxErrlen sent after the startup
+// handshake was misparsed as a pre-protocol plain-text error (garbling the
+// message) and left the connection desynchronized: the ErrorResponse body and
+// the trailing ReadyForQuery were never drained, so inProgress stayed true
+// and the poisoned connection was handed back out by the pool.
+func TestOversizedErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	wantMsg := strings.Repeat("x", proto.MaxErrlen+10000)
+
+	f := pqtest.NewFake(t, func(f pqtest.Fake, cn net.Conn) {
+		f.Startup(cn, nil)
+		for {
+			code, msg, ok := f.ReadMsg(cn)
+			if !ok {
+				return
+			}
+			switch code {
+			case proto.Terminate:
+				cn.Close()
+				return
+			case proto.Query:
+				switch strings.TrimRight(string(msg), "\x00") {
+				case ";":
+					// MustDB's Ping.
+					f.WriteMsg(cn, proto.EmptyQueryResponse, "")
+					f.WriteMsg(cn, proto.ReadyForQuery, "I")
+				case "select 1":
+					f.WriteMsg(cn, proto.CommandComplete, "SELECT 1\x00")
+					f.WriteMsg(cn, proto.ReadyForQuery, "I")
+				default:
+					f.WriteMsg(cn, proto.ErrorResponse, "SERROR\x00C58030\x00M"+wantMsg+"\x00\x00")
+					f.WriteMsg(cn, proto.ReadyForQuery, "I")
+				}
+			}
+		}
+	})
+	defer f.Close()
+
+	db := pqtest.MustDB(t, f.DSN())
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	_, err := db.Exec(`DO $$ BEGIN RAISE EXCEPTION 'x'; END $$;`)
+	if err == nil {
+		t.Fatal("first Exec: want non-nil error, got nil")
+	}
+	var pqErr *Error
+	if !errors.As(err, &pqErr) {
+		t.Fatalf("first Exec: want *pq.Error, got %T: %v", err, err)
+	}
+	if pqErr.Message != wantMsg {
+		t.Errorf("first Exec: Message mangled: got %d bytes, want %d bytes", len(pqErr.Message), len(wantMsg))
+	}
+	if pqErr.Code != "58030" {
+		t.Errorf("first Exec: Code = %q, want 58030", pqErr.Code)
+	}
+
+	// The connection must not be poisoned: a second query on the same pooled
+	// connection must not fail with errQueryInProgress.
+	_, err = db.Exec("select 1")
+	if err != nil {
+		t.Fatalf("second Exec: connection left poisoned: %v", err)
+	}
 }
