@@ -2,7 +2,6 @@ package pq
 
 import (
 	"database/sql/driver"
-	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -61,19 +60,6 @@ func TestCopyInErrorOutsideTransaction(t *testing.T) {
 	_, err := db.Prepare(`copy tbl (num) from stdin`)
 	if err != errCopyNotSupportedOutsideTxn {
 		t.Errorf("wrong error: %v", err)
-	}
-}
-
-func TestCopyInQueryWhileCopy(t *testing.T) {
-	t.Parallel()
-	db := pqtest.MustDB(t)
-	tx := pqtest.Begin(t, db)
-	pqtest.Exec(t, tx, `create temp table tbl (i int primary key)`)
-
-	pqtest.Prepare(t, tx, "copy tbl (i) from stdin", db)
-	_, err := tx.Query(`select 1`)
-	if !errors.Is(err, errQueryInProgress) {
-		t.Errorf("wrong error:\nhave: %s\nwant: %s", err, errQueryInProgress)
 	}
 }
 

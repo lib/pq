@@ -19,7 +19,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/lib/pq/internal/pgpass"
@@ -39,7 +38,6 @@ var (
 	ErrSSLKeyUnknownOwnership    = pqutil.ErrSSLKeyUnknownOwnership
 	ErrSSLKeyHasWorldPermissions = pqutil.ErrSSLKeyHasWorldPermissions
 
-	errQueryInProgress = errors.New("pq: there is already a query being processed on this connection")
 	errUnexpectedReady = errors.New("unexpected ReadyForQuery")
 	errNoRowsAffected  = errors.New("no RowsAffected available after the empty statement")
 	errNoLastInsertID  = errors.New("no LastInsertId available after the empty statement")
@@ -189,7 +187,6 @@ type conn struct {
 
 	secretKey           []byte              // Cancellation key for CancelRequest messages.
 	pid                 int                 // Cancellation PID.
-	inProgress          atomic.Bool         // This connection is in the middle of a processing a request.
 	noticeHandler       func(*Error)        // If not nil, notices will be synchronously sent here
 	notificationHandler func(*Notification) // If not nil, notifications will be synchronously sent here
 	gss                 GSS                 // GSSAPI context
@@ -835,9 +832,6 @@ func (cn *conn) PrepareContext(ctx context.Context, q string) (driver.Stmt, erro
 
 	if pqsql.StartsWithCopy(q) {
 		s, err := cn.prepareCopyIn(q)
-		if err == nil {
-			cn.inProgress.Store(true)
-		}
 		return s, cn.handleError(err, q)
 	}
 	s, err := cn.prepareTo(q, cn.gname())
@@ -927,9 +921,6 @@ func (cn *conn) query(query string, args []driver.NamedValue) (*rows, error) {
 	if err := cn.err.get(); err != nil {
 		return nil, err
 	}
-	if !cn.inProgress.CompareAndSwap(false, true) {
-		return nil, errQueryInProgress
-	}
 
 	// Check to see if we can use the "simpleQuery" interface, which is
 	// *much* faster than going through prepare/exec
@@ -982,9 +973,6 @@ func (cn *conn) ExecContext(ctx context.Context, query string, args []driver.Nam
 	defer cn.watchCancel(ctx, false)()
 	if err := cn.err.get(); err != nil {
 		return nil, err
-	}
-	if !cn.inProgress.CompareAndSwap(false, true) {
-		return nil, errQueryInProgress
 	}
 
 	// simpleExec is *much* faster than going through prepare/exec.
@@ -1119,10 +1107,6 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 	// Read the type and length of the message that follows.
 	t := proto.ResponseCode(x[0])
 	n := int(binary.BigEndian.Uint32(x[1:])) - 4
-
-	if proto.ResponseCode(t) == proto.ReadyForQuery {
-		cn.inProgress.Store(false)
-	}
 
 	// When PostgreSQL cannot start a backend (e.g., an external process limit),
 	// it sends plain text like "Ecould not fork new process [..]", which
