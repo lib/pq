@@ -1784,6 +1784,83 @@ func TestPreProtocolError(t *testing.T) {
 	}
 }
 
+func TestLargeMessage(t *testing.T) {
+	type resp struct {
+		c proto.ResponseCode
+		r string
+	}
+	long := strings.Repeat("Y", 35_000)
+	tests := []struct {
+		responses []resp
+		want      string
+		wantErr   string
+	}{
+		{ // DataRow can be unlimited length
+			[]resp{
+				{proto.RowDescription, "\x00\x01col\x00\x00\x00A\xc6\x00\x01\x00\x00\x00\x19\xff\xff\xff\xff\xff\xff\x00\x00"},
+				{proto.DataRow, "\x00\x01\x00\x00\x88\xb8" + long},
+				{proto.CommandComplete, "SELECT 1\x00"},
+			},
+			long, "",
+		},
+		{ // ErrorResponse as well (after startup)
+			[]resp{
+				{proto.ErrorResponse, "SERROR\x00C58030\x00M" + long + "\x00\x00"},
+			},
+			"", "pq: " + long + " (58030)",
+		},
+		{ // But e.g. Empty Query can't
+			[]resp{
+				{proto.EmptyQueryResponse, long},
+				{proto.CommandComplete, "SELECT 1\x00"},
+			},
+			"", `pq: lost synchronization with server: got message type "(I) EmptyQueryResponse", length 35000`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			t.Parallel()
+			f := pqtest.NewFake(t, func(f pqtest.Fake, cn net.Conn) {
+				f.Startup(cn, nil)
+				for {
+					code, q, ok := f.ReadMsg(cn)
+					if !ok {
+						return
+					}
+					switch code {
+					case proto.Query:
+						switch q := string(q[:bytes.IndexByte(q, 0)]); {
+						case q == ";": // Ping()
+							f.WriteMsg(cn, proto.EmptyQueryResponse, "")
+							f.WriteMsg(cn, proto.ReadyForQuery, "I")
+						default:
+							for _, r := range tt.responses {
+								f.WriteMsg(cn, r.c, r.r)
+							}
+							f.WriteMsg(cn, proto.ReadyForQuery, "I")
+						}
+					case proto.Terminate:
+						cn.Close()
+						return
+					}
+				}
+			})
+			defer f.Close()
+
+			db := pqtest.MustDB(t, f.DSN())
+			var have string
+			err := db.QueryRow(`select t from tbl`).Scan(&have)
+			if !pqtest.ErrorContains(err, tt.wantErr) {
+				t.Fatalf("wrong error:\nhave: %s\nwant: %s", err, tt.wantErr)
+			}
+			if have != tt.want {
+				t.Fatal("rows not equal") // Don't output content as this deals with lots of text.
+			}
+		})
+	}
+}
+
 // reading from circularConn yields content[:prefixLen] once, followed by
 // content[prefixLen:] over and over again. It never returns EOF.
 type circularConn struct {

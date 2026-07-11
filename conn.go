@@ -476,8 +476,7 @@ func dial(ctx context.Context, d Dialer, cfg Config) (net.Conn, error) {
 }
 
 func (cn *conn) isInTransaction() bool {
-	return cn.txnStatus == txnStatusIdleInTransaction ||
-		cn.txnStatus == txnStatusInFailedTransaction
+	return cn.txnStatus == txnStatusIdleInTransaction || cn.txnStatus == txnStatusInFailedTransaction
 }
 
 func (cn *conn) checkIsInTransaction(intxn bool) error {
@@ -1131,9 +1130,14 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 	//
 	// libpq checks "if ErrorResponse && (msgLength < 8 || msgLength > MAX_ERRLEN)",
 	// but check < 4 since n represents bytes remaining to be read after length.
-	if t == proto.ErrorResponse && (n < 4 || n > proto.MaxErrlen) {
+	//
+	// Use txnStatus to check if we're in the startup phase.
+	if cn.txnStatus == 0 && t == proto.ErrorResponse && (n < 4 || n > proto.MaxMsgLen) {
 		msg, _ := cn.buf.ReadString('\x00')
 		return 0, fmt.Errorf("pq: server error: %s%s", string(x[1:]), strings.TrimSuffix(msg, "\x00"))
+	}
+	if !proto.ValidLongMessageType(t) && n > proto.MaxMsgLen {
+		return 0, fmt.Errorf("pq: lost synchronization with server: got message type %q, length %d", t, n)
 	}
 
 	var y []byte
@@ -1153,11 +1157,11 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 	return t, nil
 }
 
-// recv receives a message from the backend, returning an error if an error
-// happened while reading the message or the received message an ErrorResponse.
-// NoticeResponses are ignored. This function should generally be used only
-// during the startup sequence.
-func (cn *conn) recv() (proto.ResponseCode, *readBuf, error) {
+// recvError receives a message from the backend, returning an error if an error
+// happened while reading the message or the received message is an
+// ErrorResponse. NoticeResponses are ignored. This function should generally be
+// used only during the startup sequence.
+func (cn *conn) recvError() (proto.ResponseCode, *readBuf, error) {
 	for {
 		r := new(readBuf)
 		t, err := cn.recvMessage(r)
@@ -1370,7 +1374,7 @@ func (cn *conn) startup(cfg Config) error {
 
 	var didauth bool
 	for {
-		t, r, err := cn.recv()
+		t, r, err := cn.recvError()
 		if err != nil {
 			return err
 		}
@@ -1515,7 +1519,7 @@ func (cn *conn) auth(code proto.AuthCode, r *readBuf, cfg Config) error {
 			return err
 		}
 
-		t, r, err := cn.recv()
+		t, r, err := cn.recvError()
 		if err != nil {
 			return err
 		}
@@ -1541,7 +1545,7 @@ func (cn *conn) auth(code proto.AuthCode, r *readBuf, cfg Config) error {
 			return err
 		}
 
-		t, r, err = cn.recv()
+		t, r, err = cn.recvError()
 		if err != nil {
 			return err
 		}

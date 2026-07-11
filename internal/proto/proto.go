@@ -16,9 +16,20 @@ const (
 	NegotiateGSSCode  = (1234 << 16) | 5680
 )
 
+// Constants from fe-protocol3.c
+
+func ValidLongMessageType(c ResponseCode) bool {
+	switch c {
+	case CopyDataResponse, DataRow, ErrorResponse, FunctionCallResponse,
+		NoticeResponse, NotificationResponse, RowDescription:
+		return true
+	}
+	return false
+}
+
 // Constants from fe-connect.c
 const (
-	MaxErrlen = 30_000 // https://github.com/postgres/postgres/blob/c6a10a89f/src/interfaces/libpq/fe-connect.c#L4067
+	MaxMsgLen = 30_000 // https://github.com/postgres/postgres/blob/c6a10a89f/src/interfaces/libpq/fe-connect.c#L4067
 )
 
 // RequestCode is a request codes sent by the frontend.
