@@ -328,7 +328,6 @@ func (ci *copyin) Close() error {
 	}
 
 	<-ci.done
-	ci.cn.inProgress.Store(false)
 
 	if err := ci.err(); err != nil {
 		return err

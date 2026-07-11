@@ -13,6 +13,9 @@ unreleased
 
 ### Fixes
 
+- Revert "clearer error when starting a new query while pq is still processing
+  another query ([#1272])" as the mechanism proved to be fragile ([#1327]).
+
 - The limit on error responses added in v1.11.0 ([#1248]) should only apply on
   errors during the connection phase ([#1326]).
 
@@ -27,6 +30,7 @@ unreleased
 [#1310]: https://github.com/lib/pq/pull/1310
 [#1317]: https://github.com/lib/pq/pull/1317
 [#1326]: https://github.com/lib/pq/pull/1326
+[#1327]: https://github.com/lib/pq/pull/1327
 
 
 v1.12.3 (2026-04-03)
