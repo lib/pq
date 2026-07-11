@@ -2100,3 +2100,35 @@ func BenchmarkPreparedSelect(b *testing.B) {
 		})
 	})
 }
+
+func TestParsePortalRowDescribeInvalidFormat(t *testing.T) {
+	// Construct a fake RowDescription wire payload
+	// 1 column (n = 1)
+	// name "col1" (5 bytes: 'c','o','l','1', 0)
+	// next(6) skips 6 bytes
+	// OID (4 bytes)
+	// Len (2 bytes)
+	// Mod (4 bytes)
+	// format code = 2 (invalid) (2 bytes)
+	buf := []byte{
+		0, 1, // n = 1
+		'c', 'o', 'l', '1', 0, // name
+		0, 0, 0, 0, 0, 0, // next(6)
+		0, 0, 0, 0, // oid
+		0, 0,       // len
+		0, 0, 0, 0, // mod
+		0, 2,       // format = 2 (invalid)
+	}
+	r := readBuf(buf)
+	
+	_, err := parsePortalRowDescribe(&r)
+	
+	if err == nil {
+		t.Fatalf("expected error for invalid format code, got nil")
+	}
+	
+	expectedMsg := "pq: unknown response format code: 2"
+	if err.Error() != expectedMsg {
+		t.Fatalf("expected error %q, got %q", expectedMsg, err.Error())
+	}
+}
