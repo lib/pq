@@ -131,7 +131,10 @@ func (rs *rows) Next(dest []driver.Value) (resErr error) {
 			}
 			return rs.cn.handleError(resErr)
 		case proto.RowDescription:
-			next := parsePortalRowDescribe(&rs.rb)
+			next, err := parsePortalRowDescribe(&rs.rb)
+			if err != nil {
+				return rs.cn.handleError(err)
+			}
 			rs.next = &next
 			return io.EOF
 		default:

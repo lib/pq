@@ -717,7 +717,11 @@ func (cn *conn) simpleQuery(q string) (*rows, error) {
 		case proto.RowDescription:
 			// res might be non-nil here if we received a previous
 			// CommandComplete, but that's fine and just overwrite it.
-			res = &rows{cn: cn, rowsHeader: parsePortalRowDescribe(r)}
+			rh, err := parsePortalRowDescribe(r)
+			if err != nil {
+				return nil, cn.handleError(err, q)
+			}
+			res = &rows{cn: cn, rowsHeader: rh}
 
 			// To work around a bug in QueryRow in Go 1.2 and earlier, wait
 			// until the first DataRow has been received.
@@ -1792,7 +1796,7 @@ func (cn *conn) readPortalDescribeResponse() (rowsHeader, error) {
 	}
 	switch t {
 	case proto.RowDescription:
-		return parsePortalRowDescribe(r), nil
+		return parsePortalRowDescribe(r)
 	case proto.NoData:
 		return rowsHeader{}, nil
 	case proto.ErrorResponse:
@@ -1910,7 +1914,7 @@ func parseStatementRowDescribe(r *readBuf) (colNames []string, colTyps []fieldDe
 	return
 }
 
-func parsePortalRowDescribe(r *readBuf) rowsHeader {
+func parsePortalRowDescribe(r *readBuf) (rowsHeader, error) {
 	n := r.int16()
 	colNames := make([]string, n)
 	colFmts := make([]format, n)
@@ -1921,13 +1925,17 @@ func parsePortalRowDescribe(r *readBuf) rowsHeader {
 		colTyps[i].OID = r.oid()
 		colTyps[i].Len = r.int16()
 		colTyps[i].Mod = r.int32()
-		colFmts[i] = format(r.int16())
+		f := format(r.int16())
+		if f != formatText && f != formatBinary {
+			return rowsHeader{}, fmt.Errorf("pq: unknown response format code: %d", f)
+		}
+		colFmts[i] = f
 	}
 	return rowsHeader{
 		colNames: colNames,
 		colFmts:  colFmts,
 		colTyps:  colTyps,
-	}
+	}, nil
 }
 
 func (cn *conn) ResetSession(ctx context.Context) error {
