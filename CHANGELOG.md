@@ -13,6 +13,11 @@ unreleased
 
 ### Fixes
 
+- The limit on error responses added in v1.11.0 ([#1248]) should only apply on
+  errors during the connection phase ([#1326]).
+
+- Limit the size of some server responses, identical to libpq ([#1326]).
+
 - Add Redshift-specific OID mappings ([#1291], [#1317]).
 
 - Use correct environment variable name for `PGSSLMINPROTOCOLVERSION` and
@@ -21,6 +26,7 @@ unreleased
 [#1291]: https://github.com/lib/pq/pull/1291
 [#1310]: https://github.com/lib/pq/pull/1310
 [#1317]: https://github.com/lib/pq/pull/1317
+[#1326]: https://github.com/lib/pq/pull/1326
 
 
 v1.12.3 (2026-04-03)
