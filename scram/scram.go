@@ -161,7 +161,7 @@ func (c *Client) step2(in []byte) error {
 	if !bytes.HasPrefix(fields[1], []byte("s=")) || len(fields[1]) < 6 {
 		return fmt.Errorf("server sent an invalid SCRAM-SHA-256 salt: %q", fields[1])
 	}
-	if !bytes.HasPrefix(fields[2], []byte("i=")) || len(fields[2]) < 6 {
+	if !bytes.HasPrefix(fields[2], []byte("i=")) || len(fields[2]) < 3 {
 		return fmt.Errorf("server sent an invalid SCRAM-SHA-256 iteration count: %q", fields[2])
 	}
 
