@@ -97,6 +97,12 @@ func TestSSLMode(t *testing.T) {
 		{"sslmode=disable sslnegotiation=direct", "weak sslmode"},
 		{"sslmode=allow sslnegotiation=direct", "weak sslmode"},
 		{"sslmode=prefer sslnegotiation=direct", "weak sslmode"},
+
+		// sslnegotiation=direct with an accepted sslmode should connect, same
+		// as without. PostgreSQL 17+ requires the "postgresql" ALPN
+		// protocol for a direct handshake; missing it closes the connection.
+		{"sslmode=require sslnegotiation=direct user=pqgossl", ""},
+		{"sslrootcert=testdata/ssl/root.crt sslmode=verify-ca user=pqgossl host=127.0.0.1 sslnegotiation=direct", ""},
 	}
 
 	for _, tt := range tests {
@@ -290,7 +296,7 @@ func TestSSLSNI(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			port, nameCh, errCh := mockPostgresSSL(t, tt.direct)
+			port, nameCh, _, errCh := mockPostgresSSL(t, tt.direct)
 
 			// We are okay to skip this error as we are polling errCh and we'll
 			// get an error or timeout from the server side in case of problems
@@ -307,6 +313,55 @@ func TestSSLSNI(t *testing.T) {
 			case name := <-nameCh:
 				if name != tt.wantSNI {
 					t.Fatalf("have: %q\nwant: %q", name, tt.wantSNI)
+				}
+			}
+		})
+	}
+}
+
+// PostgreSQL 17+ requires the "postgresql" ALPN protocol during a direct SSL
+// handshake (sslnegotiation=direct) and closes the connection without it.
+// This doesn't need a real server: it drives the client's actual TLS
+// handshake against a local mock and inspects the ClientHello lib/pq sends.
+func TestSSLDirectNegotiationALPN(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		connect string
+		direct  bool
+	}{
+		{
+			name:    "classic negotiation doesn't advertise an ALPN protocol",
+			connect: "sslmode=require",
+		},
+		{
+			name:    "direct negotiation advertises the postgresql ALPN protocol",
+			connect: "sslmode=require sslnegotiation=direct",
+			direct:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			port, _, protoCh, errCh := mockPostgresSSL(t, tt.direct)
+
+			db, _ := sql.Open("postgres", fmt.Sprintf("host=127.0.0.1 port=%s %s", port, tt.connect))
+			_, _ = db.Exec("select 1")
+
+			select {
+			case <-time.After(time.Second):
+				t.Fatal("exceeded connection timeout without erroring out")
+			case err := <-errCh:
+				t.Fatal(err)
+			case protos := <-protoCh:
+				switch {
+				case !tt.direct && len(protos) != 0:
+					t.Fatalf("ALPN protocols = %v, want none", protos)
+				case tt.direct && (len(protos) != 1 || protos[0] != "postgresql"):
+					t.Fatalf("ALPN protocols = %v, want [postgresql]", protos)
 				}
 			}
 		})
@@ -435,22 +490,23 @@ func TestUnreadableHome(t *testing.T) {
 // Accepts postgres StartupMessage and handles TLS clientHello, then closes a
 // connection. While reading clientHello catch passed SNI data and report it to
 // nameChan.
-func mockPostgresSSL(t *testing.T, direct bool) (string, chan string, chan error) {
+func mockPostgresSSL(t *testing.T, direct bool) (string, chan string, chan []string, chan error) {
 	l, err := net.Listen("tcp", "127.0.0.1:")
 	if err != nil {
 		t.Fatal(err)
-		return "", nil, nil
+		return "", nil, nil, nil
 	}
 
 	_, port, err := net.SplitHostPort(l.Addr().String())
 	if err != nil {
 		t.Fatal(err)
-		return "", nil, nil
+		return "", nil, nil, nil
 	}
 
 	var (
-		nameCh = make(chan string, 1)
-		errCh  = make(chan error, 1)
+		nameCh  = make(chan string, 1)
+		protoCh = make(chan []string, 1)
+		errCh   = make(chan error, 1)
 	)
 
 	go func() {
@@ -464,6 +520,7 @@ func mockPostgresSSL(t *testing.T, direct bool) (string, chan string, chan error
 		t.Cleanup(func() {
 			close(errCh)
 			close(nameCh)
+			close(protoCh)
 			l.Close()
 		})
 
@@ -497,10 +554,14 @@ func mockPostgresSSL(t *testing.T, direct bool) (string, chan string, chan error
 
 		// Set up TLS context to catch clientHello. It will always error out during
 		// handshake as no certificate is set.
-		var sniHost string
+		var (
+			sniHost   string
+			protocols []string
+		)
 		srv := tls.Server(conn, &tls.Config{
 			GetConfigForClient: func(argHello *tls.ClientHelloInfo) (*tls.Config, error) {
 				sniHost = argHello.ServerName
+				protocols = argHello.SupportedProtos
 				return nil, nil
 			},
 		})
@@ -510,7 +571,8 @@ func mockPostgresSSL(t *testing.T, direct bool) (string, chan string, chan error
 		_ = srv.Handshake()
 
 		nameCh <- sniHost
+		protoCh <- protocols
 	}()
 
-	return port, nameCh, errCh
+	return port, nameCh, protoCh, errCh
 }

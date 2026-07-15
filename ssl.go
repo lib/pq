@@ -121,6 +121,14 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 	tlsConf.MinVersion = cfg.SSLMinProtocolVersion.tlsconf()
 	tlsConf.MaxVersion = cfg.SSLMaxProtocolVersion.tlsconf()
 
+	// PostgreSQL 17+ requires the "postgresql" ALPN protocol during a direct
+	// SSL handshake (sslnegotiation=direct) and rejects the connection
+	// otherwise, since there's no plaintext SSLRequest exchange to distinguish
+	// a direct Postgres connection from any other protocol over the same port.
+	if cfg.SSLNegotiation == SSLNegotiationDirect {
+		tlsConf.NextProtos = []string{"postgresql"}
+	}
+
 	// RFC 6066 asks to not set SNI if the host is a literal IP address (IPv4 or
 	// IPv6). This check is coded already crypto.tls.hostnameInSNI, so just
 	// always set ServerName here and let crypto/tls do the filtering.
