@@ -13,6 +13,8 @@ unreleased
 
 ### Fixes
 
+- `sslnegotiation=direct` didn't work due to missing ALPN protocol [[#1332]).
+
 - Revert "clearer error when starting a new query while pq is still processing
   another query ([#1272])" as the mechanism proved to be fragile ([#1327]).
 
@@ -31,6 +33,7 @@ unreleased
 [#1317]: https://github.com/lib/pq/pull/1317
 [#1326]: https://github.com/lib/pq/pull/1326
 [#1327]: https://github.com/lib/pq/pull/1327
+[#1332]: https://github.com/lib/pq/pull/1327
 
 
 v1.12.3 (2026-04-03)

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,7 +93,9 @@ func TestSSLMode(t *testing.T) {
 		// sslmode=disable
 		{"sslmode=disable user=pqgossl", "or:no encryption|login rejected (08P01)|authentication rejected by configuration (28000)"},
 
-		// sslnegotiation=direct should fail if ssl isn't required, like libpq:
+		// sslnegotiation=direct
+		{"sslmode=require sslnegotiation=direct", ""},
+		// should fail if ssl isn't required, like libpq:
 		// psql: error: weak sslmode "allow" may not be used with sslnegotiation=direct (use "require", "verify-ca", or "verify-full")
 		{"sslmode=disable sslnegotiation=direct", "weak sslmode"},
 		{"sslmode=allow sslnegotiation=direct", "weak sslmode"},
@@ -102,6 +105,10 @@ func TestSSLMode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
+
+			if strings.Contains(tt.connect, "sslnegotiation=direct") {
+				pqtest.SkipBeforeVersion(t, 17) // Only supported on PostgreSQL≥17.
+			}
 
 			_, err := pqtest.DB(t, tt.connect)
 			switch {

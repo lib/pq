@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/lib/pq/internal/pqutil"
+	"github.com/lib/pq/internal/proto"
 )
 
 // Registry for custom tls.Configs
@@ -120,6 +121,12 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 
 	tlsConf.MinVersion = cfg.SSLMinProtocolVersion.tlsconf()
 	tlsConf.MaxVersion = cfg.SSLMaxProtocolVersion.tlsconf()
+
+	// ALPN is mandatory with direct SSL connections; PostgreSQL only supports
+	// one protocol.
+	if cfg.SSLNegotiation == SSLNegotiationDirect {
+		tlsConf.NextProtos = []string{proto.ALPNProtocol}
+	}
 
 	// RFC 6066 asks to not set SNI if the host is a literal IP address (IPv4 or
 	// IPv6). This check is coded already crypto.tls.hostnameInSNI, so just
