@@ -507,22 +507,18 @@ func mockPostgresSSL(t *testing.T, direct bool) (string, chan string, chan []str
 		nameCh  = make(chan string, 1)
 		protoCh = make(chan []string, 1)
 		errCh   = make(chan error, 1)
+		done    = make(chan struct{})
 	)
 
 	go func() {
+		defer close(done)
+
 		conn, err := l.Accept()
 		if err != nil {
 			errCh <- err
 			return
 		}
 		defer conn.Close()
-
-		t.Cleanup(func() {
-			close(errCh)
-			close(nameCh)
-			close(protoCh)
-			l.Close()
-		})
 
 		err = conn.SetDeadline(time.Now().Add(time.Second))
 		if err != nil {
@@ -573,6 +569,17 @@ func mockPostgresSSL(t *testing.T, direct bool) (string, chan string, chan []str
 		nameCh <- sniHost
 		protoCh <- protocols
 	}()
+
+	t.Cleanup(func() {
+		// Unblock a pending Accept, then wait for the goroutine above to
+		// fully finish before closing the channels it sends on, so that
+		// closing never races with a send.
+		l.Close()
+		<-done
+		close(nameCh)
+		close(protoCh)
+		close(errCh)
+	})
 
 	return port, nameCh, protoCh, errCh
 }
