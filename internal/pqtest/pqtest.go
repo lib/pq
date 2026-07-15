@@ -35,6 +35,28 @@ func SkipCockroach(t testing.TB) {
 	}
 }
 
+// ServerVersionNum returns the server's reported server_version_num (e.g.
+// 170004 for PostgreSQL 17.4). CockroachDB reports the PostgreSQL version
+// it emulates.
+func ServerVersionNum(t testing.TB) int {
+	t.Helper()
+	db := MustDB(t)
+	var v int
+	if err := db.QueryRow("show server_version_num").Scan(&v); err != nil {
+		t.Fatalf("pqtest.ServerVersionNum: %s", err)
+	}
+	return v
+}
+
+// SkipBeforePG skips the test unless the connected server reports at least
+// the given server_version_num (e.g. 170000 for PostgreSQL 17).
+func SkipBeforePG(t testing.TB, version int) {
+	t.Helper()
+	if v := ServerVersionNum(t); v < version {
+		t.Skipf("skipped: requires PostgreSQL server_version_num >= %d, have %d", version, v)
+	}
+}
+
 func ForceBinaryParameters() bool {
 	v, ok := os.LookupEnv("PQTEST_BINARY_PARAMETERS")
 	if !ok {
