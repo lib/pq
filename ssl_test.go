@@ -97,12 +97,6 @@ func TestSSLMode(t *testing.T) {
 		{"sslmode=disable sslnegotiation=direct", "weak sslmode"},
 		{"sslmode=allow sslnegotiation=direct", "weak sslmode"},
 		{"sslmode=prefer sslnegotiation=direct", "weak sslmode"},
-
-		// sslnegotiation=direct with an accepted sslmode should connect, same
-		// as without. PostgreSQL 17+ requires the "postgresql" ALPN
-		// protocol for a direct handshake; missing it closes the connection.
-		{"sslmode=require sslnegotiation=direct user=pqgossl", ""},
-		{"sslrootcert=testdata/ssl/root.crt sslmode=verify-ca user=pqgossl host=127.0.0.1 sslnegotiation=direct", ""},
 	}
 
 	for _, tt := range tests {
@@ -119,6 +113,25 @@ func TestSSLMode(t *testing.T) {
 				}
 			case !pqtest.ErrorContains(err, tt.wantErr):
 				t.Fatalf("wrong error\nwant: %s\nhave: %s", tt.wantErr, err)
+			}
+		})
+	}
+
+	// sslnegotiation=direct with an accepted sslmode should connect, same as
+	// without. PostgreSQL 17+ requires the "postgresql" ALPN protocol for a
+	// direct handshake; older servers (and CockroachDB, which emulates an
+	// older PostgreSQL) don't support the direct handshake at all.
+	directTests := []string{
+		"sslmode=require sslnegotiation=direct user=pqgossl",
+		"sslrootcert=testdata/ssl/root.crt sslmode=verify-ca user=pqgossl host=127.0.0.1 sslnegotiation=direct",
+	}
+	for _, connect := range directTests {
+		t.Run("", func(t *testing.T) {
+			t.Parallel()
+			pqtest.SkipBeforePG(t, 170000)
+
+			if _, err := pqtest.DB(t, connect); err != nil {
+				t.Fatalf("\nfailed for %q\n%s", connect, err)
 			}
 		})
 	}
