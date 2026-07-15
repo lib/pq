@@ -14,6 +14,7 @@ const (
 	CancelRequestCode = (1234 << 16) | 5678
 	NegotiateSSLCode  = (1234 << 16) | 5679
 	NegotiateGSSCode  = (1234 << 16) | 5680
+	ALPNProtocol      = "postgresql"
 )
 
 // Constants from fe-protocol3.c

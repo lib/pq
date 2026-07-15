@@ -35,6 +35,16 @@ func SkipCockroach(t testing.TB) {
 	}
 }
 
+// SkipBeforeVersion skips the test unless the connected server reports at least
+// the given major version (e.g. 16, 17, etc.)
+func SkipBeforeVersion(t testing.TB, want int) {
+	t.Helper()
+	have := QueryRow[int](t, MustDB(t), `show server_version_num`)["server_version_num"] / 10000
+	if want > have {
+		t.Skipf("skipped for PostgreSQL %d (want %d)", have, want)
+	}
+}
+
 func ForceBinaryParameters() bool {
 	v, ok := os.LookupEnv("PQTEST_BINARY_PARAMETERS")
 	if !ok {
