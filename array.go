@@ -718,7 +718,7 @@ func appendArray(b []byte, rv reflect.Value, n int) ([]byte, string, error) {
 // using driver.DefaultParameterConverter and the resulting []byte or string
 // is double-quoted.
 //
-// See http://www.postgresql.org/docs/current/static/arrays.html#ARRAYS-IO
+// See https://www.postgresql.org/docs/current/static/arrays.html#ARRAYS-IO
 func appendArrayElement(b []byte, rv reflect.Value) ([]byte, string, error) {
 	if k := rv.Kind(); k == reflect.Array || k == reflect.Slice {
 		if t := rv.Type(); t != typeByteSlice && !t.Implements(typeDriverValuer) {
@@ -785,7 +785,7 @@ func appendValue(b []byte, v driver.Value) ([]byte, error) {
 // Notably, whitespace around brackets and delimiters is significant, and NULL
 // is case-sensitive.
 //
-// See http://www.postgresql.org/docs/current/static/arrays.html#ARRAYS-IO
+// See https://www.postgresql.org/docs/current/static/arrays.html#ARRAYS-IO
 func parseArray(src, del []byte) (dims []int, elems [][]byte, err error) {
 	var depth, i int
 

@@ -24,7 +24,7 @@
 
 // Package scram implements a SCRAM-{SHA-1,etc} client per RFC5802.
 //
-// http://tools.ietf.org/html/rfc5802
+// https://tools.ietf.org/html/rfc5802
 package scram
 
 import (

@@ -131,7 +131,7 @@ package:
 This package is in a separate module so that users who don't need Kerberos don't
 have to add unnecessary dependencies.
 
-[identifier]: http://www.postgresql.org/docs/current/static/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS
-[NOTIFY]: http://www.postgresql.org/docs/current/static/sql-notify.html
+[identifier]: https://www.postgresql.org/docs/current/static/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS
+[NOTIFY]: https://www.postgresql.org/docs/current/static/sql-notify.html
 */
 package pq

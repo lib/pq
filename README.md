@@ -91,7 +91,7 @@ connections asynchronously so it doesn't use the context from QueryContext(),
 PingContext(), etc. The default is to wait indefinitely.
 
 [Config struct]: https://pkg.go.dev/github.com/lib/pq#Config
-[run-time parameter]: http://www.postgresql.org/docs/current/static/runtime-config.html
+[run-time parameter]: https://www.postgresql.org/docs/current/static/runtime-config.html
 
 Errors
 ------
@@ -153,7 +153,7 @@ users) don't have to add unnecessary dependencies.
 
 Reading a [password file] (pgpass) is also supported.
 
-[password file]: http://www.postgresql.org/docs/current/static/libpq-pgpass.html
+[password file]: https://www.postgresql.org/docs/current/static/libpq-pgpass.html
 
 ### Bulk imports with `COPY [..] FROM STDIN`
 You can perform bulk imports by preparing a `COPY [..] FROM STDIN` statement

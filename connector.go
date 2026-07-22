@@ -329,7 +329,7 @@ type Config struct {
 
 	// Path to [pgpass] file to store passwords; overrides Password.
 	//
-	// [pgpass]: http://www.postgresql.org/docs/current/static/libpq-pgpass.html
+	// [pgpass]: https://www.postgresql.org/docs/current/static/libpq-pgpass.html
 	Passfile string `postgres:"passfile" env:"PGPASSFILE"`
 
 	// Commandline options to send to the server at connection start.
@@ -568,8 +568,8 @@ type ConfigMultihost struct {
 // support are set. Environment variables have a lower precedence than
 // explicitly provided connection parameters.
 //
-// [PostgreSQL environment variables]: http://www.postgresql.org/docs/current/static/libpq-envars.html
-// [run-time parameter]: http://www.postgresql.org/docs/current/static/runtime-config.html
+// [PostgreSQL environment variables]: https://www.postgresql.org/docs/current/static/libpq-envars.html
+// [run-time parameter]: https://www.postgresql.org/docs/current/static/runtime-config.html
 func NewConfig(dsn string) (Config, error) {
 	return newConfig(dsn, os.Environ())
 }

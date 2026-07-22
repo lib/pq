@@ -86,7 +86,7 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 		// Skip TLS's own verification since it requires full verification.
 		tlsConf.InsecureSkipVerify = true
 
-		// From http://www.postgresql.org/docs/current/static/libpq-ssl.html:
+		// From https://www.postgresql.org/docs/current/static/libpq-ssl.html:
 		//
 		// For backwards compatibility with earlier versions of PostgreSQL, if a
 		// root CA file exists, the behavior of sslmode=require will be the same
