@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pg: ['14', '15', '16', '17', '18']
+        pg: ['14', '15', '16', '17', '18', '19']
         go: ['1.23', '1.26']
     steps:
     - uses: 'actions/checkout@v6'
