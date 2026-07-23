@@ -28,6 +28,18 @@ services:
     command:     ['start-single-node', '--accept-sql-without-tls', '--certs-dir=/ssl2']
     healthcheck: {test: ['CMD-SHELL', '/cockroach/cockroach node status --insecure --user=pqgo'], start_period: '30s', start_interval: '1s'}
 
+  pg19:
+    profiles:    ['pg19']
+    image:       'postgres:19beta2'
+    ports:       ['127.0.0.1:5432:5432']
+    entrypoint:  '/init/entry.sh'
+    volumes:     ['./testdata/postgres:/init', './testdata/ssl:/ssl']
+    shm_size:    '128mb'
+    healthcheck: {test: ['CMD-SHELL', 'pg_isready -U pqgo -d pqgo'], start_period: '30s', start_interval: '1s'}
+    environment:
+      'POSTGRES_DATABASE': 'pqgo'
+      'POSTGRES_USER':     'pqgo'
+      'POSTGRES_PASSWORD': 'unused'
   pg18:
     image:       'postgres:18'
     ports:       ['127.0.0.1:5432:5432']
