@@ -47,6 +47,8 @@ func BufferQuoteIdentifier(name string, buffer *bytes.Buffer) {
 // Any single quotes in name will be escaped. Any backslashes (i.e. "\") will be
 // replaced by two backslashes (i.e. "\\") and the C-style escape identifier
 // that PostgreSQL provides ('E') will be prepended to the string.
+// If the input string contains a zero byte, the result will be truncated
+// immediately before it (same as QuoteIdentifier).
 func QuoteLiteral(literal string) string {
 	// This follows the PostgreSQL internal algorithm for handling quoted literals
 	// from libpq, which can be found in the "PQEscapeStringInternal" function,
@@ -54,6 +56,11 @@ func QuoteLiteral(literal string) string {
 	// https://git.postgresql.org/gitweb/?p=postgresql.git;a=blob;f=src/interfaces/libpq/fe-exec.c
 	//
 	// substitute any single-quotes (') with two single-quotes ('')
+	// Truncate at a zero byte, matching QuoteIdentifier.
+	end := strings.IndexRune(literal, 0)
+	if end > -1 {
+		literal = literal[:end]
+	}
 	literal = strings.Replace(literal, `'`, `''`, -1)
 	// determine if the string has any backslashes (\) in it.
 	// if it does, replace any backslashes (\) with two backslashes (\\)

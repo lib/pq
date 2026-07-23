@@ -57,3 +57,16 @@ func TestQuoteLiteral(t *testing.T) {
 		})
 	}
 }
+
+
+func TestQuoteLiteralNullByte(t *testing.T) {
+	if got, want := QuoteLiteral("foo\x00bar"), "'foo'"; got != want {
+		t.Errorf("embedded NUL: have %q want %q", got, want)
+	}
+	if got, want := QuoteLiteral("\x00foo"), "''"; got != want {
+		t.Errorf("leading NUL: have %q want %q", got, want)
+	}
+	if got, want := QuoteLiteral("a\x00b'c"), "'a'"; got != want {
+		t.Errorf("NUL before quote: have %q want %q", got, want)
+	}
+}
