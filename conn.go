@@ -442,17 +442,17 @@ func (cn *conn) checkTSA(tsa TargetSessionAttrs) error {
 func dial(ctx context.Context, d Dialer, cfg Config) (net.Conn, error) {
 	network, address := cfg.network()
 
+	var (
+		conn net.Conn
+		err  error
+	)
 	// Zero or not specified means wait indefinitely.
 	if cfg.ConnectTimeout > 0 {
 		// connect_timeout should apply to the entire connection establishment
 		// procedure, so we both use a timeout for the TCP connection
 		// establishment and set a deadline for doing the initial handshake. The
 		// deadline is then reset after startup() is done.
-		var (
-			deadline = time.Now().Add(cfg.ConnectTimeout)
-			conn     net.Conn
-			err      error
-		)
+		deadline := time.Now().Add(cfg.ConnectTimeout)
 		if dctx, ok := d.(DialerContext); ok {
 			ctx, cancel := context.WithTimeout(ctx, cfg.ConnectTimeout)
 			defer cancel()
@@ -463,13 +463,84 @@ func dial(ctx context.Context, d Dialer, cfg Config) (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		err = conn.SetDeadline(deadline)
-		return conn, err
+		if err = conn.SetDeadline(deadline); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+	} else if dctx, ok := d.(DialerContext); ok {
+		conn, err = dctx.DialContext(ctx, network, address)
+	} else {
+		conn, err = d.Dial(network, address)
 	}
-	if dctx, ok := d.(DialerContext); ok {
-		return dctx.DialContext(ctx, network, address)
+	if err != nil {
+		return nil, err
 	}
-	return d.Dial(network, address)
+
+	if err = setTCPKeepalives(conn, cfg); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+// setTCPKeepalives applies client-side TCP keepalive options from cfg to conn
+// when the connection is a [*net.TCPConn] (or unwraps to one) and at least one
+// keepalive parameter is configured. Unix-domain sockets and other connection
+// types are left unchanged.
+//
+// Parameters match libpq: keepalives, keepalives_idle, keepalives_interval,
+// and keepalives_count. [net.TCPConn.SetKeepAliveConfig] is used so idle,
+// interval, and count can be set independently.
+func setTCPKeepalives(conn net.Conn, cfg Config) error {
+	if !cfg.hasKeepaliveSettings() {
+		return nil
+	}
+	tc, ok := asTCPConn(conn)
+	if !ok {
+		return nil
+	}
+
+	// keepalives=0 disables client-side TCP keepalives.
+	// keepalives_idle/interval/count alone leave keepalives enabled (libpq).
+	if cfg.isset("keepalives") && !cfg.Keepalives {
+		return tc.SetKeepAlive(false)
+	}
+
+	// Zero Idle/Interval/Count leave Go/OS defaults (see [net.KeepAliveConfig]).
+	return tc.SetKeepAliveConfig(net.KeepAliveConfig{
+		Enable:   true,
+		Idle:     cfg.KeepalivesIdle,
+		Interval: cfg.KeepalivesInterval,
+		Count:    cfg.KeepalivesCount,
+	})
+}
+
+// hasKeepaliveSettings reports whether any TCP keepalive option was configured
+// (via DSN parsing or non-zero/true fields on [Config]).
+func (cfg Config) hasKeepaliveSettings() bool {
+	if cfg.isset("keepalives") || cfg.isset("keepalives_idle") ||
+		cfg.isset("keepalives_interval") || cfg.isset("keepalives_count") {
+		return true
+	}
+	return cfg.Keepalives || cfg.KeepalivesIdle != 0 || cfg.KeepalivesInterval != 0 || cfg.KeepalivesCount != 0
+}
+
+// asTCPConn returns the underlying *net.TCPConn if conn is one or unwraps to
+// one (e.g. via NetConn() as on [*tls.Conn]).
+func asTCPConn(conn net.Conn) (*net.TCPConn, bool) {
+	for conn != nil {
+		if tc, ok := conn.(*net.TCPConn); ok {
+			return tc, true
+		}
+		// *tls.Conn and similar wrappers.
+		type netConner interface{ NetConn() net.Conn }
+		if nc, ok := conn.(netConner); ok {
+			conn = nc.NetConn()
+			continue
+		}
+		return nil, false
+	}
+	return nil, false
 }
 
 func (cn *conn) isInTransaction() bool {
