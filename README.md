@@ -90,8 +90,25 @@ It's recommended to add `connect_timeout` to the DSN – database/sql may open n
 connections asynchronously so it doesn't use the context from QueryContext(),
 PingContext(), etc. The default is to wait indefinitely.
 
+For long-running queries, TCP keepalives help detect dead connections (for
+example behind NATs or load balancers). pq accepts the same libpq parameters:
+
+- `keepalives` – enable (`1`) or disable (`0`) client-side TCP keepalives
+- `keepalives_idle` – seconds idle before the first keepalive probe
+- `keepalives_interval` – seconds between unacknowledged probes
+- `keepalives_count` – number of failed probes before the connection is dead
+
+Example:
+
+    sql.Open("postgres", "dbname=pqgo keepalives=1 keepalives_idle=30 keepalives_interval=10 keepalives_count=5")
+
+When unset, the dialer's defaults are left alone ([net.Dialer] enables keepalives
+by default). Settings apply only to TCP connections (`*net.TCPConn`); Unix
+sockets ignore them. They can also be set on [Config].
+
 [Config struct]: https://pkg.go.dev/github.com/lib/pq#Config
 [run-time parameter]: http://www.postgresql.org/docs/current/static/runtime-config.html
+[net.Dialer]: https://pkg.go.dev/net#Dialer
 
 Errors
 ------

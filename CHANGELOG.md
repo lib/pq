@@ -9,6 +9,10 @@ unreleased
 
 ### Features
 
+- Implement TCP keepalive connection parameters (`keepalives`,
+  `keepalives_idle`, `keepalives_interval`, `keepalives_count`), matching libpq
+  ([#360]).
+
 - Implement `require_auth` connection parameter ([#1310]).
 
 ### Fixes

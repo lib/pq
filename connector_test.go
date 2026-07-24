@@ -444,6 +444,23 @@ func TestNewConfig(t *testing.T) {
 		{"require_auth=!md5,!scram-sha-256", nil, "require_auth=!md5,!scram-sha-256", ""},
 		{"require_auth=md5,!password", nil, "", `negative require_auth method "!password" cannot be mixed with non-negative methods`},
 		{"require_auth=!md5,password", nil, "", `require_auth method "password" cannot be mixed with negative methods`},
+
+		// TCP keepalives (libpq)
+		{"keepalives=1", nil, "keepalives=yes", ""},
+		{"keepalives=0", nil, "keepalives=no", ""},
+		{"keepalives=yes", nil, "keepalives=yes", ""},
+		{"keepalives=off", nil, "keepalives=no", ""},
+		{"keepalives=maybe", nil, "", `pq: wrong value for "keepalives": strconv.ParseBool: parsing "maybe": invalid syntax`},
+		{"keepalives_idle=30", nil, "keepalives_idle=30", ""},
+		{"keepalives_interval=10", nil, "keepalives_interval=10", ""},
+		{"keepalives_count=5", nil, "keepalives_count=5", ""},
+		{"keepalives=1 keepalives_idle=60 keepalives_interval=10 keepalives_count=3", nil,
+			"keepalives=yes keepalives_count=3 keepalives_idle=60 keepalives_interval=10", ""},
+		{"keepalives_idle=abc", nil, "", `pq: wrong value for "keepalives_idle": strconv.ParseInt: parsing "abc": invalid syntax`},
+		{"keepalives_count=1.5", nil, "", `pq: wrong value for "keepalives_count": strconv.ParseInt: parsing "1.5": invalid syntax`},
+		// Must not leak into runtime parameters.
+		{"keepalives=1 keepalives_idle=1 search_path=public", nil,
+			"keepalives=yes keepalives_idle=1 search_path=public", ""},
 	}
 
 	t.Parallel()
@@ -478,6 +495,32 @@ func TestNewConfig(t *testing.T) {
 			if have.ConnectTimeout != 4*time.Second {
 				t.Errorf("\nhave: %q\nwant: %q", have.ConnectTimeout, 4*time.Second)
 			}
+		}
+	})
+
+	// Keepalive durations are seconds; keepalives_count is an int.
+	t.Run("keepalives", func(t *testing.T) {
+		have, err := newConfig("keepalives=1 keepalives_idle=30 keepalives_interval=10 keepalives_count=5", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !have.Keepalives {
+			t.Error("Keepalives: want true")
+		}
+		if have.KeepalivesIdle != 30*time.Second {
+			t.Errorf("KeepalivesIdle: have %v want %v", have.KeepalivesIdle, 30*time.Second)
+		}
+		if have.KeepalivesInterval != 10*time.Second {
+			t.Errorf("KeepalivesInterval: have %v want %v", have.KeepalivesInterval, 10*time.Second)
+		}
+		if have.KeepalivesCount != 5 {
+			t.Errorf("KeepalivesCount: have %d want 5", have.KeepalivesCount)
+		}
+		if _, ok := have.Runtime["keepalives"]; ok {
+			t.Error("keepalives must not be a runtime parameter")
+		}
+		if _, ok := have.Runtime["keepalives_idle"]; ok {
+			t.Error("keepalives_idle must not be a runtime parameter")
 		}
 	})
 }

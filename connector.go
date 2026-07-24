@@ -408,6 +408,30 @@ type Config struct {
 	// specified means wait indefinitely
 	ConnectTimeout time.Duration `postgres:"connect_timeout" env:"PGCONNECT_TIMEOUT"`
 
+	// Controls whether client-side TCP keepalives are used. The default is to
+	// leave the dialer's keepalive settings unchanged (Go's [net.Dialer] enables
+	// keepalives by default). Set to true to enable with optional
+	// KeepalivesIdle/Interval/Count, or false to disable. Ignored for
+	// Unix-domain sockets and non-TCP connections.
+	//
+	// Matches libpq's keepalives parameter (1=on, 0=off).
+	Keepalives bool `postgres:"keepalives" env:"-"`
+
+	// Seconds of inactivity after which TCP sends a keepalive probe. Zero uses
+	// the system/Go default. Ignored for Unix-domain sockets or when keepalives
+	// are disabled. Matches libpq's keepalives_idle.
+	KeepalivesIdle time.Duration `postgres:"keepalives_idle" env:"-"`
+
+	// Seconds between keepalive retransmissions when a probe is not
+	// acknowledged. Zero uses the system/Go default. Matches libpq's
+	// keepalives_interval.
+	KeepalivesInterval time.Duration `postgres:"keepalives_interval" env:"-"`
+
+	// Number of unacknowledged keepalive probes before the connection is
+	// considered dead. Zero uses the system/Go default. Matches libpq's
+	// keepalives_count.
+	KeepalivesCount int `postgres:"keepalives_count" env:"-"`
+
 	// Whether to always send []byte parameters over as binary. Enables single
 	// round-trip mode for non-prepared Query calls. This is a pq extension, not
 	// supported in libpq.
@@ -885,6 +909,8 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 			rv                    = values.Field(i)
 			k                     = rt.Tag.Get(tag)
 			connectTimeout        = (tag == "postgres" && k == "connect_timeout") || (tag == "env" && k == "PGCONNECT_TIMEOUT")
+			keepalivesIdle        = tag == "postgres" && k == "keepalives_idle"
+			keepalivesInterval    = tag == "postgres" && k == "keepalives_interval"
 			host                  = (tag == "postgres" && k == "host") || (tag == "env" && k == "PGHOST")
 			hostaddr              = (tag == "postgres" && k == "hostaddr") || (tag == "env" && k == "PGHOSTADDR")
 			port                  = (tag == "postgres" && k == "port") || (tag == "env" && k == "PGPORT")
@@ -897,6 +923,7 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 			sslminprotocolversion = (tag == "postgres" && k == "ssl_min_protocol_version") || (tag == "env" && k == "PGSSLMINPROTOCOLVERSION")
 			sslmaxprotocolversion = (tag == "postgres" && k == "ssl_max_protocol_version") || (tag == "env" && k == "PGSSLMAXPROTOCOLVERSION")
 			requireauth           = (tag == "postgres" && k == "require_auth") || (tag == "env" && k == "PGREQUIREAUTH")
+			durationSeconds       = connectTimeout || keepalivesIdle || keepalivesInterval
 		)
 		if k == "" || k == "-" {
 			continue
@@ -995,12 +1022,12 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 					}
 					rv.Set(reflect.ValueOf(s))
 				}
-			case reflect.Int64:
+			case reflect.Int, reflect.Int64:
 				n, err := strconv.ParseInt(v, 10, 64)
 				if err != nil {
 					return fmt.Errorf(f+"%w", k, err)
 				}
-				if connectTimeout {
+				if durationSeconds {
 					n = int64(time.Duration(n) * time.Second)
 				}
 				rv.SetInt(n)
@@ -1087,9 +1114,10 @@ func (cfg Config) tomap() map[string]string {
 			case reflect.Uint16:
 				n := rv.Uint()
 				o[k] = strconv.FormatUint(n, 10)
-			case reflect.Int64:
+			case reflect.Int, reflect.Int64:
 				n := rv.Int()
-				if k == "connect_timeout" {
+				switch k {
+				case "connect_timeout", "keepalives_idle", "keepalives_interval":
 					n = int64(time.Duration(n) / time.Second)
 				}
 				o[k] = strconv.FormatInt(n, 10)

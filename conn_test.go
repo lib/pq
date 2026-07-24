@@ -505,6 +505,163 @@ func TestErrorDuringStartupClosesConn(t *testing.T) {
 	}
 }
 
+func TestSetTCPKeepalives(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	// Accept in background so Dial can complete.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		// Hold the connection open until the test finishes with it.
+		io.Copy(io.Discard, c)
+	}()
+
+	raw, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+
+	tc, ok := raw.(*net.TCPConn)
+	if !ok {
+		t.Fatalf("Dial returned %T, want *net.TCPConn", raw)
+	}
+
+	t.Run("noop when unset", func(t *testing.T) {
+		if err := setTCPKeepalives(tc, Config{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("enable with tuning", func(t *testing.T) {
+		cfg, err := newConfig("keepalives=1 keepalives_idle=30 keepalives_interval=10 keepalives_count=4", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := setTCPKeepalives(tc, cfg); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("disable", func(t *testing.T) {
+		cfg, err := newConfig("keepalives=0", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := setTCPKeepalives(tc, cfg); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("idle alone enables", func(t *testing.T) {
+		cfg, err := newConfig("keepalives_idle=15", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := setTCPKeepalives(tc, cfg); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("config fields without isset", func(t *testing.T) {
+		cfg := Config{
+			Keepalives:         true,
+			KeepalivesIdle:     20 * time.Second,
+			KeepalivesInterval: 5 * time.Second,
+			KeepalivesCount:    3,
+		}
+		if err := setTCPKeepalives(tc, cfg); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("non-TCP is ignored", func(t *testing.T) {
+		cfg, err := newConfig("keepalives=1", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Unix-style pipe is not *net.TCPConn.
+		c1, c2 := net.Pipe()
+		defer c1.Close()
+		defer c2.Close()
+		if err := setTCPKeepalives(c1, cfg); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("asTCPConn unwraps NetConn", func(t *testing.T) {
+		type wrap struct {
+			net.Conn
+		}
+		// Plain embedding does not implement NetConn; asTCPConn should fail.
+		if _, ok := asTCPConn(wrap{Conn: tc}); ok {
+			t.Fatal("expected unwrap failure for plain embedding")
+		}
+
+		w := netConnerWrap{inner: tc}
+		got, ok := asTCPConn(w)
+		if !ok || got != tc {
+			t.Fatalf("asTCPConn unwrap: ok=%v got=%v want=%v", ok, got, tc)
+		}
+	})
+
+	raw.Close()
+	<-done
+}
+
+// netConnerWrap is a test double for connections that expose NetConn()
+// (as *tls.Conn does).
+type netConnerWrap struct {
+	inner net.Conn
+}
+
+func (w netConnerWrap) Read(b []byte) (int, error)         { return w.inner.Read(b) }
+func (w netConnerWrap) Write(b []byte) (int, error)        { return w.inner.Write(b) }
+func (w netConnerWrap) Close() error                       { return w.inner.Close() }
+func (w netConnerWrap) LocalAddr() net.Addr                { return w.inner.LocalAddr() }
+func (w netConnerWrap) RemoteAddr() net.Addr               { return w.inner.RemoteAddr() }
+func (w netConnerWrap) SetDeadline(t time.Time) error      { return w.inner.SetDeadline(t) }
+func (w netConnerWrap) SetReadDeadline(t time.Time) error  { return w.inner.SetReadDeadline(t) }
+func (w netConnerWrap) SetWriteDeadline(t time.Time) error { return w.inner.SetWriteDeadline(t) }
+func (w netConnerWrap) NetConn() net.Conn                  { return w.inner }
+
+func TestHasKeepaliveSettings(t *testing.T) {
+	t.Parallel()
+	if (Config{}).hasKeepaliveSettings() {
+		t.Error("empty Config should not report keepalive settings")
+	}
+	if !(Config{Keepalives: true}).hasKeepaliveSettings() {
+		t.Error("Keepalives true should report settings")
+	}
+	if !(Config{KeepalivesIdle: time.Second}).hasKeepaliveSettings() {
+		t.Error("KeepalivesIdle should report settings")
+	}
+	if !(Config{KeepalivesInterval: time.Second}).hasKeepaliveSettings() {
+		t.Error("KeepalivesInterval should report settings")
+	}
+	if !(Config{KeepalivesCount: 1}).hasKeepaliveSettings() {
+		t.Error("KeepalivesCount should report settings")
+	}
+	cfg, err := newConfig("keepalives=0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.hasKeepaliveSettings() {
+		t.Error("keepalives=0 should report settings (to disable)")
+	}
+}
+
 func TestBadConn(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []error{io.EOF, &Error{Severity: pqerror.SeverityFatal}, io.ErrUnexpectedEOF} {
