@@ -303,6 +303,8 @@ func TestDecode(t *testing.T) {
 		{oid.T_text, formatText, []byte("hello world"), "hello world", ``},
 
 		{oid.T_uuid, formatBinary, []byte{0x12, 0x34}, ([]byte)(nil), `pq: unable to decode uuid; bad length: 2`},
+
+		{oid.T_text, format(2), []byte("x"), nil, `pq: unknown column format code 2`},
 	}
 
 	for _, tt := range tests {

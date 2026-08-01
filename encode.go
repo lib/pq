@@ -58,7 +58,7 @@ func decode(ps *parameterStatus, s []byte, typ oid.Oid, f format) (any, error) {
 	case formatText:
 		return textDecode(ps, s, typ)
 	default:
-		panic("unreachable")
+		return nil, fmt.Errorf("pq: unknown column format code %d", f)
 	}
 }
 
