@@ -117,6 +117,21 @@ func TestRegressionPostgreSQLSASLprep(t *testing.T) {
 		})
 	}
 
+	t.Run("non_ascii_space_precedes_mapped_to_nothing", func(t *testing.T) {
+		// U+200B appears in both RFC 3454 table C.1.2 and table B.1.
+		// PostgreSQL checks the non-ASCII-space table first, so the character
+		// becomes an ASCII space rather than being removed.
+		have := regressionSCRAMProof(t, "a\u200bb")
+		space := regressionSCRAMProof(t, "a b")
+		nothing := regressionSCRAMProof(t, "ab")
+		if !bytes.Equal(have, space) {
+			t.Error("overlapping SASLprep character was not mapped to ASCII space")
+		}
+		if bytes.Equal(have, nothing) {
+			t.Error("overlapping SASLprep character was incorrectly mapped to nothing")
+		}
+	})
+
 	// PostgreSQL deliberately falls back to the original bytes when SASLprep
 	// rejects a password, preserving prohibited and non-UTF-8 passwords.
 	for _, tt := range []struct {
