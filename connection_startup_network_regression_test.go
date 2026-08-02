@@ -92,6 +92,17 @@ func TestConnectionStartupRegressionSQLContextCancelsOpen(t *testing.T) {
 	}
 }
 
+func TestConnectionStartupRegressionSQLDriverTypePreserved(t *testing.T) {
+	db, err := sql.Open("postgres", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, ok := db.Driver().(*Driver); !ok {
+		t.Fatalf("sql.DB.Driver type = %T; want *pq.Driver", db.Driver())
+	}
+}
+
 func TestConnectionStartupRegressionRejectsLongFrameBeforeAllocation(t *testing.T) {
 	const childEnvironment = "PQ_CONNECTION_STARTUP_LONG_FRAME_CHILD"
 	if os.Getenv(childEnvironment) == "1" {
@@ -238,6 +249,22 @@ func TestConnectionStartupRegressionAuthenticationChallengeRequiresOK(t *testing
 	}
 }
 
+func TestConnectionStartupRegressionAuthenticationOKDoesNotCoverLaterChallenge(t *testing.T) {
+	payload := binary.BigEndian.AppendUint32(nil, uint32(proto.AuthReqPassword))
+	wire := bytes.Join([][]byte{
+		regressionBackendFrame(proto.AuthenticationRequest, []byte{0, 0, 0, 0}),
+		regressionBackendFrame(proto.AuthenticationRequest, payload),
+		regressionBackendFrame(proto.ReadyForQuery, []byte{'I'}),
+	}, nil)
+	script := newRegressionScriptConn(wire)
+	cn := &conn{c: script, buf: bufio.NewReader(script)}
+	if err := cn.startup(Config{
+		User: "test", Password: "secret", MaxProtocolVersion: ProtocolVersion30,
+	}); err == nil {
+		t.Fatal("startup treated an earlier AuthenticationOk as acknowledgement of a later challenge")
+	}
+}
+
 type connectionStartupDeadlineRejectConn struct{ net.Conn }
 
 func (c *connectionStartupDeadlineRejectConn) SetDeadline(time.Time) error {
@@ -344,6 +371,10 @@ func (d *connectionStartupPreferFallbackDialer) dial() (net.Conn, error) {
 				regressionBackendFrame(proto.AuthenticationRequest, []byte{0, 0, 0, 0}),
 				regressionBackendFrame(proto.ReadyForQuery, []byte{'I'}),
 			}, nil))
+			// Keep the successful fallback connection alive until the client
+			// closes it. Closing immediately after ReadyForQuery races with the
+			// connector resetting its startup deadline.
+			_, _ = io.Copy(io.Discard, server)
 		}()
 	default:
 		_ = client.Close()
@@ -400,6 +431,74 @@ func TestConnectionStartupRegressionPreferFallsBackAfterTLSHandshakeFailure(t *t
 	defer got.Close()
 	if count := dialer.Count(); count != 2 {
 		t.Fatalf("sslmode=prefer used %d connections; want TLS attempt plus plaintext fallback", count)
+	}
+}
+
+var errConnectionStartupPreferStandbyDial = errors.New("intentional prefer-standby dial failure")
+
+type connectionStartupPreferStandbyLoopDialer struct {
+	mu    sync.Mutex
+	calls int
+	third net.Conn
+}
+
+func (d *connectionStartupPreferStandbyLoopDialer) dial() (net.Conn, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.calls++
+	if d.calls <= 2 {
+		return nil, errConnectionStartupPreferStandbyDial
+	}
+	return d.third, nil
+}
+
+func (d *connectionStartupPreferStandbyLoopDialer) Dial(string, string) (net.Conn, error) {
+	return d.dial()
+}
+
+func (d *connectionStartupPreferStandbyLoopDialer) DialTimeout(string, string, time.Duration) (net.Conn, error) {
+	return d.dial()
+}
+
+func (d *connectionStartupPreferStandbyLoopDialer) Count() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.calls
+}
+
+func TestConnectionStartupRegressionPreferStandbyFallbackIsOneShot(t *testing.T) {
+	wire := bytes.Join([][]byte{
+		regressionBackendFrame(proto.AuthenticationRequest, []byte{0, 0, 0, 0}),
+		regressionBackendFrame(proto.ReadyForQuery, []byte{'I'}),
+	}, nil)
+	script := newRegressionScriptConn(wire)
+	dialer := &connectionStartupPreferStandbyLoopDialer{third: script}
+	connector, err := NewConnectorConfig(Config{
+		Host:               "prefer-standby.invalid",
+		Port:               1,
+		User:               "test",
+		Database:           "test",
+		SSLMode:            SSLModeDisable,
+		MaxProtocolVersion: ProtocolVersion30,
+		TargetSessionAttrs: TargetSessionAttrsPreferStandby,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector.Dialer(dialer)
+
+	got, err := connector.Connect(context.Background())
+	if got != nil {
+		_ = got.Close()
+	}
+	if err == nil {
+		t.Error("prefer-standby kept restarting after the any-host fallback pass failed")
+	}
+	if !errors.Is(err, errConnectionStartupPreferStandbyDial) {
+		t.Errorf("Connect error = %v; want intentional dial failure", err)
+	}
+	if calls := dialer.Count(); calls != 2 {
+		t.Errorf("prefer-standby made %d dial attempts; want one preferred pass plus one any-host pass", calls)
 	}
 }
 
