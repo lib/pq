@@ -143,6 +143,32 @@ func TestConnectionIONetworkRegressionSendPartialWritePoisons(t *testing.T) {
 	}
 }
 
+func TestConnectionIONetworkRegressionPingDoesNotWritePoisonedConnection(t *testing.T) {
+	wire := newConnectionIOWriteConn(connectionIOWritePartialError, nil)
+	cn := &conn{
+		c:         wire,
+		buf:       bufio.NewReader(wire),
+		txnStatus: txnStatusIdle,
+	}
+
+	b := cn.writeBuf(proto.Query)
+	b.string("UPDATE regression SET value = 1")
+	if err := cn.send(b); err == nil {
+		t.Fatal("partial frontend write was reported as successful")
+	}
+	if err := cn.err.get(); err != driver.ErrBadConn {
+		t.Fatalf("partial frontend write left connection reusable: %v", err)
+	}
+
+	writes := wire.writes.Load()
+	if err := cn.Ping(context.Background()); !errors.Is(err, driver.ErrBadConn) {
+		t.Errorf("Ping on poisoned connection returned %v; want %v", err, driver.ErrBadConn)
+	}
+	if got := wire.writes.Load(); got != writes {
+		t.Errorf("Ping wrote on a poisoned connection: writes changed from %d to %d", writes, got)
+	}
+}
+
 func TestConnectionIONetworkRegressionStartupWritePreservesUnderlyingError(t *testing.T) {
 	wire := newConnectionIOWriteConn(connectionIOWriteZeroError, nil)
 	connector, err := NewConnectorConfig(Config{
