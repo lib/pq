@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -210,6 +211,49 @@ func TestProtocolRegressionCancelRequestBoundsLegacyDialer(t *testing.T) {
 	case <-time.After(regressionOperationTimeout):
 		t.Fatal("CancelRequest did not use the bounded legacy DialTimeout method")
 	}
+}
+
+func TestProtocolRegressionDialClosesConnectionOnError(t *testing.T) {
+	t.Run("dial returns connection and error", func(t *testing.T) {
+		client, server := net.Pipe()
+		defer server.Close()
+		tracked := &regressionTrackingConn{Conn: client}
+		wantErr := errors.New("dial failed after creating socket")
+
+		got, err := dial(context.Background(), protocolLifecycleCancelDialer{
+			conn: tracked,
+			err:  wantErr,
+		}, Config{Host: "dial.invalid", Port: 1})
+		if got != nil {
+			t.Errorf("dial returned a connection alongside an error: %T", got)
+		}
+		if !errors.Is(err, wantErr) {
+			t.Errorf("dial error = %v; want %v", err, wantErr)
+		}
+		if !tracked.closed.Load() {
+			t.Error("dial left the returned connection open")
+		}
+	})
+
+	t.Run("setting connection deadline fails", func(t *testing.T) {
+		client, server := net.Pipe()
+		defer server.Close()
+		tracked := &regressionTrackingConn{Conn: client}
+		deadlineConn := &protocolLifecycleDeadlineErrorConn{regressionTrackingConn: tracked}
+
+		got, err := dial(context.Background(), protocolLifecycleCancelDialer{
+			conn: deadlineConn,
+		}, Config{Host: "dial.invalid", Port: 1, ConnectTimeout: time.Second})
+		if got != nil {
+			t.Errorf("dial returned a connection after SetDeadline failed: %T", got)
+		}
+		if err == nil || !strings.Contains(err.Error(), "setting test deadline") {
+			t.Errorf("dial error = %v; want SetDeadline error", err)
+		}
+		if !tracked.closed.Load() {
+			t.Error("dial left connection open after SetDeadline failed")
+		}
+	})
 }
 
 // Prepared-statement cancellation must finish sending (or failing to send) the
@@ -669,6 +713,14 @@ type protocolLifecycleFixedDialer struct {
 
 type protocolLifecycleTimeoutDialer struct {
 	timeoutUsed chan<- time.Duration
+}
+
+type protocolLifecycleDeadlineErrorConn struct {
+	*regressionTrackingConn
+}
+
+func (c *protocolLifecycleDeadlineErrorConn) SetDeadline(time.Time) error {
+	return errors.New("setting test deadline failed")
 }
 
 func (d protocolLifecycleTimeoutDialer) Dial(string, string) (net.Conn, error) {
