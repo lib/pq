@@ -82,6 +82,9 @@ func TestProtocolRegressionMalformedFrames(t *testing.T) {
 			} else if err == nil {
 				t.Error("malformed backend input was accepted")
 			}
+			if err := cn.err.get(); err != driver.ErrBadConn {
+				t.Errorf("malformed backend input left connection reusable: %v", err)
+			}
 		})
 	}
 }
@@ -122,6 +125,21 @@ func TestProtocolRegressionOversizedLongFrameRejectedBeforeAllocation(t *testing
 	}
 	if err != nil {
 		t.Fatalf("oversized frame was not safely rejected before allocation: %v\n%s", err, output)
+	}
+}
+
+func TestProtocolRegressionPreProtocolErrorIsBounded(t *testing.T) {
+	input := append([]byte{'E'}, bytes.Repeat([]byte{'x'}, proto.MaxMsgLen+100)...)
+	wire := newRegressionScriptConn(input)
+	cn := &conn{c: wire, buf: bufio.NewReader(wire)}
+	if _, err := cn.recvMessage(new(readBuf)); err == nil {
+		t.Fatal("pre-protocol backend error was accepted")
+	}
+	if err := cn.err.get(); err != driver.ErrBadConn {
+		t.Errorf("pre-protocol backend error left connection reusable: %v", err)
+	}
+	if remaining := wire.reader.Len(); remaining < 100 {
+		t.Errorf("pre-protocol error consumed unbounded input; only %d bytes remain", remaining)
 	}
 }
 
@@ -247,6 +265,55 @@ func TestProtocolRegressionConnectContextBoundsHandshake(t *testing.T) {
 			regressionExpectResultBeforeTimeout(t, result, dialer.Close)
 		})
 	}
+}
+
+func TestProtocolRegressionConnectContextBoundsTargetSessionAttrs(t *testing.T) {
+	client, server := net.Pipe()
+	queryReceived := make(chan struct{})
+	go func() {
+		if !regressionReadStartupPacket(server) {
+			return
+		}
+		_, _ = server.Write(bytes.Join([][]byte{
+			regressionBackendFrame(proto.AuthenticationRequest, []byte{0, 0, 0, 0}),
+			regressionBackendFrame(proto.ReadyForQuery, []byte{'I'}),
+		}, nil))
+		if regressionReadFrontendMessage(server) {
+			close(queryReceived)
+		}
+		_, _ = io.Copy(io.Discard, server)
+	}()
+
+	connector, err := NewConnectorConfig(Config{
+		Host:               "context.invalid",
+		Port:               1,
+		User:               "test",
+		Database:           "test",
+		SSLMode:            SSLModeDisable,
+		MaxProtocolVersion: ProtocolVersion30,
+		TargetSessionAttrs: TargetSessionAttrsReadOnly,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector.Dialer(protocolLifecycleFixedDialer{conn: client})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		cn, err := connector.Connect(ctx)
+		if err == nil && cn != nil {
+			_ = cn.Close()
+		}
+		result <- err
+	}()
+
+	regressionAwaitSignal(t, queryReceived, "target_session_attrs query was not sent")
+	regressionExpectResultBeforeTimeout(t, result, func() {
+		_ = server.Close()
+		_ = client.Close()
+	})
 }
 
 func TestProtocolRegressionBeginTxContextCoversBegin(t *testing.T) {
@@ -575,6 +642,18 @@ func (c *regressionWriteErrorConn) Write([]byte) (int, error) {
 type protocolLifecycleCancelDialer struct {
 	conn net.Conn
 	err  error
+}
+
+type protocolLifecycleFixedDialer struct {
+	conn net.Conn
+}
+
+func (d protocolLifecycleFixedDialer) Dial(string, string) (net.Conn, error) {
+	return d.conn, nil
+}
+
+func (d protocolLifecycleFixedDialer) DialTimeout(string, string, time.Duration) (net.Conn, error) {
+	return d.conn, nil
 }
 
 func (d protocolLifecycleCancelDialer) Dial(string, string) (net.Conn, error) {
