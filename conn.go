@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lib/pq/internal/pgpass"
@@ -216,10 +217,10 @@ type conn struct {
 	namei        int
 	scratch      [512]byte
 	txnStatus    transactionStatus
-	txnFinish    func()
+	txnFinish    *cancelWatcher
 	copyState    struct {
 		sync.Mutex
-		active             *copyin
+		active             atomic.Pointer[copyin]
 		deferredStmtCloses []string
 	}
 
@@ -244,16 +245,13 @@ type conn struct {
 	gssComplete         bool                // GSSAPI peer authentication completed
 }
 
-type syncErr struct {
-	err error
-	sync.Mutex
-}
+type syncErrValue struct{ err error }
+
+type syncErr struct{ value atomic.Pointer[syncErrValue] }
 
 // Return ErrBadConn if connection is bad.
 func (e *syncErr) get() error {
-	e.Lock()
-	defer e.Unlock()
-	if e.err != nil {
+	if e.value.Load() != nil {
 		return driver.ErrBadConn
 	}
 	return nil
@@ -261,9 +259,11 @@ func (e *syncErr) get() error {
 
 // Return the error set on the connection. Currently only used by rows.Next.
 func (e *syncErr) getForNext() error {
-	e.Lock()
-	defer e.Unlock()
-	return e.err
+	value := e.value.Load()
+	if value == nil {
+		return nil
+	}
+	return value.err
 }
 
 // Set error, only if it isn't set yet.
@@ -271,11 +271,7 @@ func (e *syncErr) set(err error) {
 	if err == nil {
 		panic("attempt to set nil err")
 	}
-	e.Lock()
-	defer e.Unlock()
-	if e.err == nil {
-		e.err = err
-	}
+	e.value.CompareAndSwap(nil, &syncErrValue{err: err})
 }
 
 func (cn *conn) writeBuf(b proto.RequestCode) *writeBuf {
@@ -682,17 +678,18 @@ func (cn *conn) checkIsInTransaction(intxn bool) error {
 func (cn *conn) activateCopy(ci *copyin) error {
 	cn.copyState.Lock()
 	defer cn.copyState.Unlock()
-	if cn.copyState.active != nil && cn.copyState.active != ci {
+	active := cn.copyState.active.Load()
+	if active != nil && active != ci {
 		return errCopyInProgress
 	}
-	cn.copyState.active = ci
+	cn.copyState.active.Store(ci)
 	return nil
 }
 
 func (cn *conn) clearActiveCopy(ci *copyin) {
 	cn.copyState.Lock()
-	if cn.copyState.active == ci {
-		cn.copyState.active = nil
+	if cn.copyState.active.Load() == ci {
+		cn.copyState.active.Store(nil)
 		cn.copyState.deferredStmtCloses = nil
 	}
 	cn.copyState.Unlock()
@@ -701,7 +698,7 @@ func (cn *conn) clearActiveCopy(ci *copyin) {
 func (cn *conn) deferStmtClose(name string) bool {
 	cn.copyState.Lock()
 	defer cn.copyState.Unlock()
-	if cn.copyState.active == nil {
+	if cn.copyState.active.Load() == nil {
 		return false
 	}
 	cn.copyState.deferredStmtCloses = append(cn.copyState.deferredStmtCloses, name)
@@ -716,7 +713,7 @@ func (cn *conn) deferStmtClose(name string) bool {
 func (cn *conn) nextDeferredStmtCloseBatch(ci *copyin, resetDeadline bool) (names []string, finished bool, err error) {
 	cn.copyState.Lock()
 	defer cn.copyState.Unlock()
-	if cn.copyState.active != ci {
+	if cn.copyState.active.Load() != ci {
 		return nil, true, nil
 	}
 	if len(cn.copyState.deferredStmtCloses) == 0 {
@@ -725,7 +722,7 @@ func (cn *conn) nextDeferredStmtCloseBatch(ci *copyin, resetDeadline bool) (name
 				return nil, false, err
 			}
 		}
-		cn.copyState.active = nil
+		cn.copyState.active.Store(nil)
 		return nil, true, nil
 	}
 	names = cn.copyState.deferredStmtCloses
@@ -734,10 +731,7 @@ func (cn *conn) nextDeferredStmtCloseBatch(ci *copyin, resetDeadline bool) (name
 }
 
 func (cn *conn) activeCopy() *copyin {
-	cn.copyState.Lock()
-	ci := cn.copyState.active
-	cn.copyState.Unlock()
-	return ci
+	return cn.copyState.active.Load()
 }
 
 func (cn *conn) checkCopyInactive() error {
@@ -749,6 +743,7 @@ func (cn *conn) checkCopyInactive() error {
 
 // Implement [driver.ConnBeginTx].
 func (cn *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	cancelable := ctx.Done() != nil
 	var mode string
 	switch sql.IsolationLevel(opts.Isolation) {
 	case sql.LevelDefault:
@@ -779,23 +774,28 @@ func (cn *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, 
 	if err := cn.checkIsInTransaction(false); err != nil {
 		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	if cancelable {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 
-	finish := cn.watchCancel(ctx, false)
+	var finish *cancelWatcher
+	if cancelable {
+		finish = cn.watchCancel(ctx, false)
+	}
 	_, commandTag, err := cn.simpleExec("BEGIN" + mode)
 	if err != nil {
-		finish()
+		finish.finish()
 		return nil, cn.handleError(err)
 	}
 	if commandTag != "BEGIN" {
-		finish()
+		finish.finish()
 		cn.err.set(driver.ErrBadConn)
 		return nil, fmt.Errorf("unexpected command tag %s", commandTag)
 	}
 	if cn.txnStatus != txnStatusIdleInTransaction {
-		finish()
+		finish.finish()
 		cn.err.set(driver.ErrBadConn)
 		return nil, fmt.Errorf("unexpected transaction status %v", cn.txnStatus)
 	}
@@ -807,7 +807,7 @@ func (cn *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, 
 func (cn *conn) Commit() error {
 	defer func() {
 		if cn.txnFinish != nil {
-			cn.txnFinish()
+			cn.txnFinish.finish()
 		}
 	}()
 	if err := cn.err.get(); err != nil {
@@ -858,7 +858,7 @@ func (cn *conn) Commit() error {
 func (cn *conn) Rollback() error {
 	defer func() {
 		if cn.txnFinish != nil {
-			cn.txnFinish()
+			cn.txnFinish.finish()
 		}
 	}()
 	if err := cn.err.get(); err != nil {
@@ -1126,8 +1126,11 @@ func (cn *conn) prepareTo(q, stmtName string) (*stmt, error) {
 
 // Implement [driver.ConnPrepareContext].
 func (cn *conn) PrepareContext(ctx context.Context, q string) (driver.Stmt, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	cancelable := ctx.Done() != nil
+	if cancelable {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 	if err := cn.err.get(); err != nil {
 		return nil, err
@@ -1135,7 +1138,9 @@ func (cn *conn) PrepareContext(ctx context.Context, q string) (driver.Stmt, erro
 	if err := cn.checkCopyInactive(); err != nil {
 		return nil, err
 	}
-	defer cn.watchCancel(ctx, false)()
+	if cancelable {
+		defer cn.watchCancel(ctx, false).finish()
+	}
 
 	if pqsql.StartsWithCopy(q) {
 		s, err := cn.prepareCopyIn(q)
@@ -1228,8 +1233,11 @@ func (cn *conn) CheckNamedValue(nv *driver.NamedValue) error {
 
 // Implement [driver.QueryerContext].
 func (cn *conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	cancelable := ctx.Done() != nil
+	if cancelable {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 	if err := cn.err.get(); err != nil {
 		return nil, err
@@ -1237,12 +1245,13 @@ func (cn *conn) QueryContext(ctx context.Context, query string, args []driver.Na
 	if err := cn.checkCopyInactive(); err != nil {
 		return nil, err
 	}
-	finish := cn.watchCancel(ctx, false)
+	var finish *cancelWatcher
+	if cancelable {
+		finish = cn.watchCancel(ctx, false)
+	}
 	r, err := cn.query(query, args)
 	if err != nil {
-		if finish != nil {
-			finish()
-		}
+		finish.finish()
 		return nil, err
 	}
 	r.finish = finish
@@ -1306,8 +1315,11 @@ func (cn *conn) query(query string, args []driver.NamedValue) (*rows, error) {
 
 // Implement [driver.ExecerContext].
 func (cn *conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	cancelable := ctx.Done() != nil
+	if cancelable {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 	if err := cn.err.get(); err != nil {
 		return nil, err
@@ -1315,7 +1327,9 @@ func (cn *conn) ExecContext(ctx context.Context, query string, args []driver.Nam
 	if err := cn.checkCopyInactive(); err != nil {
 		return nil, err
 	}
-	defer cn.watchCancel(ctx, false)()
+	if cancelable {
+		defer cn.watchCancel(ctx, false).finish()
+	}
 
 	// simpleExec is *much* faster than going through prepare/exec.
 	if len(args) == 0 {
@@ -1364,8 +1378,11 @@ func (cn *conn) ExecContext(ctx context.Context, query string, args []driver.Nam
 }
 
 func (cn *conn) Ping(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
+	cancelable := ctx.Done() != nil
+	if cancelable {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 	}
 	if err := cn.err.get(); err != nil {
 		return err
@@ -1373,7 +1390,9 @@ func (cn *conn) Ping(ctx context.Context) error {
 	if err := cn.checkCopyInactive(); err != nil {
 		return err
 	}
-	defer cn.watchCancel(ctx, false)()
+	if cancelable {
+		defer cn.watchCancel(ctx, false).finish()
+	}
 	rows, err := cn.simpleQuery(";")
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -1389,8 +1408,10 @@ func (cn *conn) Ping(ctx context.Context) error {
 		cn.err.set(driver.ErrBadConn)
 		return driver.ErrBadConn
 	}
-	if err := ctx.Err(); err != nil {
-		return err
+	if cancelable {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 	}
 	return cn.err.get()
 }
@@ -1409,9 +1430,13 @@ func (cn *conn) write(p []byte) error {
 	if n == len(p) && err == nil {
 		return nil
 	}
-	if n < 0 || n > len(p) {
+	return cn.writeFailure(n, len(p), err)
+}
+
+func (cn *conn) writeFailure(n, total int, err error) error {
+	if n < 0 || n > total {
 		cn.err.set(driver.ErrBadConn)
-		return fmt.Errorf("pq: invalid write count %d for %d-byte message", n, len(p))
+		return fmt.Errorf("pq: invalid write count %d for %d-byte message", n, total)
 	}
 	if err == nil {
 		err = io.ErrShortWrite
@@ -1424,8 +1449,9 @@ func (cn *conn) write(p []byte) error {
 }
 
 func (cn *conn) send(m *writeBuf) error {
+	message := m.wrap()
 	if debugProto {
-		w := m.wrap()
+		w := message
 		for len(w) > 0 { // Can contain multiple messages.
 			c := proto.RequestCode(w[0])
 			l := int(binary.BigEndian.Uint32(w[1:5])) - 4
@@ -1438,7 +1464,11 @@ func (cn *conn) send(m *writeBuf) error {
 		}
 	}
 
-	return cn.write(m.wrap())
+	n, err := cn.c.Write(message)
+	if n == len(message) && err == nil {
+		return nil
+	}
+	return cn.writeFailure(n, len(message), err)
 }
 
 func (cn *conn) sendStartupPacket(m *writeBuf) error {
@@ -1583,7 +1613,25 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 	if err != nil {
 		return 0, cn.badBackendMessage(err)
 	}
-	if err := validateBackendMessage(t, y); err != nil {
+	// Avoid the large diagnostic validator on the two hottest valid response
+	// types. Invalid frames still take the central path below, preserving the
+	// same checks and errors.
+	validated := false
+	switch t {
+	case proto.ReadyForQuery:
+		if len(y) == 1 {
+			switch transactionStatus(y[0]) {
+			case txnStatusIdle, txnStatusIdleInTransaction, txnStatusInFailedTransaction:
+				validated = true
+			}
+		}
+	case proto.DataRow:
+		validated = len(y) >= 2 && validDataRow(y)
+	}
+	if !validated {
+		err = validateBackendMessage(t, y)
+	}
+	if err != nil {
 		return 0, cn.badBackendMessage(err)
 	}
 	*r = y
@@ -1615,6 +1663,28 @@ func readPreProtocolError(r *bufio.Reader, limit int) string {
 }
 
 func validateBackendMessage(t proto.ResponseCode, payload []byte) error {
+	// These variable-size messages are common enough that handling them before
+	// the general minimum-length and type switches avoids paying for two type
+	// dispatches on every successful frame.
+	switch t {
+	case proto.ErrorResponse, proto.NoticeResponse:
+		if len(payload) < 1 {
+			return fmt.Errorf("pq: invalid %s payload: got %d bytes, need at least 1", t, len(payload))
+		}
+		if !validBackendErrorFields(payload) {
+			return fmt.Errorf("pq: invalid %s payload: fields are not NUL-terminated", t)
+		}
+		return nil
+	case proto.RowDescription:
+		if len(payload) < 2 {
+			return fmt.Errorf("pq: invalid %s payload: got %d bytes, need at least 2", t, len(payload))
+		}
+		if !validRowDescription(payload) {
+			return fmt.Errorf("pq: invalid %s payload: invalid field description", t)
+		}
+		return nil
+	}
+
 	minimum := 0
 	switch t {
 	case proto.ReadyForQuery:
@@ -1623,7 +1693,7 @@ func validateBackendMessage(t proto.ResponseCode, payload []byte) error {
 		minimum = 4
 	case proto.BackendKeyData, proto.NegotiateProtocolVersion:
 		minimum = 8
-	case proto.DataRow, proto.RowDescription, proto.ParameterDescription:
+	case proto.DataRow, proto.ParameterDescription:
 		minimum = 2
 	case proto.CopyInResponse, proto.CopyOutResponse, proto.CopyBothResponse:
 		minimum = 3
@@ -1631,7 +1701,7 @@ func validateBackendMessage(t proto.ResponseCode, payload []byte) error {
 		minimum = 6 // PID and two empty, NUL-terminated strings.
 	case proto.ParameterStatus:
 		minimum = 2 // Two empty, NUL-terminated strings.
-	case proto.CommandComplete, proto.ErrorResponse, proto.NoticeResponse:
+	case proto.CommandComplete:
 		minimum = 1 // At least the terminating NUL byte.
 	}
 	if len(payload) < minimum {
@@ -1689,17 +1759,9 @@ func validateBackendMessage(t proto.ResponseCode, payload []byte) error {
 		if end, ok = backendCString(payload, end); !ok || end != len(payload) {
 			return fmt.Errorf("pq: invalid %s payload: notification payload is not NUL-terminated", t)
 		}
-	case proto.ErrorResponse, proto.NoticeResponse:
-		if !validBackendErrorFields(payload) {
-			return fmt.Errorf("pq: invalid %s payload: fields are not NUL-terminated", t)
-		}
 	case proto.DataRow:
 		if !validDataRow(payload) {
 			return fmt.Errorf("pq: invalid %s payload: invalid column data", t)
-		}
-	case proto.RowDescription:
-		if !validRowDescription(payload) {
-			return fmt.Errorf("pq: invalid %s payload: invalid field description", t)
 		}
 	case proto.ParameterDescription:
 		count := int(binary.BigEndian.Uint16(payload))
@@ -1747,11 +1809,11 @@ func validBackendErrorFields(payload []byte) bool {
 		if payload[pos] == 0 {
 			return pos == len(payload)-1
 		}
-		var ok bool
-		pos, ok = backendCString(payload, pos+1)
-		if !ok {
+		end := bytes.IndexByte(payload[pos+1:], 0)
+		if end < 0 {
 			return false
 		}
+		pos += end + 2
 	}
 	return false
 }
@@ -1763,15 +1825,18 @@ func validDataRow(payload []byte) bool {
 		if len(payload)-pos < 4 {
 			return false
 		}
-		length := int32(binary.BigEndian.Uint32(payload[pos:]))
+		length := int(int32(binary.BigEndian.Uint32(payload[pos:])))
 		pos += 4
-		switch {
-		case length == -1:
-		case length < -1 || int64(length) > int64(len(payload)-pos):
-			return false
-		default:
-			pos += int(length)
+		if length < 0 {
+			if length != -1 {
+				return false
+			}
+			continue
 		}
+		if length > len(payload)-pos {
+			return false
+		}
+		pos += length
 	}
 	return pos == len(payload)
 }
@@ -1785,8 +1850,7 @@ func validRowDescription(payload []byte) bool {
 		if !ok || len(payload)-pos < 18 {
 			return false
 		}
-		formatCode := binary.BigEndian.Uint16(payload[pos+16 : pos+18])
-		if formatCode > uint16(formatBinary) {
+		if payload[pos+16] != 0 || payload[pos+17] > byte(formatBinary) {
 			return false
 		}
 		pos += 18
@@ -1893,81 +1957,109 @@ func (cn *conn) recv1() (proto.ResponseCode, *readBuf, error) {
 // We need to let PostgreSQL know the query is cancelled: just dropping the
 // connection won't stop the query.
 //
-// So create a goroutine which selects on ctx.Done() and a finish channel.
-// Returns a function to send to this, which should be called after the query is
-// finished.
-func (cn *conn) watchCancel(ctx context.Context, fromStmt bool) func() {
+// Register cancellation lazily so a successful operation does not have to
+// start and schedule a goroutine. finish still joins a callback which won the
+// race with successful completion before allowing the connection to be reused.
+type cancelWatcher struct {
+	cn       *conn
+	ctx      context.Context
+	fromStmt bool
+
+	finished chan struct{}
+	done     sync.WaitGroup
+	stop     func() bool
+	once     sync.Once
+	canceled bool
+}
+
+func (cn *conn) watchCancel(ctx context.Context, fromStmt bool) *cancelWatcher {
 	if ctx.Done() == nil { // "may return nil if this context can never be canceled"
-		return func() {}
+		return nil
 	}
 
-	finished := make(chan struct{})
-	done := make(chan struct{})
-	var finishOnce sync.Once
-	canceled := false
-	go func() {
-		defer close(done)
-		select {
-		case <-finished: // Query finished successfully.
-		case <-ctx.Done():
-			canceled = true
-			cancelCtx, stopCancel := context.WithTimeout(context.Background(), cancelRequestTimeout)
-			defer stopCancel()
-			cancelResult := make(chan error, 1)
-			go func() { cancelResult <- cn.sendCancelRequestContext(cancelCtx) }()
+	w := &cancelWatcher{
+		cn:       cn,
+		ctx:      ctx,
+		fromStmt: fromStmt,
+		finished: make(chan struct{}),
+	}
+	w.done.Add(1)
+	w.stop = context.AfterFunc(ctx, w.cancel)
+	return w
+}
 
-			timer := time.NewTimer(cancelResponseGracePeriod)
-			defer timer.Stop()
-			queryFinished, cancelComplete := false, false
-			finishedWait := (<-chan struct{})(finished)
-			for {
-				select {
-				case <-finishedWait:
-					queryFinished = true
-					finishedWait = nil
-					if cancelComplete {
-						return
-					}
-
-				case cancelErr := <-cancelResult:
-					if queryFinished {
-						return
-					}
-					select {
-					case <-finishedWait:
-						return
-					default:
-					}
-					if cancelErr == nil {
-						// The request was delivered; wait for the primary response or
-						// for the grace period to expire.
-						cancelComplete = true
-						cancelResult = nil
-						continue
-					}
-					cn.invalidateCanceledOperation(ctx, fromStmt)
-					return
-
-				case <-timer.C:
-					// Stop an in-flight side channel and make a late result harmless.
-					// The primary is no longer reusable, so there is no next query for
-					// a late CancelRequest to race.
-					stopCancel()
-					cn.invalidateCanceledOperation(ctx, fromStmt)
-					return
-				}
+func (w *cancelWatcher) finish() {
+	if w == nil {
+		return
+	}
+	w.once.Do(func() {
+		close(w.finished)
+		if w.stop() {
+			return
+		}
+		w.done.Wait()
+		if w.canceled && !w.fromStmt {
+			w.cn.err.set(w.ctx.Err())
+			if w.cn.c != nil {
+				_ = w.cn.c.Close()
 			}
 		}
-	}()
+	})
+}
 
-	return func() {
-		finishOnce.Do(func() { close(finished) })
-		<-done
-		if canceled && !fromStmt {
-			cn.err.set(ctx.Err())
-			if cn.c != nil {
-				_ = cn.c.Close()
+func (w *cancelWatcher) cancel() {
+	defer w.done.Done()
+	select {
+	case <-w.finished: // Query finished successfully.
+		return
+	default:
+	}
+
+	w.canceled = true
+	cancelCtx, stopCancel := context.WithTimeout(context.Background(), cancelRequestTimeout)
+	defer stopCancel()
+	cancelResult := make(chan error, 1)
+	go func() { cancelResult <- w.cn.sendCancelRequestContext(cancelCtx) }()
+
+	timer := time.NewTimer(cancelResponseGracePeriod)
+	defer timer.Stop()
+	queryFinished, cancelComplete := false, false
+	finishedWait := (<-chan struct{})(w.finished)
+	for {
+		select {
+		case <-finishedWait:
+			queryFinished = true
+			finishedWait = nil
+			if cancelComplete {
+				return
 			}
+
+		case cancelErr := <-cancelResult:
+			if queryFinished {
+				return
+			}
+			select {
+			case <-finishedWait:
+				return
+			default:
+			}
+			if cancelErr == nil {
+				// The request was delivered; wait for the primary response or
+				// for the grace period to expire.
+				cancelComplete = true
+				cancelResult = nil
+				continue
+			}
+			w.cn.invalidateCanceledOperation(w.ctx, w.fromStmt)
+			return
+
+		case <-timer.C:
+			// Stop an in-flight side channel and make a late result harmless.
+			// The primary is no longer reusable, so there is no next query for
+			// a late CancelRequest to race.
+			stopCancel()
+			w.cn.invalidateCanceledOperation(w.ctx, w.fromStmt)
+			return
 		}
 	}
 }

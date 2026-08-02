@@ -276,6 +276,48 @@ func TestListenerNetworkLossMarkerFollowsRetainedNotifications(t *testing.T) {
 	}
 }
 
+func TestListenerNetworkDirectDeliveryPreservesFallbackOrder(t *testing.T) {
+	listener := &Listener{
+		Notify:            make(chan *Notification, 1),
+		done:              make(chan struct{}),
+		notificationQueue: make(chan *Notification, listenerChannelCapacity),
+	}
+	dispatcherDone := make(chan struct{})
+	go func() {
+		listener.notificationDispatcher()
+		close(dispatcherDone)
+	}()
+	t.Cleanup(func() {
+		close(listener.done)
+		listenerNetworkAwaitCleanup(t, dispatcherDone, "notification dispatcher did not stop")
+	})
+
+	notifications := []*Notification{
+		{Extra: "direct"},
+		{Extra: "queued-first"},
+		{Extra: "queued-second"},
+	}
+	for _, notification := range notifications {
+		if !listener.sendNotification(notification) {
+			t.Fatal("notification dispatcher stopped unexpectedly")
+		}
+	}
+	if got := len(listener.Notify); got != 1 {
+		t.Fatalf("direct delivery buffered %d notifications; want 1", got)
+	}
+
+	for i, want := range notifications {
+		select {
+		case got := <-listener.Notify:
+			if got != want {
+				t.Fatalf("notification %d = %#v; want %#v", i, got, want)
+			}
+		case <-time.After(listenerNetworkTestTimeout):
+			t.Fatalf("timed out waiting for notification %d", i)
+		}
+	}
+}
+
 func TestListenerNetworkCallbackCanListenDuringReconnect(t *testing.T) {
 	client, server := net.Pipe()
 	releaseFirst := make(chan struct{})

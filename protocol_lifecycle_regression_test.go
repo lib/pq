@@ -375,7 +375,7 @@ func TestProtocolRegressionPreparedCancelFinishSynchronizes(t *testing.T) {
 
 	returned := make(chan struct{})
 	go func() {
-		finish()
+		finish.finish()
 		close(returned)
 	}()
 

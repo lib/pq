@@ -39,7 +39,7 @@ func (st *stmt) Close() error {
 		return st.closeError(err)
 	}
 
-	if err := st.cn.closePreparedStatements([]string{st.name}); err != nil {
+	if err := st.cn.closePreparedStatement(st.name); err != nil {
 		return st.closeError(err)
 	}
 	if err := st.cn.c.SetDeadline(time.Time{}); err != nil {
@@ -50,28 +50,51 @@ func (st *stmt) Close() error {
 	return nil
 }
 
+func (cn *conn) closePreparedStatement(name string) error {
+	w := cn.writeBuf(proto.Close)
+	w.byte(proto.Sync) // 'S' selects a prepared statement, not a portal.
+	w.string(name)
+	w.next(proto.Sync)
+	return cn.closePreparedStatementExchange(w, 1)
+}
+
 // closePreparedStatements sends one extended-protocol synchronization for a
-// batch of named statements. It deliberately uses private buffers because it
-// can run from COPY's response goroutine while conn.scratch still belongs to a
+// batch of named statements. It deliberately uses a private buffer because it
+// runs from COPY's response goroutine while conn.scratch still belongs to a
 // backend read.
 func (cn *conn) closePreparedStatements(names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	capacity := 5 // Final Sync frame.
 	for _, name := range names {
-		w := &writeBuf{
-			buf: []byte{byte(proto.Close), 0, 0, 0, 0},
-			pos: 1,
-		}
+		capacity += 7 + len(name) // Close header, selector, name, and terminator.
+	}
+	w := &writeBuf{
+		buf: make([]byte, 5, capacity),
+		pos: 1,
+	}
+	w.buf[0] = byte(proto.Close)
+	for i, name := range names {
 		w.byte(proto.Sync) // 'S' selects a prepared statement, not a portal.
 		w.string(name)
-		if err := cn.send(w); err != nil {
-			return err
+		if i+1 < len(names) {
+			w.next(proto.Close)
+		} else {
+			w.next(proto.Sync)
 		}
 	}
-	if err := cn.sendSimpleMessage(proto.Sync); err != nil {
+	return cn.closePreparedStatementExchange(w, len(names))
+}
+
+func (cn *conn) closePreparedStatementExchange(w *writeBuf, count int) error {
+	if err := cn.send(w); err != nil {
 		return err
 	}
 
-	for range names {
-		t, _, err := cn.recv1()
+	var r readBuf
+	for range count {
+		t, err := cn.recv1Buf(&r)
 		if err != nil {
 			return err
 		}
@@ -80,14 +103,14 @@ func (cn *conn) closePreparedStatements(names []string) error {
 		}
 	}
 
-	t, r, err := cn.recv1()
+	t, err := cn.recv1Buf(&r)
 	if err != nil {
 		return err
 	}
 	if t != proto.ReadyForQuery {
 		return fmt.Errorf("pq: expected ready for query, but got: %q", t)
 	}
-	cn.processReadyForQuery(r)
+	cn.processReadyForQuery(&r)
 	return nil
 }
 
@@ -99,8 +122,11 @@ func (st *stmt) closeError(err error) error {
 
 // Implement [driver.StmtQueryContext].
 func (st *stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	cancelable := ctx.Done() != nil
+	if cancelable {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 	if err := st.cn.err.get(); err != nil {
 		return nil, err
@@ -108,11 +134,14 @@ func (st *stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (dri
 	if err := st.cn.checkCopyInactive(); err != nil {
 		return nil, err
 	}
-	finish := st.cn.watchCancel(ctx, true)
+	var finish *cancelWatcher
+	if cancelable {
+		finish = st.cn.watchCancel(ctx, true)
+	}
 
 	err := st.exec(args)
 	if err != nil {
-		finish()
+		finish.finish()
 		return nil, st.cn.handleError(err)
 	}
 
@@ -125,8 +154,11 @@ func (st *stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (dri
 
 // Implement [driver.StmtExecContext].
 func (st *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	cancelable := ctx.Done() != nil
+	if cancelable {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 	if err := st.cn.err.get(); err != nil {
 		return nil, err
@@ -134,7 +166,9 @@ func (st *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driv
 	if err := st.cn.checkCopyInactive(); err != nil {
 		return nil, err
 	}
-	defer st.cn.watchCancel(ctx, true)()
+	if cancelable {
+		defer st.cn.watchCancel(ctx, true).finish()
+	}
 
 	err := st.exec(args)
 	if err != nil {

@@ -29,7 +29,7 @@ type (
 	}
 	rows struct {
 		cn     *conn
-		finish func()
+		finish *cancelWatcher
 		rowsHeader
 		done   bool
 		rb     readBuf
@@ -42,7 +42,7 @@ type (
 
 func (rs *rows) Close() error {
 	if rs.finish != nil {
-		defer rs.finish()
+		defer rs.finish.finish()
 	}
 	// no need to look at cn.bad as Next() will
 	for {

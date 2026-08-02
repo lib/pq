@@ -226,8 +226,15 @@ func (r RequireAuths) allows(method RequireAuth) bool {
 	if len(r) == 0 {
 		return true
 	}
-	if strings.HasPrefix(string(r[0]), "!") {
-		return !slices.Contains(r, RequireAuth("!"+string(method)))
+	if len(r[0]) > 0 && r[0][0] == '!' {
+		methodName := string(method)
+		for _, denied := range r {
+			name := string(denied)
+			if len(name) > 1 && name[1:] == methodName {
+				return false
+			}
+		}
+		return true
 	}
 	return slices.Contains(r, method)
 }
@@ -249,7 +256,10 @@ func NewConnector(dsn string) (*Connector, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewConnectorConfig(cfg)
+	// NewConfig returns a fully validated Config whose mutable members are
+	// owned by this call, so no defensive clone or second validation pass is
+	// needed here. NewConnectorConfig retains both for caller-supplied Configs.
+	return &Connector{cfg: cfg, dialer: defaultDialer{}}, nil
 }
 
 // NewConnectorConfig returns a connector for the pq driver in a fixed
@@ -257,7 +267,7 @@ func NewConnector(dsn string) (*Connector, error) {
 // create any number of equivalent Conn's. The returned connector is intended to
 // be used with [sql.OpenDB].
 func NewConnectorConfig(cfg Config) (*Connector, error) {
-	cfg = cfg.Clone()
+	cfg = cfg.cloneForConnector()
 	if cfg.SSLRootCert == "system" && cfg.SSLMode == "" {
 		cfg.SSLMode = SSLModeVerifyFull
 	}
@@ -610,6 +620,17 @@ func (cfg Config) Clone() Config {
 	return c
 }
 
+// cloneForConnector isolates every reference field exposed to callers. Parser
+// metadata is private, immutable after construction, and may be shared safely;
+// avoiding those unnecessary copies keeps connector construction lightweight.
+func (cfg Config) cloneForConnector() Config {
+	c := cfg
+	c.Runtime = maps.Clone(cfg.Runtime)
+	c.Multi = slices.Clone(cfg.Multi)
+	c.RequireAuth = slices.Clone(cfg.RequireAuth)
+	return c
+}
+
 // hosts returns a slice of copies of this config, one for each host.
 func (cfg Config) hosts() []Config {
 	cfgs := make([]Config, 1, len(cfg.Multi)+1)
@@ -640,20 +661,30 @@ func newConfig(dsn string, env []string) (Config, error) {
 		return Config{}, err
 	}
 
-	// The DSN selects the service, but service values have lower precedence
-	// than all other explicit DSN values. Probe a clone to discover that
-	// selector before applying the service and then the DSN exactly once.
-	probe := cfg.Clone()
-	if err := probe.fromDSN(dsn); err != nil {
+	options, err := parseDSN(dsn)
+	if err != nil {
 		return Config{}, err
 	}
-	if probe.isset("service") {
-		cfg.Service = probe.Service
+
+	// A DSN-selected service has lower precedence than the remaining DSN
+	// options. Most configurations do not select a service, so avoid parsing
+	// and applying every option twice in that common case. When a service is
+	// selected, retain the validation-before-file-access ordering by probing a
+	// clone with the already-tokenized options.
+	_, dsnSelectsService := options["service"]
+	if cfg.Service != "" || dsnSelectsService {
+		probe := cfg.Clone()
+		if err := probe.setFromTag(maps.Clone(options), "postgres", false); err != nil {
+			return Config{}, err
+		}
+		if probe.isset("service") {
+			cfg.Service = probe.Service
+		}
 	}
 	if err := cfg.fromService(); err != nil {
 		return Config{}, err
 	}
-	if err := cfg.fromDSN(dsn); err != nil {
+	if err := cfg.setFromTag(options, "postgres", false); err != nil {
 		return Config{}, err
 	}
 
@@ -724,7 +755,7 @@ func newConfig(dsn string, env []string) (Config, error) {
 	return cfg, nil
 }
 
-func (cfg Config) validate() error {
+func (cfg *Config) validate() error {
 	if cfg.SSLMode != "" && !slices.Contains(sslModes, cfg.SSLMode) &&
 		!(strings.HasPrefix(string(cfg.SSLMode), "pqgo-") && hasTLSConfig(string(cfg.SSLMode)[5:])) {
 		return fmt.Errorf(`pq: wrong value for "sslmode": %q is not supported; supported values are %s`,
@@ -742,23 +773,21 @@ func (cfg Config) validate() error {
 		return fmt.Errorf(`pq: wrong value for "load_balance_hosts": %q is not supported; supported values are %s`,
 			cfg.LoadBalanceHosts, pqutil.Join(loadBalanceHosts))
 	}
-	for name, version := range map[string]ProtocolVersion{
-		"min_protocol_version": cfg.MinProtocolVersion,
-		"max_protocol_version": cfg.MaxProtocolVersion,
-	} {
-		if version != "" && !slices.Contains(protocolVersions, version) {
-			return fmt.Errorf(`pq: wrong value for %q: %q is not supported; supported values are %s`,
-				name, version, pqutil.Join(protocolVersions))
-		}
+	if version := cfg.MinProtocolVersion; version != "" && !slices.Contains(protocolVersions, version) {
+		return fmt.Errorf(`pq: wrong value for %q: %q is not supported; supported values are %s`,
+			"min_protocol_version", version, pqutil.Join(protocolVersions))
 	}
-	for name, version := range map[string]SSLProtocolVersion{
-		"ssl_min_protocol_version": cfg.SSLMinProtocolVersion,
-		"ssl_max_protocol_version": cfg.SSLMaxProtocolVersion,
-	} {
-		if version != "" && !slices.Contains(sslProtocolVersions, version) {
-			return fmt.Errorf(`pq: wrong value for %q: %q is not supported; supported values are %s`,
-				name, version, pqutil.Join(sslProtocolVersions))
-		}
+	if version := cfg.MaxProtocolVersion; version != "" && !slices.Contains(protocolVersions, version) {
+		return fmt.Errorf(`pq: wrong value for %q: %q is not supported; supported values are %s`,
+			"max_protocol_version", version, pqutil.Join(protocolVersions))
+	}
+	if version := cfg.SSLMinProtocolVersion; version != "" && !slices.Contains(sslProtocolVersions, version) {
+		return fmt.Errorf(`pq: wrong value for %q: %q is not supported; supported values are %s`,
+			"ssl_min_protocol_version", version, pqutil.Join(sslProtocolVersions))
+	}
+	if version := cfg.SSLMaxProtocolVersion; version != "" && !slices.Contains(sslProtocolVersions, version) {
+		return fmt.Errorf(`pq: wrong value for %q: %q is not supported; supported values are %s`,
+			"ssl_max_protocol_version", version, pqutil.Join(sslProtocolVersions))
 	}
 	if cfg.MinProtocolVersion != "" && cfg.MaxProtocolVersion != "" && cfg.MinProtocolVersion > cfg.MaxProtocolVersion {
 		return fmt.Errorf("pq: min_protocol_version %q cannot be greater than max_protocol_version %q",
@@ -826,9 +855,12 @@ func (cfg Config) network() (string, string) {
 }
 
 func (cfg *Config) fromEnv(env []string) error {
-	e := make(map[string]string)
-	for _, v := range env {
-		k, v, ok := strings.Cut(v, "=")
+	var e map[string]string
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, "PG") {
+			continue
+		}
+		k, v, ok := strings.Cut(entry, "=")
 		if !ok {
 			continue
 		}
@@ -843,7 +875,13 @@ func (cfg *Config) fromEnv(env []string) error {
 				return fmt.Errorf("pq: environment variable $%s is not supported as Kerberos is not enabled", k)
 			}
 		}
+		if e == nil {
+			e = make(map[string]string)
+		}
 		e[k] = v
+	}
+	if len(e) == 0 {
+		return nil
 	}
 	return cfg.setFromTag(e, "env", false)
 }
@@ -852,11 +890,19 @@ func (cfg *Config) fromEnv(env []string) error {
 //
 // The parsing code is based on conninfo_parse from libpq's fe-connect.c
 func (cfg *Config) fromDSN(dsn string) error {
+	options, err := parseDSN(dsn)
+	if err != nil {
+		return err
+	}
+	return cfg.setFromTag(options, "postgres", false)
+}
+
+func parseDSN(dsn string) (map[string]string, error) {
 	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		var err error
 		dsn, err = convertURL(dsn)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -907,7 +953,7 @@ func (cfg *Config) fromDSN(dsn string) error {
 
 		// The current character should be =
 		if r != '=' || !ok {
-			return fmt.Errorf(`missing "=" after %q in connection info string`, string(keyRunes))
+			return nil, fmt.Errorf(`missing "=" after %q in connection info string`, string(keyRunes))
 		}
 
 		// Skip any whitespace after the =
@@ -921,7 +967,7 @@ func (cfg *Config) fromDSN(dsn string) error {
 			for !unicode.IsSpace(r) {
 				if r == '\\' {
 					if r, ok = next(); !ok {
-						return fmt.Errorf(`missing character after backslash`)
+						return nil, fmt.Errorf(`missing character after backslash`)
 					}
 				}
 				valRunes = append(valRunes, r)
@@ -934,7 +980,7 @@ func (cfg *Config) fromDSN(dsn string) error {
 		quote:
 			for {
 				if r, ok = next(); !ok {
-					return fmt.Errorf(`unterminated quoted string literal in connection string`)
+					return nil, fmt.Errorf(`unterminated quoted string literal in connection string`)
 				}
 				switch r {
 				case '\'':
@@ -951,7 +997,7 @@ func (cfg *Config) fromDSN(dsn string) error {
 		opt[string(keyRunes)] = string(valRunes)
 	}
 
-	return cfg.setFromTag(opt, "postgres", false)
+	return opt, nil
 }
 
 func (cfg *Config) fromService() error {
@@ -1317,16 +1363,22 @@ func (cfg Config) debugString() string {
 
 // Recognize all sorts of silly things as "UTF-8", like Postgres does
 func isUTF8(name string) bool {
-	s := strings.Map(func(c rune) rune {
+	var normalized [7]byte
+	n := 0
+	for _, c := range name {
 		if 'A' <= c && c <= 'Z' {
-			return c + ('a' - 'A')
+			c += 'a' - 'A'
 		}
 		if 'a' <= c && c <= 'z' || '0' <= c && c <= '9' {
-			return c
+			if n == len(normalized) {
+				return false
+			}
+			normalized[n] = byte(c)
+			n++
 		}
-		return -1 // discard
-	}, name)
-	return s == "utf8" || s == "unicode"
+	}
+	return n == 4 && normalized[0] == 'u' && normalized[1] == 't' && normalized[2] == 'f' && normalized[3] == '8' ||
+		n == 7 && normalized == [7]byte{'u', 'n', 'i', 'c', 'o', 'd', 'e'}
 }
 
 func convertURL(url string) (string, error) {

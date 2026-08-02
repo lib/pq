@@ -391,18 +391,25 @@ func (ci *copyin) Exec(v []driver.Value) (driver.Result, error) {
 // ExecContext inserts values into the COPY stream while allowing a blocked
 // network flush to be interrupted by ctx.
 func (ci *copyin) ExecContext(ctx context.Context, v []driver.NamedValue) (driver.Result, error) {
+	if ctx.Done() == nil {
+		values := make([]driver.Value, len(v))
+		for i := range v {
+			values[i] = v[i].Value
+		}
+		return ci.exec(values)
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	finish := ci.cn.watchCancel(ctx, false)
-	defer finish()
+	defer finish.finish()
 
 	values := make([]driver.Value, len(v))
 	for i := range v {
 		values[i] = v[i].Value
 	}
 	result, err := ci.exec(values)
-	finish()
+	finish.finish()
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
 	}
@@ -469,12 +476,15 @@ func (ci *copyin) exec(v []driver.Value) (driver.Result, error) {
 // errors from pending data, since Stmt.Close() doesn't return errors
 // to the user.
 func (ci *copyin) CopyData(ctx context.Context, line string) (driver.Result, error) {
+	if ctx.Done() == nil {
+		return ci.copyData(line)
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	finish := ci.cn.watchCancel(ctx, false)
 	result, err := ci.copyData(line)
-	finish()
+	finish.finish()
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
 	}

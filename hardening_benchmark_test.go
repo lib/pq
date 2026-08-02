@@ -314,7 +314,7 @@ func BenchmarkCancellationWatcher(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		cn.watchCancel(ctx, false)()
+		benchmarkFinishCancellationWatcher(cn.watchCancel(ctx, false))
 		if i&255 == 255 || i == b.N-1 {
 			b.StopTimer()
 			benchmarkDrainWatcherGoroutines(b, baselineGoroutines)
@@ -322,6 +322,22 @@ func BenchmarkCancellationWatcher(b *testing.B) {
 				b.StartTimer()
 			}
 		}
+	}
+}
+
+type benchmarkCancellationFinisher interface{ finish() }
+
+// benchmarkFinishCancellationWatcher keeps this benchmark source compatible
+// with both upstream's function-return watcher and the optimized joined
+// watcher used on this branch.
+func benchmarkFinishCancellationWatcher(watcher any) {
+	switch watcher := watcher.(type) {
+	case func():
+		watcher()
+	case benchmarkCancellationFinisher:
+		watcher.finish()
+	default:
+		panic("unsupported cancellation watcher")
 	}
 }
 

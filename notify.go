@@ -653,6 +653,7 @@ type Listener struct {
 	channels                map[string]struct{}
 	notificationQueue       chan *Notification
 	notificationLock        sync.Mutex
+	notificationOutstanding int
 	notificationLost        bool
 	notificationLossBarrier *listenerEventBarrier
 	notificationBarriers    map[*Notification]*listenerEventBarrier
@@ -1519,6 +1520,18 @@ func (l *Listener) queueNotification(notification *Notification, barrier *listen
 		return true
 	}
 
+	// With no queued, in-flight, or pending loss notification, deliver directly
+	// to a ready consumer. The non-blocking fallback retains the finite internal
+	// queue which prevents a slow public consumer from stalling reconnects.
+	if barrier == nil && l.notificationOutstanding == 0 {
+		select {
+		case l.Notify <- notification:
+			l.notificationLock.Unlock()
+			return true
+		default:
+		}
+	}
+
 	if barrier != nil {
 		if l.notificationBarriers == nil {
 			l.notificationBarriers = make(map[*Notification]*listenerEventBarrier)
@@ -1527,6 +1540,7 @@ func (l *Listener) queueNotification(notification *Notification, barrier *listen
 	}
 	select {
 	case l.notificationQueue <- notification:
+		l.notificationOutstanding++
 		l.notificationLock.Unlock()
 		return true
 	default:
@@ -1557,9 +1571,18 @@ func (l *Listener) takeNotificationLoss() (bool, *listenerEventBarrier) {
 	if lost {
 		l.notificationLost = false
 		l.notificationLossBarrier = nil
+		// Keep the claimed marker ordered ahead of new direct deliveries until
+		// it has reached the public channel.
+		l.notificationOutstanding++
 	}
 	l.notificationLock.Unlock()
 	return lost, barrier
+}
+
+func (l *Listener) finishNotification() {
+	l.notificationLock.Lock()
+	l.notificationOutstanding--
+	l.notificationLock.Unlock()
 }
 
 func (l *Listener) waitNotificationBarrier(barrier *listenerEventBarrier) bool {
@@ -1594,11 +1617,13 @@ func (l *Listener) releaseNotificationQueue() {
 	l.notificationLost = false
 	l.notificationLossBarrier = nil
 	l.notificationBarriers = nil
+	l.notificationOutstanding = 0
 	for {
 		select {
 		case <-l.notificationQueue:
 			continue
 		default:
+			close(l.Notify)
 			l.notificationLock.Unlock()
 			return
 		}
@@ -1606,10 +1631,7 @@ func (l *Listener) releaseNotificationQueue() {
 }
 
 func (l *Listener) notificationDispatcher() {
-	defer func() {
-		l.releaseNotificationQueue()
-		close(l.Notify)
-	}()
+	defer l.releaseNotificationQueue()
 	for {
 		// Drain the retained prefix before reporting a gap. A non-blocking
 		// receive is needed here so loss markers cannot overtake queued data.
@@ -1618,6 +1640,7 @@ func (l *Listener) notificationDispatcher() {
 			if !l.deliverNotification(notification) {
 				return
 			}
+			l.finishNotification()
 			continue
 		default:
 		}
@@ -1629,6 +1652,7 @@ func (l *Listener) notificationDispatcher() {
 			if !l.deliverNotification(nil) {
 				return
 			}
+			l.finishNotification()
 			continue
 		}
 
@@ -1637,6 +1661,7 @@ func (l *Listener) notificationDispatcher() {
 			if !l.deliverNotification(notification) {
 				return
 			}
+			l.finishNotification()
 		case <-l.done:
 			return
 		}

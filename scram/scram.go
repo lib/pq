@@ -79,6 +79,20 @@ var postgresSASLprep = func() stringprep.Profile {
 }()
 
 func preparePassword(password string) string {
+	// SASLprep cannot change printable ASCII. Its only prohibited ASCII
+	// characters are controls, for which PostgreSQL deliberately falls back to
+	// the original bytes. Avoid the substantially more expensive generic
+	// stringprep tables and normalization for this overwhelmingly common case.
+	ascii := true
+	for i := 0; i < len(password); i++ {
+		if password[i] >= utf8.RuneSelf {
+			ascii = false
+			break
+		}
+	}
+	if ascii {
+		return password
+	}
 	if !utf8.ValidString(password) {
 		return password
 	}
