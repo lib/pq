@@ -217,6 +217,11 @@ type conn struct {
 	scratch      [512]byte
 	txnStatus    transactionStatus
 	txnFinish    func()
+	copyState    struct {
+		sync.Mutex
+		active             *copyin
+		deferredStmtCloses []string
+	}
 
 	// Save connection arguments to use during CancelRequest.
 	dialer          Dialer
@@ -530,44 +535,79 @@ func (cn *conn) checkTSA(tsa TargetSessionAttrs) error {
 func dial(ctx context.Context, d Dialer, cfg Config) (net.Conn, error) {
 	network, address := cfg.network()
 
-	// Zero or not specified means wait indefinitely.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// connect_timeout and the caller's context both bound the entire connection
+	// establishment procedure. Use one absolute deadline for dialing and for
+	// the initial handshake so time spent dialing is not added back afterward.
+	deadline, hasDeadline := ctx.Deadline()
 	if cfg.ConnectTimeout > 0 {
-		// connect_timeout should apply to the entire connection establishment
-		// procedure, so we both use a timeout for the TCP connection
-		// establishment and set a deadline for doing the initial handshake. The
-		// deadline is then reset after startup() is done.
-		var (
-			deadline = time.Now().Add(cfg.ConnectTimeout)
-			conn     net.Conn
-			err      error
-		)
-		dialCtx, cancel := context.WithTimeout(ctx, cfg.ConnectTimeout)
-		defer cancel()
+		connectDeadline := time.Now().Add(cfg.ConnectTimeout)
+		if !hasDeadline || connectDeadline.Before(deadline) {
+			deadline, hasDeadline = connectDeadline, true
+		}
+	}
+
+	if !hasDeadline {
 		if dctx, ok := d.(DialerContext); ok {
-			conn, err = dctx.DialContext(dialCtx, network, address)
-		} else {
-			conn, err = dialLegacy(dialCtx, func() (net.Conn, error) {
-				return d.DialTimeout(network, address, cfg.ConnectTimeout)
-			})
+			conn, err := dctx.DialContext(ctx, network, address)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				if conn != nil {
+					_ = conn.Close()
+				}
+				return nil, ctxErr
+			}
+			return checkedDialResult(conn, err)
 		}
-		conn, err = checkedDialResult(conn, err)
-		if err != nil {
-			return nil, err
-		}
-		err = conn.SetDeadline(deadline)
-		if err != nil {
-			_ = conn.Close()
-			return nil, err
-		}
-		return conn, nil
+		// A cancellation-only context cannot be translated into a duration for
+		// the legacy API. Preserve Dial here; dialLegacy still lets the caller
+		// return promptly when the context is canceled.
+		return dialLegacy(ctx, func() (net.Conn, error) {
+			return d.Dial(network, address)
+		})
 	}
+
+	dialCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	var (
+		conn net.Conn
+		err  error
+	)
 	if dctx, ok := d.(DialerContext); ok {
-		conn, err := dctx.DialContext(ctx, network, address)
-		return checkedDialResult(conn, err)
+		conn, err = dctx.DialContext(dialCtx, network, address)
+	} else {
+		conn, err = dialLegacy(dialCtx, func() (net.Conn, error) {
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				if ctxErr := dialCtx.Err(); ctxErr != nil {
+					return nil, ctxErr
+				}
+				return nil, context.DeadlineExceeded
+			}
+			return d.DialTimeout(network, address, remaining)
+		})
 	}
-	return dialLegacy(ctx, func() (net.Conn, error) {
-		return d.Dial(network, address)
-	})
+	if ctxErr := dialCtx.Err(); ctxErr != nil {
+		if conn != nil {
+			_ = conn.Close()
+		}
+		return nil, ctxErr
+	}
+	conn, err = checkedDialResult(conn, err)
+	if err != nil {
+		return nil, err
+	}
+	if err = conn.SetDeadline(deadline); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if ctxErr := dialCtx.Err(); ctxErr != nil {
+		_ = conn.Close()
+		return nil, ctxErr
+	}
+	return conn, nil
 }
 
 type legacyDialResult struct {
@@ -636,6 +676,77 @@ func (cn *conn) checkIsInTransaction(intxn bool) error {
 	return nil
 }
 
+// activateCopy records the response goroutine which currently owns backend
+// reads. database/sql serializes driver calls, but it cannot see that COPY uses
+// an internal reader after Prepare and Exec return.
+func (cn *conn) activateCopy(ci *copyin) error {
+	cn.copyState.Lock()
+	defer cn.copyState.Unlock()
+	if cn.copyState.active != nil && cn.copyState.active != ci {
+		return errCopyInProgress
+	}
+	cn.copyState.active = ci
+	return nil
+}
+
+func (cn *conn) clearActiveCopy(ci *copyin) {
+	cn.copyState.Lock()
+	if cn.copyState.active == ci {
+		cn.copyState.active = nil
+		cn.copyState.deferredStmtCloses = nil
+	}
+	cn.copyState.Unlock()
+}
+
+func (cn *conn) deferStmtClose(name string) bool {
+	cn.copyState.Lock()
+	defer cn.copyState.Unlock()
+	if cn.copyState.active == nil {
+		return false
+	}
+	cn.copyState.deferredStmtCloses = append(cn.copyState.deferredStmtCloses, name)
+	return true
+}
+
+// nextDeferredStmtCloseBatch detaches pending statement closes while retaining
+// COPY ownership. Once the queue is empty, it restores the connection deadline
+// and releases ownership under the same lock. Consequently a new operation
+// cannot install a deadline which the COPY response goroutine then erases, and
+// a statement close cannot be stranded in an empty-queue/release gap.
+func (cn *conn) nextDeferredStmtCloseBatch(ci *copyin, resetDeadline bool) (names []string, finished bool, err error) {
+	cn.copyState.Lock()
+	defer cn.copyState.Unlock()
+	if cn.copyState.active != ci {
+		return nil, true, nil
+	}
+	if len(cn.copyState.deferredStmtCloses) == 0 {
+		if resetDeadline {
+			if err := cn.c.SetDeadline(time.Time{}); err != nil {
+				return nil, false, err
+			}
+		}
+		cn.copyState.active = nil
+		return nil, true, nil
+	}
+	names = cn.copyState.deferredStmtCloses
+	cn.copyState.deferredStmtCloses = nil
+	return names, false, nil
+}
+
+func (cn *conn) activeCopy() *copyin {
+	cn.copyState.Lock()
+	ci := cn.copyState.active
+	cn.copyState.Unlock()
+	return ci
+}
+
+func (cn *conn) checkCopyInactive() error {
+	if cn.activeCopy() != nil {
+		return errCopyInProgress
+	}
+	return nil
+}
+
 // Implement [driver.ConnBeginTx].
 func (cn *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	var mode string
@@ -660,6 +771,9 @@ func (cn *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, 
 	}
 
 	if err := cn.err.get(); err != nil {
+		return nil, err
+	}
+	if err := cn.checkCopyInactive(); err != nil {
 		return nil, err
 	}
 	if err := cn.checkIsInTransaction(false); err != nil {
@@ -699,6 +813,17 @@ func (cn *conn) Commit() error {
 	if err := cn.err.get(); err != nil {
 		return err
 	}
+	if ci := cn.activeCopy(); ci != nil {
+		if err := ci.abortForTransaction(); err != nil {
+			return cn.handleError(err)
+		}
+		if err := cn.rollback(); err != nil {
+			return cn.handleError(err)
+		}
+		return ErrInFailedTransaction
+	}
+	// activeCopy synchronizes with the response owner's release, so txnStatus
+	// can only be inspected after any COPY ReadyForQuery has been consumed.
 	if err := cn.checkIsInTransaction(true); err != nil {
 		return err
 	}
@@ -738,6 +863,11 @@ func (cn *conn) Rollback() error {
 	}()
 	if err := cn.err.get(); err != nil {
 		return err
+	}
+	if ci := cn.activeCopy(); ci != nil {
+		if err := ci.abortForTransaction(); err != nil {
+			return cn.handleError(err)
+		}
 	}
 
 	err := cn.rollback()
@@ -999,10 +1129,13 @@ func (cn *conn) PrepareContext(ctx context.Context, q string) (driver.Stmt, erro
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	defer cn.watchCancel(ctx, false)()
 	if err := cn.err.get(); err != nil {
 		return nil, err
 	}
+	if err := cn.checkCopyInactive(); err != nil {
+		return nil, err
+	}
+	defer cn.watchCancel(ctx, false)()
 
 	if pqsql.StartsWithCopy(q) {
 		s, err := cn.prepareCopyIn(q)
@@ -1018,6 +1151,11 @@ func (cn *conn) PrepareContext(ctx context.Context, q string) (driver.Stmt, erro
 func (cn *conn) Close() error {
 	if cn.c == nil {
 		return nil
+	}
+	if cn.activeCopy() != nil {
+		// The COPY response goroutine owns backend reads. Sending Terminate here
+		// would race it and is unnecessary for a connection being discarded.
+		return cn.c.Close()
 	}
 	if err := cn.c.SetWriteDeadline(cn.closeDeadline()); err != nil {
 		_ = cn.c.Close()
@@ -1093,6 +1231,12 @@ func (cn *conn) QueryContext(ctx context.Context, query string, args []driver.Na
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := cn.err.get(); err != nil {
+		return nil, err
+	}
+	if err := cn.checkCopyInactive(); err != nil {
+		return nil, err
+	}
 	finish := cn.watchCancel(ctx, false)
 	r, err := cn.query(query, args)
 	if err != nil {
@@ -1165,10 +1309,13 @@ func (cn *conn) ExecContext(ctx context.Context, query string, args []driver.Nam
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	defer cn.watchCancel(ctx, false)()
 	if err := cn.err.get(); err != nil {
 		return nil, err
 	}
+	if err := cn.checkCopyInactive(); err != nil {
+		return nil, err
+	}
+	defer cn.watchCancel(ctx, false)()
 
 	// simpleExec is *much* faster than going through prepare/exec.
 	if len(args) == 0 {
@@ -1221,6 +1368,9 @@ func (cn *conn) Ping(ctx context.Context) error {
 		return err
 	}
 	if err := cn.err.get(); err != nil {
+		return err
+	}
+	if err := cn.checkCopyInactive(); err != nil {
 		return err
 	}
 	defer cn.watchCancel(ctx, false)()
@@ -2576,9 +2726,12 @@ func (cn *conn) ResetSession(ctx context.Context) error {
 	// Ensure bad connections are reported: From database/sql/driver:
 	// If a connection is never returned to the connection pool but immediately reused, then
 	// ResetSession is called prior to reuse but IsValid is not called.
-	return cn.err.get()
+	if err := cn.err.get(); err != nil {
+		return err
+	}
+	return cn.checkCopyInactive()
 }
 
 func (cn *conn) IsValid() bool {
-	return cn.err.get() == nil
+	return cn.err.get() == nil && cn.activeCopy() == nil
 }

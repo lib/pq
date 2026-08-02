@@ -107,11 +107,16 @@ Listener uses finite buffers so a consumer which stops receiving cannot prevent
 protocol replies, disconnect detection, or reconnection. If those buffers fill,
 Listener drops notifications and later sends a single nil pointer over Notify to
 report possible loss. Listener also sends nil any time the connection is
-re-established following a connection loss. Applications should therefore treat
-nil as a signal to refresh any state derived from notifications, and should
-continue to receive from Notify promptly. The application can get information
-about the state of the underlying connection by setting an event callback in the
-call to NewListener.
+re-established following a connection loss. When an event callback is set, its
+Reconnected invocation returns before the corresponding nil becomes observable.
+Applications should therefore treat nil as a signal to refresh any state derived
+from notifications, and should continue to receive from Notify promptly.
+
+Event callbacks likewise use a finite backlog so a slow callback cannot stop
+connection maintenance. Under sustained backlog, repeated connection-attempt
+failures and superseded intermediate state transitions can be coalesced or
+dropped. Retained events remain ordered, and closing an established Listener
+preserves them before one terminal Disconnected callback.
 
 A single [Listener] can safely be used from concurrent goroutines, which means
 that there is often no need to create more than one Listener in your

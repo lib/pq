@@ -18,15 +18,17 @@ var (
 	errBinaryCopyNotSupported     = errors.New("pq: only text format supported for COPY")
 	errCopyToNotSupported         = errors.New("pq: COPY TO is not supported")
 	errCopyNotSupportedOutsideTxn = errors.New("pq: COPY is only allowed inside a transaction")
+	errCopyInProgress             = errors.New("pq: COPY is already in progress on this connection")
 )
 
 type copyin struct {
-	cn      *conn
-	buffer  []byte
-	rowData chan []byte
-	done    chan bool
-	closed  bool
-	mu      struct {
+	cn       *conn
+	buffer   []byte
+	rowData  chan []byte
+	done     chan bool
+	closed   bool
+	doneOnce sync.Once
+	mu       struct {
 		sync.Mutex
 		err error
 		driver.Result
@@ -84,6 +86,11 @@ awaitCopyInResponse:
 					resErr = errBinaryCopyNotSupported
 					break awaitCopyInResponse
 				}
+			}
+			if err := cn.activateCopy(ci); err != nil {
+				cn.err.set(driver.ErrBadConn)
+				_ = cn.c.Close()
+				return nil, err
 			}
 			go ci.resploop()
 			return ci, nil
@@ -165,12 +172,20 @@ func (ci *copyin) flush(buf []byte) error {
 }
 
 func (ci *copyin) resploop() {
+	if err := ci.cn.activateCopy(ci); err != nil {
+		ci.setBad(driver.ErrBadConn)
+		ci.setError(err)
+		ci.finishResponse(false)
+		return
+	}
+	synchronized := false
+	defer func() { ci.finishResponse(synchronized) }()
+
 	for {
 		t, r, err := ci.cn.recv1()
 		if err != nil {
 			ci.setBad(driver.ErrBadConn)
 			ci.setError(err)
-			ci.done <- true
 			return
 		}
 		switch t {
@@ -180,13 +195,12 @@ func (ci *copyin) resploop() {
 			if err != nil {
 				ci.setBad(driver.ErrBadConn)
 				ci.setError(err)
-				ci.done <- true
 				return
 			}
 			ci.setResult(res)
 		case proto.ReadyForQuery:
 			ci.cn.processReadyForQuery(r)
-			ci.done <- true
+			synchronized = true
 			return
 		case proto.ErrorResponse:
 			err := parseError(r, "")
@@ -194,8 +208,57 @@ func (ci *copyin) resploop() {
 		default:
 			ci.setBad(driver.ErrBadConn)
 			ci.setError(fmt.Errorf("unknown response during CopyIn: %q", t))
-			ci.done <- true
 			return
+		}
+	}
+}
+
+func (ci *copyin) finishResponse(synchronized bool) {
+	ci.doneOnce.Do(func() {
+		if synchronized {
+			if err := ci.drainDeferredStmtCloses(); err != nil {
+				// Once a deferred Close has been sent, only a complete
+				// CloseComplete/ReadyForQuery exchange can make the protocol
+				// reusable. Discard the connection on any interruption.
+				ci.setBad(driver.ErrBadConn)
+				ci.setError(err)
+				_ = ci.cn.c.Close()
+				ci.cn.clearActiveCopy(ci)
+			}
+		} else {
+			// A protocol failure before ReadyForQuery makes deferred closes
+			// unsafe to send. They are discarded with the bad connection.
+			ci.cn.clearActiveCopy(ci)
+		}
+		if ci.done != nil {
+			close(ci.done)
+		}
+	})
+}
+
+// drainDeferredStmtCloses keeps COPY's backend-read ownership until every
+// queued named statement has been closed. A single absolute deadline bounds
+// all batches, including closes queued while an earlier batch is in flight.
+func (ci *copyin) drainDeferredStmtCloses() error {
+	var deadline time.Time
+	deadlineSet := false
+	for {
+		names, finished, err := ci.cn.nextDeferredStmtCloseBatch(ci, deadlineSet)
+		if err != nil {
+			return err
+		}
+		if finished {
+			return nil
+		}
+		if !deadlineSet {
+			deadline = ci.cn.closeDeadline()
+			if err := ci.cn.c.SetDeadline(deadline); err != nil {
+				return err
+			}
+			deadlineSet = true
+		}
+		if err := ci.cn.closePreparedStatements(names); err != nil {
+			return err
 		}
 	}
 }
@@ -241,6 +304,71 @@ func (ci *copyin) getResult() driver.Result {
 	return result
 }
 
+func (ci *copyin) waitForResponse(deadline time.Time) error {
+	wait := time.Until(deadline)
+	if wait <= 0 {
+		ci.setBad(driver.ErrBadConn)
+		_ = ci.cn.c.Close()
+		return context.DeadlineExceeded
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ci.done:
+		return nil
+	case <-timer.C:
+		ci.setBad(driver.ErrBadConn)
+		_ = ci.cn.c.Close()
+		return context.DeadlineExceeded
+	}
+}
+
+func (ci *copyin) sendCopyFail(reason string) error {
+	// Do not use conn.writeBuf: the response goroutine owns conn.scratch.
+	b := &writeBuf{
+		buf: []byte{byte(proto.CopyFail), 0, 0, 0, 0},
+		pos: 1,
+	}
+	b.string(reason)
+	return ci.cn.send(b)
+}
+
+// abortForTransaction ends an unfinished COPY without allowing the caller to
+// read until resploop has consumed ReadyForQuery. The connection deadline and
+// explicit timer bound both network I/O and the completion wait.
+func (ci *copyin) abortForTransaction() error {
+	ci.closed = true
+	if err := ci.getBad(); err != nil {
+		return err
+	}
+
+	deadline := ci.cn.closeDeadline()
+	if err := ci.cn.c.SetDeadline(deadline); err != nil {
+		return ci.closeError(err)
+	}
+
+	ci.mu.Lock()
+	var sendErr error
+	if ci.mu.err == nil {
+		sendErr = ci.sendCopyFail("pq: COPY aborted by transaction end")
+	}
+	ci.mu.Unlock()
+	if sendErr != nil {
+		return ci.closeError(sendErr)
+	}
+	if err := ci.waitForResponse(deadline); err != nil {
+		return ci.closeError(err)
+	}
+	if err := ci.getBad(); err != nil {
+		_ = ci.cn.c.Close()
+		return err
+	}
+	if err := ci.cn.c.SetDeadline(time.Time{}); err != nil {
+		return ci.closeError(err)
+	}
+	return nil
+}
+
 func (ci *copyin) NumInput() int {
 	return -1
 }
@@ -266,7 +394,7 @@ func (ci *copyin) ExecContext(ctx context.Context, v []driver.NamedValue) (drive
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	finish := ci.cn.watchCancel(ctx, true)
+	finish := ci.cn.watchCancel(ctx, false)
 	defer finish()
 
 	values := make([]driver.Value, len(v))
@@ -288,15 +416,21 @@ func (ci *copyin) exec(v []driver.Value) (driver.Result, error) {
 	if err := ci.getBad(); err != nil {
 		return nil, err
 	}
-	if err := ci.err(); err != nil {
-		return nil, err
-	}
-
 	if len(v) == 0 {
 		if err := ci.Close(); err != nil {
 			return driver.RowsAffected(0), err
 		}
 		return ci.getResult(), nil
+	}
+
+	// Serialize the asynchronous error check with buffering and any CopyData
+	// write. Otherwise resploop can publish an ErrorResponse, consume
+	// ReadyForQuery, and begin deferred statement cleanup after this check but
+	// before a large row is flushed.
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	if ci.mu.err != nil {
+		return nil, ci.mu.err
 	}
 
 	var (
@@ -338,17 +472,29 @@ func (ci *copyin) CopyData(ctx context.Context, line string) (driver.Result, err
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	finish := ci.cn.watchCancel(ctx, false)
+	result, err := ci.copyData(line)
+	finish()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	return result, err
+}
+
+func (ci *copyin) copyData(line string) (driver.Result, error) {
 	if ci.closed {
 		return nil, errCopyInClosed
 	}
-	defer ci.cn.watchCancel(ctx, false)()
 	if err := ci.getBad(); err != nil {
 		return nil, err
 	}
-	if err := ci.err(); err != nil {
-		return nil, err
+	// Keep asynchronous error publication ordered with buffer mutation and a
+	// possible CopyData write; see exec.
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	if ci.mu.err != nil {
+		return nil, ci.mu.err
 	}
-
 	ci.buffer = append(ci.buffer, []byte(line)...)
 	ci.buffer = append(ci.buffer, '\n')
 
@@ -374,23 +520,34 @@ func (ci *copyin) Close() error {
 	if err := ci.getBad(); err != nil {
 		return err
 	}
-	if err := ci.cn.c.SetDeadline(ci.cn.closeDeadline()); err != nil {
+	deadline := ci.cn.closeDeadline()
+	if err := ci.cn.c.SetDeadline(deadline); err != nil {
 		return ci.closeError(err)
 	}
 
-	if len(ci.buffer) > 0 {
-		err := ci.flush(ci.buffer)
-		if err != nil {
-			return ci.closeError(err)
+	// Serialize the decision to finish COPY with publication of an asynchronous
+	// ErrorResponse. Once resploop has published an error, the backend is already
+	// ending COPY and sending more CopyData or CopyDone would corrupt the next
+	// protocol exchange.
+	ci.mu.Lock()
+	var sendErr error
+	if ci.mu.err == nil {
+		if len(ci.buffer) > 0 {
+			sendErr = ci.flush(ci.buffer)
+		}
+		if sendErr == nil {
+			// Avoid touching the scratch buffer as resploop could be using it.
+			sendErr = ci.cn.sendSimpleMessage(proto.CopyDoneRequest)
 		}
 	}
-	// Avoid touching the scratch buffer as resploop could be using it.
-	err := ci.cn.sendSimpleMessage(proto.CopyDoneRequest)
-	if err != nil {
-		return ci.closeError(err)
+	ci.mu.Unlock()
+	if sendErr != nil {
+		return ci.closeError(sendErr)
 	}
 
-	<-ci.done
+	if err := ci.waitForResponse(deadline); err != nil {
+		return ci.closeError(err)
+	}
 
 	if bad := ci.getBad(); bad != nil {
 		_ = ci.cn.c.Close()

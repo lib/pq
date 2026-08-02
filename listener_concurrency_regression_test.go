@@ -295,55 +295,6 @@ func TestListenerConcurrencyCloseEmitsOneDisconnectedEvent(t *testing.T) {
 	}
 }
 
-func TestListenerConcurrencyReconnectCallbackCanReceiveMarker(t *testing.T) {
-	callbackResult := make(chan error, 1)
-	dispatcherDone := make(chan struct{})
-	var listener *Listener
-	listener = &Listener{
-		Notify:            make(chan *Notification),
-		done:              make(chan struct{}),
-		eventWake:         make(chan struct{}, 1),
-		notificationQueue: make(chan *Notification, listenerChannelCapacity),
-		eventCallback: func(event ListenerEventType, _ error) {
-			if event != ListenerEventReconnected {
-				return
-			}
-			notification, ok := <-listener.Notify
-			switch {
-			case !ok:
-				callbackResult <- errors.New("Notify closed before reconnect marker")
-			case notification != nil:
-				callbackResult <- errors.New("callback received a non-nil reconnect marker")
-			default:
-				callbackResult <- nil
-			}
-		},
-	}
-
-	go func() {
-		listener.eventDispatcher()
-		close(dispatcherDone)
-	}()
-	go listener.notificationDispatcher()
-	t.Cleanup(func() {
-		close(listener.done)
-		listener.closeEventQueue(false)
-		listenerConcurrencyAwaitSignal(t, dispatcherDone, "the callback dispatcher to stop")
-		listenerConcurrencyAwaitNotifyClose(t, listener.Notify)
-	})
-
-	barrier := listener.emitEvent(ListenerEventReconnected, nil)
-	if barrier == nil {
-		t.Fatal("Reconnected event did not retain a callback barrier")
-	}
-	if !listener.sendReconnectNotification(barrier) {
-		t.Fatal("reconnect marker was not queued")
-	}
-	if err := copyConcurrencyAwaitError(t, callbackResult, "Reconnected callback marker receive"); err != nil {
-		t.Error(err)
-	}
-}
-
 func TestListenerConcurrencyReconnectMarkerFollowsCallback(t *testing.T) {
 	firstClient, firstServer := net.Pipe()
 	secondClient, secondServer := net.Pipe()
@@ -356,6 +307,8 @@ func TestListenerConcurrencyReconnectMarkerFollowsCallback(t *testing.T) {
 	releaseDisconnected := make(chan struct{})
 	disconnectedFinished := make(chan struct{})
 	reconnectedExecuted := make(chan struct{})
+	releaseReconnected := make(chan struct{})
+	reconnectedFinished := make(chan struct{})
 	var connectedOnce, disconnectedOnce, reconnectedOnce sync.Once
 
 	listener := NewDialListener(dialer, listenerConcurrencyDSN, 0, 0, func(event ListenerEventType, _ error) {
@@ -369,16 +322,26 @@ func TestListenerConcurrencyReconnectMarkerFollowsCallback(t *testing.T) {
 				close(disconnectedFinished)
 			})
 		case ListenerEventReconnected:
-			reconnectedOnce.Do(func() { close(reconnectedExecuted) })
+			reconnectedOnce.Do(func() {
+				close(reconnectedExecuted)
+				<-releaseReconnected
+				close(reconnectedFinished)
+			})
 		}
 	})
-	var dropFirstOnce, releaseDisconnectedOnce sync.Once
+	var dropFirstOnce, releaseDisconnectedOnce, releaseReconnectedOnce sync.Once
 	t.Cleanup(func() {
 		dropFirstOnce.Do(func() { close(dropFirst) })
 		releaseDisconnectedOnce.Do(func() { close(releaseDisconnected) })
+		releaseReconnectedOnce.Do(func() { close(releaseReconnected) })
 		select {
 		case <-disconnectedStarted:
 			listenerConcurrencyAwaitSignal(t, disconnectedFinished, "the blocked Disconnected callback to finish")
+		default:
+		}
+		select {
+		case <-reconnectedExecuted:
+			listenerConcurrencyAwaitSignal(t, reconnectedFinished, "the blocked Reconnected callback to finish")
 		default:
 		}
 		_ = listener.Close()
@@ -418,13 +381,31 @@ func TestListenerConcurrencyReconnectMarkerFollowsCallback(t *testing.T) {
 		select {
 		case notification, ok := <-listener.Notify:
 			if !ok {
+				t.Fatal("Listener.Notify closed while the Reconnected callback was running")
+			}
+			if notification != nil {
+				t.Fatalf("got notification %#v; want reconnect loss marker", notification)
+			}
+			earlyMarker = true
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	if earlyMarker {
+		t.Error("reconnect loss marker became observable before the Reconnected callback returned")
+	}
+	releaseReconnectedOnce.Do(func() { close(releaseReconnected) })
+	listenerConcurrencyAwaitSignal(t, reconnectedFinished, "the Reconnected callback to return")
+	if !earlyMarker {
+		select {
+		case notification, ok := <-listener.Notify:
+			if !ok {
 				t.Fatal("Listener.Notify closed before the reconnect loss marker")
 			}
 			if notification != nil {
 				t.Fatalf("got notification %#v; want reconnect loss marker", notification)
 			}
 		case <-time.After(listenerConcurrencyTestTimeout):
-			t.Fatal("timed out waiting for reconnect loss marker after Reconnected callback")
+			t.Fatal("timed out waiting for reconnect loss marker after Reconnected callback returned")
 		}
 	}
 }
@@ -464,7 +445,7 @@ func TestListenerConcurrencyReconnectBarrierCannotBeStarved(t *testing.T) {
 				if disconnectedCallbacks < churnCallbacks {
 					// Keep one ordinary event ahead of the pending reconnect.
 					// Moving that reconnect to the tail on every churn cycle
-					// must not prevent its callback barrier from ever starting.
+					// must not prevent its callback barrier from ever completing.
 					listener.emitEvent(ListenerEventDisconnected, errors.New("intentional churn"))
 					listener.emitEvent(ListenerEventReconnected, nil)
 				}

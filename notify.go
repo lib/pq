@@ -94,14 +94,33 @@ type message struct {
 }
 
 type listenerEvent struct {
-	typ ListenerEventType
-	err error
+	typ     ListenerEventType
+	err     error
+	barrier *listenerEventBarrier
+}
+
+// listenerEventBarrier lets notification delivery wait until its corresponding
+// callback has returned.
+type listenerEventBarrier struct {
+	ready chan struct{}
+	once  sync.Once
+}
+
+func newListenerEventBarrier() *listenerEventBarrier {
+	return &listenerEventBarrier{ready: make(chan struct{})}
+}
+
+func (b *listenerEventBarrier) complete() {
+	if b != nil {
+		b.once.Do(func() { close(b.ready) })
+	}
 }
 
 var errListenerConnClosed = errors.New("pq: ListenerConn has been closed")
 
 const (
-	listenerChannelCapacity = 32
+	listenerChannelCapacity    = 32
+	listenerEventQueueCapacity = 64
 )
 
 // ListenerConn is a low-level interface for waiting for notifications. You
@@ -569,8 +588,8 @@ const (
 
 	// ListenerEventReconnected is emitted after a database connection has been
 	// re-established after connection loss. The err argument of the callback
-	// will always be nil. After this event has been emitted, a nil
-	// pq.Notification is sent on the Listener.Notify channel.
+	// will always be nil. After the callback returns, a nil pq.Notification is
+	// sent on the Listener.Notify channel.
 	ListenerEventReconnected
 
 	// ListenerEventConnectionAttemptFailed is emitted after a connection to the
@@ -611,6 +630,8 @@ type Listener struct {
 	eventLock            sync.Mutex
 	eventQueue           []listenerEvent
 	eventWake            chan struct{}
+	eventClosed          bool
+	eventConnected       bool
 
 	// connectLock serializes connection attempts. operationLock serializes
 	// changes to channels with queries and connection resynchronization. Neither
@@ -620,18 +641,21 @@ type Listener struct {
 	operationLock     chan struct{}
 	operationLockOnce sync.Once
 
-	lock                 sync.Mutex
-	isClosed             bool
-	done                 chan struct{}
-	reconnectCond        *sync.Cond
-	connectAttempt       uint64
-	connectCancel        context.CancelFunc
-	pendingCN            *ListenerConn
-	cn                   *ListenerConn
-	connNotificationChan <-chan *Notification
-	channels             map[string]struct{}
-	notificationQueue    chan *Notification
-	notificationLost     atomic.Bool
+	lock                    sync.Mutex
+	isClosed                bool
+	done                    chan struct{}
+	reconnectCond           *sync.Cond
+	connectAttempt          uint64
+	connectCancel           context.CancelFunc
+	pendingCN               *ListenerConn
+	cn                      *ListenerConn
+	connNotificationChan    <-chan *Notification
+	channels                map[string]struct{}
+	notificationQueue       chan *Notification
+	notificationLock        sync.Mutex
+	notificationLost        bool
+	notificationLossBarrier *listenerEventBarrier
+	notificationBarriers    map[*Notification]*listenerEventBarrier
 }
 
 // NewListener creates a new database connection dedicated to LISTEN / NOTIFY.
@@ -650,8 +674,12 @@ type Listener struct {
 // The last parameter cb can be set to a function which will be called by the
 // Listener when the state of the underlying database connection changes.
 // Callbacks are delivered in order by a dedicated goroutine, so a callback may
-// call Listener methods. You should still avoid potentially time-consuming
-// work because it delays later callbacks.
+// call Listener methods. Callback delivery has a finite backlog so a slow
+// callback cannot stop connection maintenance. If that backlog fills, repeated
+// connection-attempt failures and superseded pending state transitions are
+// coalesced or dropped; retained callbacks remain in order. Close preserves the
+// retained backlog and, for an established connection, appends exactly one
+// terminal Disconnected callback. Close does not wait for callbacks to return.
 func NewListener(dsn string, minReconnect, maxReconnect time.Duration, cb EventCallbackType) *Listener {
 	return NewDialListener(defaultDialer{}, dsn, minReconnect, maxReconnect, cb)
 }
@@ -1200,9 +1228,11 @@ func (l *Listener) connect() error {
 	return err
 }
 
-// Close disconnects the Listener from the database and shuts it down.
-// Subsequent calls to its methods will return an error. Close returns an error
-// if the connection has already been closed.
+// Close disconnects the Listener from the database and shuts it down. If a
+// connection was established, its callback queue ends with exactly one
+// ListenerEventDisconnected event. Close does not wait for that callback.
+// Subsequent calls to Listener methods return an error. Close returns an error
+// if the Listener has already been closed.
 func (l *Listener) Close() error {
 	l.lock.Lock()
 	if l.isClosed {
@@ -1228,6 +1258,11 @@ func (l *Listener) Close() error {
 	l.reconnectCond.Broadcast()
 	l.lock.Unlock()
 
+	// Stop accepting maintenance events only after all events which raced with
+	// Close have been ordered. The dispatcher drains the retained queue and the
+	// terminal event asynchronously, so Close never waits for a callback.
+	l.closeEventQueue(cn != nil)
+
 	if cancel != nil {
 		cancel()
 	}
@@ -1241,54 +1276,178 @@ func (l *Listener) Close() error {
 	return nil
 }
 
-func (l *Listener) emitEvent(event ListenerEventType, err error) {
-	if l.eventCallback == nil {
-		return
-	}
-	select {
-	case <-l.done:
-		return
-	default:
-	}
-
-	l.eventLock.Lock()
-	l.eventQueue = append(l.eventQueue, listenerEvent{typ: event, err: err})
-	l.eventLock.Unlock()
+func (l *Listener) wakeEventDispatcher() {
 	select {
 	case l.eventWake <- struct{}{}:
 	default:
 	}
 }
 
-func (l *Listener) eventDispatcher() {
-	for {
-		select {
-		case <-l.eventWake:
-		case <-l.done:
-			return
-		}
+// enqueueEventLocked adds an ordinary (non-terminal) event. One queue slot is
+// reserved for the Disconnected event emitted by Close, allowing Close to
+// preserve every event which was retained before it.
+func (l *Listener) enqueueEventLocked(event listenerEvent) bool {
+	const ordinaryCapacity = listenerEventQueueCapacity - 1
+	if len(l.eventQueue) < ordinaryCapacity {
+		l.eventQueue = append(l.eventQueue, event)
+		return true
+	}
 
-		for {
-			select {
-			case <-l.done:
-				return
-			default:
+	// A failure event carries no state transition. Prefer replacing an older
+	// failure over discarding connection-state information. Moving the retained
+	// failure to the tail preserves the ordering of all other retained events.
+	if event.typ == ListenerEventConnectionAttemptFailed {
+		for i := len(l.eventQueue) - 1; i >= 0; i-- {
+			if l.eventQueue[i].typ != ListenerEventConnectionAttemptFailed {
+				continue
 			}
+			copy(l.eventQueue[i:], l.eventQueue[i+1:])
+			l.eventQueue[len(l.eventQueue)-1] = event
+			return true
+		}
+		return false
+	}
 
-			l.eventLock.Lock()
-			if len(l.eventQueue) == 0 {
-				l.eventLock.Unlock()
+	// State transitions take precedence over attempt failures. A reconnect
+	// barrier is never evicted because a notification may be waiting on it.
+	drop := -1
+	for i := range l.eventQueue {
+		if l.eventQueue[i].typ == ListenerEventConnectionAttemptFailed {
+			drop = i
+			break
+		}
+	}
+	if drop < 0 {
+		for i := range l.eventQueue {
+			if l.eventQueue[i].barrier == nil {
+				drop = i
 				break
 			}
-			event := l.eventQueue[0]
-			l.eventQueue[0] = listenerEvent{}
-			l.eventQueue = l.eventQueue[1:]
-			if len(l.eventQueue) == 0 {
-				l.eventQueue = nil
-			}
-			l.eventLock.Unlock()
-			l.eventCallback(event.typ, event.err)
 		}
+	}
+	if drop < 0 {
+		// Every retained event is paired with reconnect notification delivery.
+		// Preserve those barriers and drop the new transition.
+		return false
+	}
+	copy(l.eventQueue[drop:], l.eventQueue[drop+1:])
+	l.eventQueue[len(l.eventQueue)-1] = event
+	return true
+}
+
+// emitEvent queues a callback without blocking connection maintenance. For a
+// reconnect it returns a barrier which notification delivery can use to ensure
+// the callback returns before the corresponding nil marker is observable.
+func (l *Listener) emitEvent(event ListenerEventType, err error) *listenerEventBarrier {
+	if l.eventCallback == nil {
+		return nil
+	}
+
+	l.eventLock.Lock()
+	if l.eventClosed {
+		l.eventLock.Unlock()
+		return nil
+	}
+
+	switch event {
+	case ListenerEventConnected, ListenerEventReconnected:
+		l.eventConnected = true
+	case ListenerEventDisconnected:
+		l.eventConnected = false
+	}
+
+	// Consecutive failures convey the same state; retain only the newest error.
+	if event == ListenerEventConnectionAttemptFailed && len(l.eventQueue) != 0 {
+		last := len(l.eventQueue) - 1
+		if l.eventQueue[last].typ == ListenerEventConnectionAttemptFailed {
+			l.eventQueue[last].err = err
+			l.eventLock.Unlock()
+			l.wakeEventDispatcher()
+			return nil
+		}
+	}
+
+	if event == ListenerEventReconnected {
+		// Coalesce only with a reconnect in the current pending connected
+		// interval. An intervening Disconnected transition must retain a later
+		// Reconnected callback so the callback stream's final state is correct.
+		// Keeping a reusable reconnect at its original position also prevents a
+		// stream of later events from starving its notification barrier.
+	findPendingReconnect:
+		for i := len(l.eventQueue) - 1; i >= 0; i-- {
+			switch l.eventQueue[i].typ {
+			case ListenerEventReconnected:
+				queued := l.eventQueue[i]
+				l.eventLock.Unlock()
+				l.wakeEventDispatcher()
+				return queued.barrier
+			case ListenerEventConnected, ListenerEventDisconnected:
+				break findPendingReconnect
+			}
+		}
+	}
+
+	queued := listenerEvent{typ: event, err: err}
+	if event == ListenerEventReconnected {
+		queued.barrier = newListenerEventBarrier()
+	}
+	if !l.enqueueEventLocked(queued) {
+		l.eventLock.Unlock()
+		return nil
+	}
+	l.eventLock.Unlock()
+	l.wakeEventDispatcher()
+	return queued.barrier
+}
+
+func (l *Listener) closeEventQueue(established bool) {
+	if l.eventCallback == nil {
+		return
+	}
+
+	l.eventLock.Lock()
+	if l.eventClosed {
+		l.eventLock.Unlock()
+		return
+	}
+	if established || l.eventConnected {
+		// Ordinary events leave this slot reserved, so the terminal callback
+		// never displaces an event retained before Close.
+		l.eventQueue = append(l.eventQueue, listenerEvent{
+			typ: ListenerEventDisconnected,
+			err: errListenerConnClosed,
+		})
+		l.eventConnected = false
+	}
+	l.eventClosed = true
+	l.eventLock.Unlock()
+	l.wakeEventDispatcher()
+}
+
+func (l *Listener) eventDispatcher() {
+	for {
+		l.eventLock.Lock()
+		if len(l.eventQueue) == 0 {
+			closed := l.eventClosed
+			// Release any backing array retained by a callback backlog.
+			l.eventQueue = nil
+			l.eventLock.Unlock()
+			if closed {
+				return
+			}
+			<-l.eventWake
+			continue
+		}
+		event := l.eventQueue[0]
+		l.eventQueue[0] = listenerEvent{}
+		l.eventQueue = l.eventQueue[1:]
+		if len(l.eventQueue) == 0 {
+			l.eventQueue = nil
+		}
+		l.eventLock.Unlock()
+
+		l.eventCallback(event.typ, event.err)
+		event.barrier.complete()
 	}
 }
 
@@ -1319,60 +1478,163 @@ func (l *Listener) waitReconnect(d time.Duration) bool {
 // When the queue is full, the notification is dropped and notificationLost
 // causes the dispatcher to deliver a coalesced nil loss marker when possible.
 func (l *Listener) sendNotification(notification *Notification) bool {
+	return l.queueNotification(notification, nil)
+}
+
+// sendReconnectNotification associates an internal marker with the callback
+// barrier returned by emitEvent. The marker itself is never exposed.
+func (l *Listener) sendReconnectNotification(barrier *listenerEventBarrier) bool {
+	if barrier == nil {
+		return l.sendNotification(nil)
+	}
+	return l.queueNotification(&Notification{}, barrier)
+}
+
+func (l *Listener) queueNotification(notification *Notification, barrier *listenerEventBarrier) bool {
 	select {
 	case <-l.done:
 		return false
 	default:
 	}
+
+	l.notificationLock.Lock()
+	select {
+	case <-l.done:
+		l.notificationLock.Unlock()
+		return false
+	default:
+	}
+
 	// Once a gap has occurred, drop subsequent notifications until the
 	// dispatcher claims the loss marker. That marker is an ordering barrier:
 	// retained pre-gap notifications are delivered before it, and accepted
 	// post-gap notifications after it.
-	if l.notificationLost.Load() {
+	if l.notificationLost {
+		if barrier != nil {
+			// Waiting for the newest reconnect callback also orders all earlier
+			// callbacks represented by this coalesced loss marker.
+			l.notificationLossBarrier = barrier
+		}
+		l.notificationLock.Unlock()
 		return true
 	}
 
+	if barrier != nil {
+		if l.notificationBarriers == nil {
+			l.notificationBarriers = make(map[*Notification]*listenerEventBarrier)
+		}
+		l.notificationBarriers[notification] = barrier
+	}
 	select {
 	case l.notificationQueue <- notification:
+		l.notificationLock.Unlock()
 		return true
-	case <-l.done:
-		return false
 	default:
-		l.notificationLost.Store(true)
+		if barrier != nil {
+			delete(l.notificationBarriers, notification)
+			l.notificationLossBarrier = barrier
+		}
+		l.notificationLost = true
+		l.notificationLock.Unlock()
 		return true
 	}
 }
 
+func (l *Listener) takeNotificationBarrier(notification *Notification) *listenerEventBarrier {
+	l.notificationLock.Lock()
+	barrier := l.notificationBarriers[notification]
+	if barrier != nil {
+		delete(l.notificationBarriers, notification)
+	}
+	l.notificationLock.Unlock()
+	return barrier
+}
+
+func (l *Listener) takeNotificationLoss() (bool, *listenerEventBarrier) {
+	l.notificationLock.Lock()
+	lost := l.notificationLost
+	barrier := l.notificationLossBarrier
+	if lost {
+		l.notificationLost = false
+		l.notificationLossBarrier = nil
+	}
+	l.notificationLock.Unlock()
+	return lost, barrier
+}
+
+func (l *Listener) waitNotificationBarrier(barrier *listenerEventBarrier) bool {
+	if barrier == nil {
+		return true
+	}
+	select {
+	case <-barrier.ready:
+		return true
+	case <-l.done:
+		return false
+	}
+}
+
+func (l *Listener) deliverNotification(notification *Notification) bool {
+	if barrier := l.takeNotificationBarrier(notification); barrier != nil {
+		if !l.waitNotificationBarrier(barrier) {
+			return false
+		}
+		notification = nil
+	}
+	select {
+	case l.Notify <- notification:
+		return true
+	case <-l.done:
+		return false
+	}
+}
+
+func (l *Listener) releaseNotificationQueue() {
+	l.notificationLock.Lock()
+	l.notificationLost = false
+	l.notificationLossBarrier = nil
+	l.notificationBarriers = nil
+	for {
+		select {
+		case <-l.notificationQueue:
+			continue
+		default:
+			l.notificationLock.Unlock()
+			return
+		}
+	}
+}
+
 func (l *Listener) notificationDispatcher() {
-	defer close(l.Notify)
+	defer func() {
+		l.releaseNotificationQueue()
+		close(l.Notify)
+	}()
 	for {
 		// Drain the retained prefix before reporting a gap. A non-blocking
 		// receive is needed here so loss markers cannot overtake queued data.
 		select {
 		case notification := <-l.notificationQueue:
-			select {
-			case l.Notify <- notification:
-			case <-l.done:
+			if !l.deliverNotification(notification) {
 				return
 			}
 			continue
 		default:
 		}
 
-		if l.notificationLost.CompareAndSwap(true, false) {
-			select {
-			case l.Notify <- nil:
-				continue
-			case <-l.done:
+		if lost, barrier := l.takeNotificationLoss(); lost {
+			if !l.waitNotificationBarrier(barrier) {
 				return
 			}
+			if !l.deliverNotification(nil) {
+				return
+			}
+			continue
 		}
 
 		select {
 		case notification := <-l.notificationQueue:
-			select {
-			case l.Notify <- notification:
-			case <-l.done:
+			if !l.deliverNotification(notification) {
 				return
 			}
 		case <-l.done:
@@ -1424,8 +1686,8 @@ func (l *Listener) listenerConnLoop() {
 		if nextReconnect.IsZero() {
 			l.emitEvent(ListenerEventConnected, nil)
 		} else {
-			l.emitEvent(ListenerEventReconnected, nil)
-			if !l.sendNotification(nil) {
+			barrier := l.emitEvent(ListenerEventReconnected, nil)
+			if !l.sendReconnectNotification(barrier) {
 				return
 			}
 		}

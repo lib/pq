@@ -27,43 +27,67 @@ func (st *stmt) Close() error {
 	if err := st.cn.err.get(); err != nil {
 		return err
 	}
+	if st.cn.deferStmtClose(st.name) {
+		// COPY's response goroutine owns backend reads. Let it close the
+		// prepared statement after consuming COPY's ReadyForQuery so the
+		// protocol exchange cannot overlap, and report success here because
+		// database/sql will not retry a driver's Stmt.Close call.
+		st.closed = true
+		return nil
+	}
 	if err := st.cn.c.SetDeadline(st.cn.closeDeadline()); err != nil {
 		return st.closeError(err)
 	}
 
-	w := st.cn.writeBuf(proto.Close)
-	w.byte(proto.Sync)
-	w.string(st.name)
-	err := st.cn.send(w)
-	if err != nil {
+	if err := st.cn.closePreparedStatements([]string{st.name}); err != nil {
 		return st.closeError(err)
 	}
-	err = st.cn.send(st.cn.writeBuf(proto.Sync))
-	if err != nil {
-		return st.closeError(err)
-	}
-
-	t, _, err := st.cn.recv1()
-	if err != nil {
-		return st.closeError(err)
-	}
-	if t != proto.CloseComplete {
-		return st.closeError(fmt.Errorf("pq: unexpected close response: %q", t))
-	}
-
-	t, r, err := st.cn.recv1()
-	if err != nil {
-		return st.closeError(err)
-	}
-	if t != proto.ReadyForQuery {
-		return st.closeError(fmt.Errorf("pq: expected ready for query, but got: %q", t))
-	}
-	st.cn.processReadyForQuery(r)
 	if err := st.cn.c.SetDeadline(time.Time{}); err != nil {
 		return st.closeError(err)
 	}
 	st.closed = true
 
+	return nil
+}
+
+// closePreparedStatements sends one extended-protocol synchronization for a
+// batch of named statements. It deliberately uses private buffers because it
+// can run from COPY's response goroutine while conn.scratch still belongs to a
+// backend read.
+func (cn *conn) closePreparedStatements(names []string) error {
+	for _, name := range names {
+		w := &writeBuf{
+			buf: []byte{byte(proto.Close), 0, 0, 0, 0},
+			pos: 1,
+		}
+		w.byte(proto.Sync) // 'S' selects a prepared statement, not a portal.
+		w.string(name)
+		if err := cn.send(w); err != nil {
+			return err
+		}
+	}
+	if err := cn.sendSimpleMessage(proto.Sync); err != nil {
+		return err
+	}
+
+	for range names {
+		t, _, err := cn.recv1()
+		if err != nil {
+			return err
+		}
+		if t != proto.CloseComplete {
+			return fmt.Errorf("pq: unexpected close response: %q", t)
+		}
+	}
+
+	t, r, err := cn.recv1()
+	if err != nil {
+		return err
+	}
+	if t != proto.ReadyForQuery {
+		return fmt.Errorf("pq: expected ready for query, but got: %q", t)
+	}
+	cn.processReadyForQuery(r)
 	return nil
 }
 
@@ -78,11 +102,13 @@ func (st *stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (dri
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	finish := st.cn.watchCancel(ctx, true)
 	if err := st.cn.err.get(); err != nil {
-		finish()
 		return nil, err
 	}
+	if err := st.cn.checkCopyInactive(); err != nil {
+		return nil, err
+	}
+	finish := st.cn.watchCancel(ctx, true)
 
 	err := st.exec(args)
 	if err != nil {
@@ -102,10 +128,13 @@ func (st *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driv
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	defer st.cn.watchCancel(ctx, true)()
 	if err := st.cn.err.get(); err != nil {
 		return nil, err
 	}
+	if err := st.cn.checkCopyInactive(); err != nil {
+		return nil, err
+	}
+	defer st.cn.watchCancel(ctx, true)()
 
 	err := st.exec(args)
 	if err != nil {

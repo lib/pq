@@ -279,9 +279,16 @@ func ExampleListener() {
 		dsn          = "dbname=pqgo "
 		minReconnect = 10 * time.Second
 		maxReconnect = time.Minute
+		disconnected = make(chan struct{}, 1)
 	)
 	l := pq.NewListener(dsn, minReconnect, maxReconnect, func(ev pq.ListenerEventType, err error) {
 		fmt.Printf("callback: %s: %v\n", ev, err)
+		if ev == pq.ListenerEventDisconnected {
+			select {
+			case disconnected <- struct{}{}:
+			default:
+			}
+		}
 	})
 	defer l.Close()
 
@@ -318,7 +325,14 @@ func ExampleListener() {
 		select {
 		case <-time.After(1 * time.Second):
 			l.Close()
-		case n := <-l.Notify:
+		case n, ok := <-l.Notify:
+			if !ok {
+				// Close does not wait for callbacks, so synchronize the example's
+				// output with its terminal Disconnected event.
+				<-disconnected
+				fmt.Println("nil notify: closing Listener")
+				return
+			}
 			i++
 			if n == nil {
 				fmt.Println("nil notify: closing Listener")
@@ -338,6 +352,7 @@ func ExampleListener() {
 	// callback: connected: <nil>
 	// notification on "coconut" with data "got a lovely bunch"
 	// notification on "banana" with data "yellow and curvy"
+	// callback: disconnected: pq: ListenerConn has been closed
 	// nil notify: closing Listener
 }
 
