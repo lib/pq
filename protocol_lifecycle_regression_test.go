@@ -130,6 +130,34 @@ func TestProtocolRegressionMalformedFrames(t *testing.T) {
 	}
 }
 
+func TestProtocolRegressionRowsUnexpectedMessagesPoisonConnection(t *testing.T) {
+	wire := bytes.Join([][]byte{
+		regressionBackendFrame(proto.RowDescription, regressionSingleColumnDescription(oid.T_int8, 0)),
+		regressionBackendFrame(proto.DataRow, regressionNullColumnData(1)),
+		regressionBackendFrame(proto.ParseComplete, nil),
+		regressionBackendFrame(proto.BindComplete, nil),
+		regressionBackendFrame(proto.ReadyForQuery, []byte{'I'}),
+	}, nil)
+	script := newRegressionScriptConn(wire)
+	cn := &conn{c: script, buf: bufio.NewReader(script)}
+	rows, err := cn.simpleQuery("select malformed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rows.Next(make([]driver.Value, 1)); err != nil {
+		t.Fatalf("first row: %v", err)
+	}
+	if err := rows.Next(make([]driver.Value, 1)); err == nil {
+		t.Fatal("unexpected backend message was accepted")
+	}
+	if err := rows.Close(); err == nil {
+		t.Fatal("second unexpected backend message was accepted while draining rows")
+	}
+	if err := cn.err.get(); err != driver.ErrBadConn {
+		t.Errorf("unexpected backend messages left connection reusable with unread ReadyForQuery: %v", err)
+	}
+}
+
 func TestProtocolRegressionOversizedLongFrameRejectedBeforeAllocation(t *testing.T) {
 	const childEnvironment = "PQ_PROTOCOL_LIFECYCLE_OVERSIZED_CHILD"
 	if os.Getenv(childEnvironment) == "1" {
