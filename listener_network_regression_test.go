@@ -60,6 +60,8 @@ func (d *listenerNetworkCallbackDialer) dial() (net.Conn, error) {
 		<-d.releaseFirst
 		return nil, errors.New("intentional callback reconnect failure")
 	case 2:
+		return nil, errors.New("intentional second callback reconnect failure")
+	case 3:
 		return d.conn, nil
 	default:
 		return nil, errors.New("unexpected callback reconnect attempt")
@@ -308,6 +310,7 @@ func TestListenerNetworkCallbackCanListenDuringReconnect(t *testing.T) {
 	}()
 
 	callbackResult := make(chan error, 1)
+	var callbackOnce sync.Once
 	var listener *Listener
 	listener = NewDialListener(
 		dialer,
@@ -318,9 +321,11 @@ func TestListenerNetworkCallbackCanListenDuringReconnect(t *testing.T) {
 			if event != ListenerEventConnectionAttemptFailed {
 				return
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
-			defer cancel()
-			callbackResult <- listener.ListenContext(ctx, "listener_network_callback")
+			callbackOnce.Do(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+				defer cancel()
+				callbackResult <- listener.ListenContext(ctx, "listener_network_callback")
+			})
 		},
 	)
 	t.Cleanup(func() {
