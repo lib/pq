@@ -361,3 +361,75 @@ func TestListenerConcurrencyReconnectMarkerFollowsCallback(t *testing.T) {
 		}
 	}
 }
+
+func TestListenerConcurrencyReconnectBarrierCannotBeStarved(t *testing.T) {
+	const churnCallbacks = listenerEventQueueCapacity * 2
+
+	callbackBlocked := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	barrierChecked := make(chan bool, 1)
+	dispatcherDone := make(chan struct{})
+	var releaseOnce sync.Once
+
+	var listener *Listener
+	var reconnectBarrier *listenerEventBarrier
+	disconnectedCallbacks := 0
+	listener = &Listener{
+		done:      make(chan struct{}),
+		eventWake: make(chan struct{}, 1),
+		eventCallback: func(event ListenerEventType, _ error) {
+			switch event {
+			case ListenerEventConnected:
+				close(callbackBlocked)
+				<-releaseCallback
+
+			case ListenerEventDisconnected:
+				disconnectedCallbacks++
+				if disconnectedCallbacks == churnCallbacks {
+					select {
+					case <-reconnectBarrier.ready:
+						barrierChecked <- false
+					default:
+						barrierChecked <- true
+					}
+					return
+				}
+				if disconnectedCallbacks < churnCallbacks {
+					// Keep one ordinary event ahead of the pending reconnect.
+					// Moving that reconnect to the tail on every churn cycle
+					// must not prevent its callback barrier from ever starting.
+					listener.emitEvent(ListenerEventDisconnected, errors.New("intentional churn"))
+					listener.emitEvent(ListenerEventReconnected, nil)
+				}
+			}
+		},
+	}
+
+	go func() {
+		listener.eventDispatcher()
+		close(dispatcherDone)
+	}()
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(releaseCallback) })
+		listener.closeEventQueue(false)
+		listenerConcurrencyAwaitSignal(t, dispatcherDone, "the event dispatcher to stop")
+	})
+
+	listener.emitEvent(ListenerEventConnected, nil)
+	listenerConcurrencyAwaitSignal(t, callbackBlocked, "the initial callback to block")
+	listener.emitEvent(ListenerEventDisconnected, errors.New("intentional disconnect"))
+	reconnectBarrier = listener.emitEvent(ListenerEventReconnected, nil)
+	if reconnectBarrier == nil {
+		t.Fatal("Reconnected event did not retain a callback barrier")
+	}
+	releaseOnce.Do(func() { close(releaseCallback) })
+
+	select {
+	case starved := <-barrierChecked:
+		if starved {
+			t.Errorf("event dispatcher ran %d later callbacks without invoking the queued Reconnected callback", churnCallbacks)
+		}
+	case <-time.After(listenerConcurrencyTestTimeout):
+		t.Fatal("event dispatcher stopped making progress during reconnect churn")
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq/internal/pqtest"
 	"github.com/lib/pq/internal/proto"
 )
 
@@ -42,6 +43,22 @@ type copyConcurrencyWriteTrackingConn struct {
 
 	writeStarted chan struct{}
 	writeOnce    sync.Once
+}
+
+type copyConcurrencyGatedScriptConn struct {
+	*regressionScriptConn
+
+	gate        <-chan struct{}
+	readEntered chan struct{}
+	readOnce    sync.Once
+}
+
+func (c *copyConcurrencyGatedScriptConn) Read(p []byte) (int, error) {
+	c.readOnce.Do(func() {
+		close(c.readEntered)
+		<-c.gate
+	})
+	return c.regressionScriptConn.Read(p)
 }
 
 func (c *copyConcurrencyWriteTrackingConn) Write(p []byte) (int, error) {
@@ -157,6 +174,118 @@ func TestCopyConcurrencyRegressionTransactionEndDoesNotRaceResponseLoop(t *testi
 			}
 		})
 	}
+}
+
+// Commit must synchronize with the COPY response owner before it inspects
+// txnStatus. Both goroutines start after the same barrier, so neither access is
+// ordered before the other; this test is intended to be run with -race.
+func TestCopyConcurrencyRegressionCommitSynchronizesTransactionStatus(t *testing.T) {
+	for range 32 {
+		start := make(chan struct{})
+		wire := &copyConcurrencyGatedScriptConn{
+			regressionScriptConn: newRegressionScriptConn(
+				regressionBackendFrame(proto.ReadyForQuery, []byte{'E'}),
+			),
+			gate:        start,
+			readEntered: make(chan struct{}),
+		}
+		cn := &conn{
+			c:         wire,
+			buf:       bufio.NewReader(wire),
+			txnStatus: txnStatusIdleInTransaction,
+		}
+		ci := &copyin{cn: cn, done: make(chan bool, 1)}
+
+		responseDone := make(chan struct{})
+		go func() {
+			ci.resploop()
+			close(responseDone)
+		}()
+		copyConcurrencyAwait(t, wire.readEntered, "COPY response read")
+
+		commitDone := make(chan error, 1)
+		go func() {
+			<-start
+			commitDone <- cn.Commit()
+		}()
+		close(start)
+
+		copyConcurrencyAwait(t, responseDone, "COPY response completion")
+		_ = copyConcurrencyAwaitError(t, commitDone, "Commit completion")
+	}
+}
+
+// database/sql permanently marks a driver statement closed even when its
+// driver's Close method returns an error. A close requested while COPY owns the
+// protocol must therefore be deferred or otherwise completed; returning
+// errCopyInProgress leaks the named server statement on a reusable session.
+func TestCopyConcurrencyRegressionStmtCloseDuringCopyDoesNotLeak(t *testing.T) {
+	db := pqtest.MustDB(t)
+	sqlConn, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		// This test deliberately detects a server-side resource leak. Discard the
+		// physical session so a red run cannot contaminate another test.
+		_ = sqlConn.Raw(func(any) error { return driver.ErrBadConn })
+		_ = sqlConn.Close()
+	})
+
+	var baseline int
+	if err := sqlConn.QueryRowContext(context.Background(),
+		`select count(*) from pg_prepared_statements`).Scan(&baseline); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlConn.ExecContext(context.Background(),
+		`create temporary table copy_stmt_close_regression (value bigint)`); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := sqlConn.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txFinished := false
+	t.Cleanup(func() {
+		if !txFinished {
+			_ = tx.Rollback()
+		}
+	})
+
+	normalStmt, err := tx.PrepareContext(context.Background(), `select 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyStmt, err := tx.PrepareContext(context.Background(),
+		CopyIn("copy_stmt_close_regression", "value"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := copyStmt.ExecContext(context.Background(), int64(1)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := normalStmt.Close(); err != nil {
+		t.Errorf("closing a prepared statement during COPY: %v", err)
+	}
+	if _, err := copyStmt.ExecContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	var afterClose int
+	if err := tx.QueryRowContext(context.Background(),
+		`select count(*) from pg_prepared_statements`).Scan(&afterClose); err != nil {
+		t.Fatal(err)
+	}
+	if afterClose != baseline {
+		t.Errorf("server prepared statements after Close = %d; want baseline %d", afterClose, baseline)
+	}
+
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	txFinished = true
 }
 
 func TestCopyConcurrencyRegressionCloseWaitsAfterAsyncError(t *testing.T) {
