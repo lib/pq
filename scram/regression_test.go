@@ -123,6 +123,7 @@ func TestRegressionPostgreSQLSASLprep(t *testing.T) {
 		name, password, stripped string
 	}{
 		{"prohibited_falls_back", "a\u0007b", "ab"},
+		{"unicode_3_2_unassigned_falls_back", "\U0001f100", "0."},
 		{"invalid_UTF8_falls_back", string([]byte{'a', 0xff, 'b'}), "ab"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
