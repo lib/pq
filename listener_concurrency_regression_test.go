@@ -238,7 +238,10 @@ func TestListenerConcurrencyCloseEmitsOneDisconnectedEvent(t *testing.T) {
 	dialer := &listenerConcurrencySequenceDialer{conns: []net.Conn{client}}
 	connected := make(chan struct{})
 	disconnected := make(chan struct{})
+	releaseDisconnected := make(chan struct{})
+	disconnectedFinished := make(chan struct{})
 	var connectedOnce sync.Once
+	var releaseDisconnectedOnce sync.Once
 	var disconnectedCount atomic.Int32
 	var disconnectedErr error
 
@@ -250,10 +253,13 @@ func TestListenerConcurrencyCloseEmitsOneDisconnectedEvent(t *testing.T) {
 			if disconnectedCount.Add(1) == 1 {
 				disconnectedErr = err
 				close(disconnected)
+				<-releaseDisconnected
+				close(disconnectedFinished)
 			}
 		}
 	})
 	t.Cleanup(func() {
+		releaseDisconnectedOnce.Do(func() { close(releaseDisconnected) })
 		_ = listener.Close()
 		_ = client.Close()
 		_ = server.Close()
@@ -269,11 +275,72 @@ func TestListenerConcurrencyCloseEmitsOneDisconnectedEvent(t *testing.T) {
 	listenerConcurrencyAwaitNotifyClose(t, listener.Notify)
 	listenerConcurrencyAwaitBackend(t, backendDone, "the stable close backend")
 
+	// Keep the first terminal callback in flight so any duplicate must remain
+	// visible in the retained queue instead of racing this assertion.
+	listener.eventLock.Lock()
+	for _, event := range listener.eventQueue {
+		if event.typ == ListenerEventDisconnected {
+			t.Error("Close queued a duplicate Disconnected callback")
+		}
+	}
+	listener.eventLock.Unlock()
+	releaseDisconnectedOnce.Do(func() { close(releaseDisconnected) })
+	listenerConcurrencyAwaitSignal(t, disconnectedFinished, "the Disconnected callback to return")
+
 	if count := disconnectedCount.Load(); count != 1 {
 		t.Errorf("Close delivered %d Disconnected callbacks; want exactly 1", count)
 	}
 	if disconnectedErr == nil {
 		t.Error("Close delivered a Disconnected callback without its close error")
+	}
+}
+
+func TestListenerConcurrencyReconnectCallbackCanReceiveMarker(t *testing.T) {
+	callbackResult := make(chan error, 1)
+	dispatcherDone := make(chan struct{})
+	var listener *Listener
+	listener = &Listener{
+		Notify:            make(chan *Notification),
+		done:              make(chan struct{}),
+		eventWake:         make(chan struct{}, 1),
+		notificationQueue: make(chan *Notification, listenerChannelCapacity),
+		eventCallback: func(event ListenerEventType, _ error) {
+			if event != ListenerEventReconnected {
+				return
+			}
+			notification, ok := <-listener.Notify
+			switch {
+			case !ok:
+				callbackResult <- errors.New("Notify closed before reconnect marker")
+			case notification != nil:
+				callbackResult <- errors.New("callback received a non-nil reconnect marker")
+			default:
+				callbackResult <- nil
+			}
+		},
+	}
+
+	go func() {
+		listener.eventDispatcher()
+		close(dispatcherDone)
+	}()
+	go listener.notificationDispatcher()
+	t.Cleanup(func() {
+		close(listener.done)
+		listener.closeEventQueue(false)
+		listenerConcurrencyAwaitSignal(t, dispatcherDone, "the callback dispatcher to stop")
+		listenerConcurrencyAwaitNotifyClose(t, listener.Notify)
+	})
+
+	barrier := listener.emitEvent(ListenerEventReconnected, nil)
+	if barrier == nil {
+		t.Fatal("Reconnected event did not retain a callback barrier")
+	}
+	if !listener.sendReconnectNotification(barrier) {
+		t.Fatal("reconnect marker was not queued")
+	}
+	if err := copyConcurrencyAwaitError(t, callbackResult, "Reconnected callback marker receive"); err != nil {
+		t.Error(err)
 	}
 }
 
@@ -431,5 +498,29 @@ func TestListenerConcurrencyReconnectBarrierCannotBeStarved(t *testing.T) {
 		}
 	case <-time.After(listenerConcurrencyTestTimeout):
 		t.Fatal("event dispatcher stopped making progress during reconnect churn")
+	}
+}
+
+func TestListenerConcurrencyReconnectCoalescingPreservesInterveningDisconnect(t *testing.T) {
+	listener := &Listener{
+		done:          make(chan struct{}),
+		eventWake:     make(chan struct{}, 1),
+		eventCallback: func(ListenerEventType, error) {},
+	}
+
+	first := listener.emitEvent(ListenerEventReconnected, nil)
+	listener.emitEvent(ListenerEventDisconnected, errors.New("intentional disconnect"))
+	second := listener.emitEvent(ListenerEventReconnected, nil)
+	if first == nil || second == nil {
+		t.Fatal("Reconnected event did not retain a callback barrier")
+	}
+	if second == first {
+		t.Error("Reconnected event was coalesced across an intervening Disconnected transition")
+	}
+
+	listener.eventLock.Lock()
+	defer listener.eventLock.Unlock()
+	if len(listener.eventQueue) == 0 || listener.eventQueue[len(listener.eventQueue)-1].typ != ListenerEventReconnected {
+		t.Errorf("retained event queue ended in %v; want Reconnected", listener.eventQueue)
 	}
 }
