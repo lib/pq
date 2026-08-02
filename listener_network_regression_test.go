@@ -1,11 +1,13 @@
 package pq
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
 	"net"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -34,6 +36,19 @@ func (d listenerNetworkFixedDialer) Dial(string, string) (net.Conn, error) {
 
 func (d listenerNetworkFixedDialer) DialTimeout(string, string, time.Duration) (net.Conn, error) {
 	return d.conn, nil
+}
+
+type listenerNetworkBlockingWriteConn struct {
+	net.Conn
+	writeStarted chan struct{}
+	releaseWrite <-chan struct{}
+	writeOnce    sync.Once
+}
+
+func (c *listenerNetworkBlockingWriteConn) Write([]byte) (int, error) {
+	c.writeOnce.Do(func() { close(c.writeStarted) })
+	<-c.releaseWrite
+	return 0, net.ErrClosed
 }
 
 func TestListenerNetworkPingContextCancelsBlackholedQuery(t *testing.T) {
@@ -111,6 +126,122 @@ func TestListenerNetworkCanceledListenDoesNotPersistDesiredChannel(t *testing.T)
 	listener.lock.Unlock()
 	if retained {
 		t.Error("canceled ListenContext remained in the desired channel set and can subscribe on a later reconnect")
+	}
+}
+
+func TestListenerNetworkProtocolFailureDoesNotBlockClose(t *testing.T) {
+	clientRaw, server := net.Pipe()
+	releaseWrite := make(chan struct{})
+	var releaseOnce sync.Once
+	client := &listenerNetworkBlockingWriteConn{
+		Conn:         clientRaw,
+		writeStarted: make(chan struct{}),
+		releaseWrite: releaseWrite,
+	}
+	notifications := make(chan *Notification)
+	listener := startListenerConn(&conn{
+		c:   client,
+		buf: bufio.NewReader(client),
+	}, notifications)
+
+	malformedWritten := make(chan struct{})
+	backendDone := make(chan struct{})
+	go func() {
+		defer close(backendDone)
+		defer server.Close()
+		_, _ = server.Write(regressionBackendFrame(proto.ParseComplete, nil))
+		close(malformedWritten)
+		<-releaseWrite
+	}()
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(releaseWrite) })
+		_ = clientRaw.Close()
+		_ = server.Close()
+		listenerNetworkAwaitCleanup(t, backendDone, "malformed Listener backend did not stop")
+	})
+
+	listenerNetworkAwait(t, malformedWritten, "Listener did not read malformed backend response")
+	select {
+	case <-client.writeStarted:
+		// The defective path is now blocked writing Terminate while holding
+		// connectionLock.
+	case _, ok := <-notifications:
+		if ok {
+			t.Fatal("Listener emitted an unexpected notification")
+		}
+	case <-time.After(listenerNetworkTestTimeout):
+		t.Fatal("Listener neither began nor completed protocol-failure cleanup")
+	}
+
+	result := make(chan error, 1)
+	go func() { result <- listener.Close() }()
+	returned := false
+	select {
+	case <-result:
+		returned = true
+	case <-time.After(200 * time.Millisecond):
+		t.Error("ListenerConn.Close blocked behind a graceful shutdown write to a blackholed peer")
+	}
+
+	releaseOnce.Do(func() { close(releaseWrite) })
+	if !returned {
+		select {
+		case <-result:
+		case <-time.After(time.Second):
+			t.Fatal("ListenerConn.Close did not return after releasing the test write")
+		}
+	}
+}
+
+func TestListenerNetworkLossMarkerFollowsRetainedNotifications(t *testing.T) {
+	listener := &Listener{
+		Notify:            make(chan *Notification),
+		done:              make(chan struct{}),
+		notificationQueue: make(chan *Notification, listenerChannelCapacity),
+	}
+	dispatcherDone := make(chan struct{})
+	go func() {
+		listener.notificationDispatcher()
+		close(dispatcherDone)
+	}()
+	t.Cleanup(func() {
+		close(listener.done)
+		listenerNetworkAwaitCleanup(t, dispatcherDone, "notification dispatcher did not stop")
+	})
+
+	if !listener.sendNotification(&Notification{Extra: "held"}) {
+		t.Fatal("notification dispatcher stopped unexpectedly")
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(listener.notificationQueue) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("dispatcher did not begin forwarding the held notification")
+		}
+		runtime.Gosched()
+	}
+
+	for range listenerChannelCapacity {
+		if !listener.sendNotification(&Notification{Extra: "retained"}) {
+			t.Fatal("notification dispatcher stopped unexpectedly")
+		}
+	}
+	if !listener.sendNotification(&Notification{Extra: "dropped"}) {
+		t.Fatal("notification dispatcher stopped unexpectedly")
+	}
+
+	nilIndex := -1
+	for i := range listenerChannelCapacity + 2 {
+		select {
+		case notification := <-listener.Notify:
+			if notification == nil {
+				nilIndex = i
+			}
+		case <-time.After(listenerNetworkTestTimeout):
+			t.Fatal("notification dispatcher did not deliver its retained prefix and loss marker")
+		}
+	}
+	if want := listenerChannelCapacity + 1; nilIndex != want {
+		t.Errorf("loss marker index = %d; want %d after every retained pre-loss notification", nilIndex, want)
 	}
 }
 
