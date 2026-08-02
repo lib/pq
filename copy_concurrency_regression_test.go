@@ -45,6 +45,16 @@ type copyConcurrencyWriteTrackingConn struct {
 	writeOnce    sync.Once
 }
 
+type copyConcurrencyWriteOverlapConn struct {
+	net.Conn
+
+	activeWrites     atomic.Int32
+	firstWrite       chan struct{}
+	overlappingWrite chan struct{}
+	firstOnce        sync.Once
+	overlapOnce      sync.Once
+}
+
 type copyConcurrencyGatedScriptConn struct {
 	*regressionScriptConn
 
@@ -63,6 +73,16 @@ func (c *copyConcurrencyGatedScriptConn) Read(p []byte) (int, error) {
 
 func (c *copyConcurrencyWriteTrackingConn) Write(p []byte) (int, error) {
 	c.writeOnce.Do(func() { close(c.writeStarted) })
+	return c.Conn.Write(p)
+}
+
+func (c *copyConcurrencyWriteOverlapConn) Write(p []byte) (int, error) {
+	active := c.activeWrites.Add(1)
+	defer c.activeWrites.Add(-1)
+	c.firstOnce.Do(func() { close(c.firstWrite) })
+	if active > 1 {
+		c.overlapOnce.Do(func() { close(c.overlappingWrite) })
+	}
 	return c.Conn.Write(p)
 }
 
@@ -385,6 +405,105 @@ func TestCopyConcurrencyRegressionCloseWaitsAfterAsyncError(t *testing.T) {
 			t.Error("copyin.Close did not stop during cleanup")
 		}
 	}
+}
+
+func TestCopyConcurrencyRegressionAsyncErrorSerializesCopyDataAndDeferredClose(t *testing.T) {
+	client, server := net.Pipe()
+	wire := &copyConcurrencyWriteOverlapConn{
+		Conn:             client,
+		firstWrite:       make(chan struct{}),
+		overlappingWrite: make(chan struct{}),
+	}
+	cn := &conn{
+		c:         wire,
+		buf:       bufio.NewReader(wire),
+		txnStatus: txnStatusIdleInTransaction,
+	}
+	ci := &copyin{
+		cn:     cn,
+		buffer: []byte{byte(proto.CopyDataRequest), 0, 0, 0, 0},
+		done:   make(chan bool, 1),
+	}
+	if err := cn.activateCopy(ci); err != nil {
+		t.Fatal(err)
+	}
+
+	responseDone := make(chan struct{})
+	go func() {
+		ci.resploop()
+		close(responseDone)
+	}()
+	defer func() {
+		_ = client.Close()
+		_ = server.Close()
+		copyConcurrencyAwait(t, responseDone, "COPY response loop cleanup")
+	}()
+
+	// database/sql never retries driver.Stmt.Close. Closing a regular named
+	// statement while COPY owns the protocol therefore queues its wire Close for
+	// the response goroutine to drain after COPY reaches ReadyForQuery.
+	normalStmt := &stmt{cn: cn, name: "copy_concurrency_deferred_close"}
+	if err := normalStmt.Close(); err != nil {
+		t.Fatalf("defer regular statement Close during COPY: %v", err)
+	}
+
+	execDone := make(chan error, 1)
+	go func() {
+		_, err := ci.Exec([]driver.Value{strings.Repeat("x", ciBufferFlushSize+1)})
+		execDone <- err
+	}()
+	copyConcurrencyAwait(t, wire.firstWrite, "large CopyData write to block")
+
+	if err := server.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	backendDone := make(chan error, 1)
+	go func() {
+		if _, err := server.Write(regressionBackendFrame(
+			proto.ErrorResponse,
+			regressionBackendError("22000", "COPY rejected asynchronously"),
+		)); err != nil {
+			backendDone <- err
+			return
+		}
+		_, err := server.Write(regressionBackendFrame(proto.ReadyForQuery, []byte{'E'}))
+		backendDone <- err
+	}()
+
+	select {
+	case <-wire.overlappingWrite:
+		t.Error("deferred statement Close overlapped an in-flight CopyData write after asynchronous COPY rejection")
+	case <-time.After(200 * time.Millisecond):
+		// A correct implementation holds asynchronous error publication behind
+		// the in-flight CopyData write, so deferred protocol cleanup cannot start.
+	}
+
+	if !regressionReadFrontendMessage(server) {
+		t.Error("failed to drain the in-flight CopyData message")
+	}
+	_ = copyConcurrencyAwaitError(t, execDone, "large COPY Exec completion")
+	if err := copyConcurrencyAwaitError(t, backendDone, "asynchronous backend rejection"); err != nil {
+		t.Errorf("send asynchronous backend rejection: %v", err)
+	}
+
+	if !regressionReadFrontendMessage(server) {
+		t.Error("failed to drain the deferred statement Close message")
+	}
+	if !regressionReadFrontendMessage(server) {
+		t.Error("failed to drain the deferred statement Sync message")
+	}
+	closeResponseDone := make(chan error, 1)
+	go func() {
+		_, err := server.Write(append(
+			regressionBackendFrame(proto.CloseComplete, nil),
+			regressionBackendFrame(proto.ReadyForQuery, []byte{'E'})...,
+		))
+		closeResponseDone <- err
+	}()
+	if err := copyConcurrencyAwaitError(t, closeResponseDone, "deferred Close response"); err != nil {
+		t.Errorf("send deferred Close response: %v", err)
+	}
+	copyConcurrencyAwait(t, responseDone, "deferred statement Close completion")
 }
 
 func TestCopyConcurrencyRegressionCanceledExecInvalidatesPendingCopy(t *testing.T) {
