@@ -345,6 +345,26 @@ func TestSecurityRegressionNewConnectorConfigValidatesTLS(t *testing.T) {
 	}
 }
 
+func TestSecurityRegressionNewConnectorConfigRecognizesMutatedHost(t *testing.T) {
+	cfg, err := newConfig(
+		"hostaddr=192.0.2.1 sslmode=disable",
+		[]string{"PGUSER=test"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Config is intentionally mutable and NewConnectorConfig is the public
+	// entry point for using those mutations. The private parser metadata must
+	// not hide a hostname subsequently supplied through the exported field.
+	cfg.Host = "db.example"
+	cfg.SSLMode = SSLModeVerifyFull
+	cfg.SSLRootCert = "testdata/ssl/root.crt"
+	if _, err := NewConnectorConfig(cfg); err != nil {
+		t.Fatalf("NewConnectorConfig rejected an explicitly supplied hostname: %v", err)
+	}
+}
+
 func TestSecurityRegressionRegisteredTLSVersionBoundsArePreserved(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	const key = "security-regression-version-bounds"
