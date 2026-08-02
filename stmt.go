@@ -3,8 +3,12 @@ package pq
 import (
 	"context"
 	"database/sql/driver"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"slices"
+	"strconv"
 	"time"
 
 	"github.com/lib/pq/internal/proto"
@@ -207,15 +211,8 @@ func (st *stmt) exec(v []driver.NamedValue) error {
 			if x.Value == nil {
 				w.int32(-1)
 			} else {
-				b, err := encode(x.Value, st.paramTyps[i])
-				if err != nil {
+				if err := appendEncodedParameter(w, x.Value, st.paramTyps[i]); err != nil {
 					return err
-				}
-				if b == nil {
-					w.int32(-1)
-				} else {
-					w.int32(len(b))
-					w.bytes(b)
 				}
 			}
 		}
@@ -236,6 +233,72 @@ func (st *stmt) exec(v []driver.NamedValue) error {
 		return err
 	}
 	return cn.postExecuteWorkaround()
+}
+
+// appendEncodedParameter writes common parameter types directly into the Bind
+// message, avoiding a temporary encoded slice. Less common types retain the
+// shared encoder so their wire representation remains unchanged.
+func appendEncodedParameter(w *writeBuf, value any, typ oid.Oid) error {
+	lengthPos := len(w.buf)
+	switch value := value.(type) {
+	case int64:
+		w.int32(0)
+		start := len(w.buf)
+		w.buf = strconv.AppendInt(w.buf, value, 10)
+		binary.BigEndian.PutUint32(w.buf[lengthPos:], uint32(len(w.buf)-start))
+		return nil
+	case float64:
+		w.int32(0)
+		start := len(w.buf)
+		w.buf = strconv.AppendFloat(w.buf, value, 'f', -1, 64)
+		binary.BigEndian.PutUint32(w.buf[lengthPos:], uint32(len(w.buf)-start))
+		return nil
+	case string:
+		if typ != oid.T_bytea {
+			w.int32(len(value))
+			w.buf = append(w.buf, value...)
+			return nil
+		}
+	case []byte:
+		if value == nil {
+			w.int32(-1)
+			return nil
+		}
+		if typ != oid.T_bytea {
+			w.int32(len(value))
+			w.bytes(value)
+			return nil
+		}
+		encodedLen := hex.EncodedLen(len(value))
+		w.int32(2 + encodedLen)
+		w.buf = append(w.buf, '\\', 'x')
+		start := len(w.buf)
+		w.buf = slices.Grow(w.buf, encodedLen)
+		w.buf = w.buf[:start+encodedLen]
+		hex.Encode(w.buf[start:], value)
+		return nil
+	case bool:
+		if value {
+			w.int32(len("true"))
+			w.buf = append(w.buf, "true"...)
+		} else {
+			w.int32(len("false"))
+			w.buf = append(w.buf, "false"...)
+		}
+		return nil
+	}
+
+	encoded, err := encode(value, typ)
+	if err != nil {
+		return err
+	}
+	if encoded == nil {
+		w.int32(-1)
+		return nil
+	}
+	w.int32(len(encoded))
+	w.bytes(encoded)
+	return nil
 }
 
 func (st *stmt) NumInput() int {

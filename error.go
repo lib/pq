@@ -2,6 +2,7 @@ package pq
 
 import (
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -125,9 +126,28 @@ type (
 )
 
 func parseError(r *readBuf, q string) *Error {
+	payload := *r
+	// The connection reuses payload storage for subsequent messages. Copy all
+	// fields once and let Error's strings slice that immutable backing store.
+	fields := string(payload)
 	err := &Error{query: q}
-	for t := r.byte(); t != 0; t = r.byte() {
-		msg := r.string()
+	position := 0
+	for {
+		if position >= len(fields) {
+			panic(errors.New("pq: invalid message format; expected error terminator"))
+		}
+		t := fields[position]
+		position++
+		if t == 0 {
+			break
+		}
+		end := strings.IndexByte(fields[position:], 0)
+		if end < 0 {
+			panic(errors.New("pq: invalid message format; expected string terminator"))
+		}
+		end += position
+		msg := fields[position:end]
+		position = end + 1
 		switch t {
 		case 'S':
 			err.Severity = msg
@@ -165,6 +185,7 @@ func parseError(r *readBuf, q string) *Error {
 			err.Routine = msg
 		}
 	}
+	*r = payload[position:]
 	return err
 }
 
@@ -175,26 +196,32 @@ func (e *Error) Fatal() bool { return e.Severity == pqerror.SeverityFatal }
 func (e *Error) SQLState() string { return string(e.Code) }
 
 func (e *Error) Error() string {
-	msg := e.Message
+	line, col, hasPosition := e.position()
+
+	var b strings.Builder
+	b.Grow(len(e.Message) + len(e.Code) + 32)
+	b.WriteString("pq: ")
+	b.WriteString(e.Message)
 	if e.query != "" && e.Position != "" {
-		pos, err := strconv.Atoi(e.Position)
-		if err == nil {
-			lines := strings.Split(e.query, "\n")
-			line, col, ok := posToLine(pos, lines)
-			if ok {
-				if len(lines) == 1 {
-					msg += " at column " + strconv.Itoa(col)
-				} else {
-					msg += " at position " + strconv.Itoa(line) + ":" + strconv.Itoa(col)
-				}
+		if hasPosition {
+			if strings.IndexByte(e.query, '\n') < 0 {
+				b.WriteString(" at column ")
+				writeErrorInt(&b, col)
+			} else {
+				b.WriteString(" at position ")
+				writeErrorInt(&b, line)
+				b.WriteByte(':')
+				writeErrorInt(&b, col)
 			}
 		}
 	}
 
 	if e.Code != "" {
-		return "pq: " + msg + " (" + string(e.Code) + ")"
+		b.WriteString(" (")
+		b.WriteString(string(e.Code))
+		b.WriteByte(')')
 	}
-	return "pq: " + msg
+	return b.String()
 }
 
 // ErrorWithDetail returns the error message with detailed information and
@@ -202,8 +229,18 @@ func (e *Error) Error() string {
 //
 // See the documentation on [Error].
 func (e *Error) ErrorWithDetail() string {
-	b := new(strings.Builder)
-	b.Grow(len(e.Message) + len(e.Detail) + len(e.Hint) + 30)
+	line, col, hasPosition := e.position()
+	var previous2, previous1, current string
+	if hasPosition {
+		previous2, previous1, current = errorContextLines(e.query, line)
+	}
+
+	capacity := len(e.Message) + len(e.Detail) + len(e.Hint) + 30
+	if hasPosition {
+		capacity += expandedTabLen(previous2) + expandedTabLen(previous1) + expandedTabLen(current) + col + 96
+	}
+	var b strings.Builder
+	b.Grow(capacity)
 	b.WriteString("ERROR:   ")
 	b.WriteString(e.Message)
 	if e.Code != "" {
@@ -220,79 +257,156 @@ func (e *Error) ErrorWithDetail() string {
 		b.WriteString(e.Hint)
 	}
 
-	if e.query != "" && e.Position != "" {
-		b.Grow(512)
-		pos, err := strconv.Atoi(e.Position)
-		if err != nil {
-			return b.String()
-		}
-		lines := strings.Split(e.query, "\n")
-		line, col, ok := posToLine(pos, lines)
-		if !ok {
-			return b.String()
-		}
-
-		fmt.Fprintf(b, "\nCONTEXT: line %d, column %d:\n\n", line, col)
+	if hasPosition {
+		b.WriteString("\nCONTEXT: line ")
+		writeErrorInt(&b, line)
+		b.WriteString(", column ")
+		writeErrorInt(&b, col)
+		b.WriteString(":\n\n")
 		if line > 2 {
-			fmt.Fprintf(b, "% 7d | %s\n", line-2, expandTab(lines[line-3]))
+			writeErrorSourceLine(&b, line-2, previous2)
 		}
 		if line > 1 {
-			fmt.Fprintf(b, "% 7d | %s\n", line-1, expandTab(lines[line-2]))
+			writeErrorSourceLine(&b, line-1, previous1)
 		}
 		/// Expand tabs, so that the ^ is at at the correct position, but leave
 		/// "column 10-13" intact. Adjusting this to the visual column would be
 		/// better, but we don't know the tabsize of the user in their editor,
 		/// which can be 8, 4, 2, or something else. We can't know. So leaving
 		/// it as the character index is probably the "most correct".
-		expanded := expandTab(lines[line-1])
-		diff := len(expanded) - len(lines[line-1])
-		fmt.Fprintf(b, "% 7d | %s\n", line, expanded)
-		fmt.Fprintf(b, "% 10s%s%s\n", "", strings.Repeat(" ", col-1+diff), "^")
+		expandedLength := expandedTabLen(current)
+		writeErrorSourceLine(&b, line, current)
+		writeErrorSpaces(&b, 10+col-1+expandedLength-len(current))
+		b.WriteString("^\n")
 	}
 
 	return b.String()
 }
 
-func posToLine(pos int, lines []string) (line, col int, ok bool) {
+func (e *Error) position() (line, col int, ok bool) {
+	if e.query == "" || e.Position == "" {
+		return 0, 0, false
+	}
+	pos, err := strconv.Atoi(e.Position)
+	if err != nil {
+		return 0, 0, false
+	}
+	return queryPosition(e.query, pos)
+}
+
+func queryPosition(query string, pos int) (line, col int, ok bool) {
 	if pos < 1 {
 		return 0, 0, false
 	}
 	read := 0
-	for i := range lines {
-		ll := utf8.RuneCountInString(lines[i]) + 1 // +1 for the removed newline
-		if read+ll >= pos {
-			return i + 1, pos - read, true
+	line = 1
+	for {
+		newline := strings.IndexByte(query, '\n')
+		text := query
+		if newline >= 0 {
+			text = query[:newline]
 		}
-		read += ll
+		lineLength := utf8.RuneCountInString(text) + 1
+		if read+lineLength >= pos {
+			return line, pos - read, true
+		}
+		if newline < 0 {
+			return 0, 0, false
+		}
+		read += lineLength
+		line++
+		query = query[newline+1:]
 	}
-	return 0, 0, false
 }
 
-func expandTab(s string) string {
-	var (
-		b    strings.Builder
-		l    int
-		fill = func(n int) string {
-			b := make([]byte, n)
-			for i := range b {
-				b[i] = ' '
-			}
-			return string(b)
+func errorContextLines(query string, target int) (previous2, previous1, current string) {
+	line := 1
+	for {
+		newline := strings.IndexByte(query, '\n')
+		text := query
+		if newline >= 0 {
+			text = query[:newline]
 		}
-	)
-	b.Grow(len(s))
+		switch line {
+		case target - 2:
+			previous2 = text
+		case target - 1:
+			previous1 = text
+		case target:
+			return previous2, previous1, text
+		}
+		if newline < 0 {
+			return previous2, previous1, current
+		}
+		line++
+		query = query[newline+1:]
+	}
+}
+
+func writeErrorSourceLine(b *strings.Builder, line int, source string) {
+	writeErrorPaddedInt(b, line, 7)
+	b.WriteString(" | ")
+	writeExpandedTabs(b, source)
+	b.WriteByte('\n')
+}
+
+func writeErrorPaddedInt(b *strings.Builder, value, width int) {
+	var scratch [20]byte
+	digits := strconv.AppendInt(scratch[:0], int64(value), 10)
+	padding := width - len(digits)
+	if padding < 1 {
+		// The previous % 7d formatting always reserved a leading sign space
+		// for positive values, even when the digits exceeded the field width.
+		padding = 1
+	}
+	writeErrorSpaces(b, padding)
+	b.Write(digits)
+}
+
+func writeErrorInt(b *strings.Builder, value int) {
+	var scratch [20]byte
+	b.Write(strconv.AppendInt(scratch[:0], int64(value), 10))
+}
+
+func writeErrorSpaces(b *strings.Builder, count int) {
+	const spaces = "                                                                "
+	for count > len(spaces) {
+		b.WriteString(spaces)
+		count -= len(spaces)
+	}
+	if count > 0 {
+		b.WriteString(spaces[:count])
+	}
+}
+
+func writeExpandedTabs(b *strings.Builder, s string) {
+	l := 0
 	for _, r := range s {
 		switch r {
 		case '\t':
 			tw := 8 - l%8
-			b.WriteString(fill(tw))
+			writeErrorSpaces(b, tw)
 			l += tw
 		default:
 			b.WriteRune(r)
 			l += 1
 		}
 	}
-	return b.String()
+}
+
+func expandedTabLen(s string) int {
+	length, columns := 0, 0
+	for _, r := range s {
+		if r == '\t' {
+			width := 8 - columns%8
+			length += width
+			columns += width
+		} else {
+			length += utf8.RuneLen(r)
+			columns++
+		}
+	}
+	return length
 }
 
 func (cn *conn) handleError(reported error, query ...string) error {

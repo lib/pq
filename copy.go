@@ -392,11 +392,7 @@ func (ci *copyin) Exec(v []driver.Value) (driver.Result, error) {
 // network flush to be interrupted by ctx.
 func (ci *copyin) ExecContext(ctx context.Context, v []driver.NamedValue) (driver.Result, error) {
 	if ctx.Done() == nil {
-		values := make([]driver.Value, len(v))
-		for i := range v {
-			values[i] = v[i].Value
-		}
-		return ci.exec(values)
+		return ci.execNamed(v)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -404,16 +400,29 @@ func (ci *copyin) ExecContext(ctx context.Context, v []driver.NamedValue) (drive
 	finish := ci.cn.watchCancel(ctx, false)
 	defer finish.finish()
 
-	values := make([]driver.Value, len(v))
-	for i := range v {
-		values[i] = v[i].Value
-	}
-	result, err := ci.exec(values)
+	result, err := ci.execNamed(v)
 	finish.finish()
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
 	}
 	return result, err
+}
+
+func (ci *copyin) execNamed(v []driver.NamedValue) (driver.Result, error) {
+	// COPY rows ordinarily contain only a handful of columns. Keep their
+	// NamedValue-to-Value adapter on the stack while retaining an unbounded
+	// fallback for unusually wide rows.
+	var local [8]driver.Value
+	var values []driver.Value
+	if len(v) <= len(local) {
+		values = local[:len(v)]
+	} else {
+		values = make([]driver.Value, len(v))
+	}
+	for i := range v {
+		values[i] = v[i].Value
+	}
+	return ci.exec(values)
 }
 
 func (ci *copyin) exec(v []driver.Value) (driver.Result, error) {

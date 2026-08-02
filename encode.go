@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -156,14 +157,22 @@ func appendEncodedText(buf []byte, x any) ([]byte, error) {
 	case float64:
 		return strconv.AppendFloat(buf, v, 'f', -1, 64), nil
 	case []byte:
-		encodedBytea := encodeBytea(v)
-		return appendEscapedText(buf, string(encodedBytea)), nil
+		// encodeBytea produces a leading backslash, which COPY text escaping
+		// doubles. Append the final representation directly so a row buffer with
+		// sufficient capacity needs no temporary byte slice or string.
+		encodedLen := hex.EncodedLen(len(v))
+		start := len(buf)
+		buf = slices.Grow(buf, 3+encodedLen)
+		buf = buf[:start+3+encodedLen]
+		buf[start], buf[start+1], buf[start+2] = '\\', '\\', 'x'
+		hex.Encode(buf[start+3:], v)
+		return buf, nil
 	case string:
 		return appendEscapedText(buf, v), nil
 	case bool:
 		return strconv.AppendBool(buf, v), nil
 	case time.Time:
-		return append(buf, formatTS(v)...), nil
+		return appendFormatTS(buf, v), nil
 	case nil:
 		return append(buf, `\N`...), nil
 	default:
@@ -347,6 +356,20 @@ func formatTS(t time.Time) []byte {
 		}
 	}
 	return FormatTimestamp(t)
+}
+
+func appendFormatTS(buf []byte, t time.Time) []byte {
+	if infinityTSEnabled {
+		// t <= -infinity : ! (t > -infinity)
+		if !t.After(infinityTSNegative) {
+			return append(buf, "-infinity"...)
+		}
+		// t >= infinity : ! (!t < infinity)
+		if !t.Before(infinityTSPositive) {
+			return append(buf, "infinity"...)
+		}
+	}
+	return pqtime.AppendFormat(buf, t)
 }
 
 // FormatTimestamp formats t into Postgres' text format for timestamps.

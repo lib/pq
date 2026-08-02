@@ -118,7 +118,7 @@ func (rs *rows) Next(dest []driver.Value) (resErr error) {
 				return fmt.Errorf("pq: unexpected %s after error: %w", t, resErr)
 			}
 			if t == proto.CommandComplete {
-				rs.result, rs.tag, err = rs.cn.parseComplete(rs.rb.string())
+				rs.result, rs.tag, err = rs.cn.parseCompleteResponse(&rs.rb)
 				if err != nil {
 					return rs.cn.handleError(err)
 				}

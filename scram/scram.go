@@ -220,10 +220,19 @@ func (c *Client) step2(in []byte) error {
 	c.authMsg.WriteByte(',')
 	c.authMsg.Write(in)
 
-	fields := bytes.Split(in, []byte(","))
-	if len(fields) != 3 {
-		return fmt.Errorf("expected 3 fields in first SCRAM-SHA-256 server message, got %d: %q", len(fields), in)
+	firstComma := bytes.IndexByte(in, ',')
+	if firstComma < 0 {
+		return fmt.Errorf("expected 3 fields in first SCRAM-SHA-256 server message, got 1: %q", in)
 	}
+	secondComma := bytes.IndexByte(in[firstComma+1:], ',')
+	if secondComma < 0 {
+		return fmt.Errorf("expected 3 fields in first SCRAM-SHA-256 server message, got 2: %q", in)
+	}
+	secondComma += firstComma + 1
+	if bytes.IndexByte(in[secondComma+1:], ',') >= 0 {
+		return fmt.Errorf("expected 3 fields in first SCRAM-SHA-256 server message, got %d: %q", bytes.Count(in, []byte{','})+1, in)
+	}
+	fields := [...][]byte{in[:firstComma], in[firstComma+1 : secondComma], in[secondComma+1:]}
 	if !bytes.HasPrefix(fields[0], []byte("r=")) || len(fields[0]) < 2 {
 		return fmt.Errorf("server sent an invalid SCRAM-SHA-256 nonce: %q", fields[0])
 	}
@@ -257,24 +266,29 @@ func (c *Client) step2(in []byte) error {
 	c.out.WriteString("c=biws,r=")
 	c.out.Write(c.serverNonce)
 	c.out.WriteString(",p=")
-	c.out.Write(c.clientProof())
+	proof := c.clientProof()
+	c.out.Grow(b64.EncodedLen(len(proof)))
+	encodedProof := b64.AppendEncode(c.out.AvailableBuffer(), proof)
+	c.out.Write(encodedProof)
 	return nil
 }
 
 func (c *Client) step3(in []byte) error {
 	var isv, ise bool
-	var fields = bytes.Split(in, []byte(","))
-	if len(fields) == 1 {
-		isv = bytes.HasPrefix(fields[0], []byte("v="))
-		ise = bytes.HasPrefix(fields[0], []byte("e="))
+	if bytes.IndexByte(in, ',') < 0 {
+		isv = bytes.HasPrefix(in, []byte("v="))
+		ise = bytes.HasPrefix(in, []byte("e="))
 	}
 	if ise {
-		return fmt.Errorf("SCRAM-SHA-256 authentication error: %s", fields[0][2:])
+		return fmt.Errorf("SCRAM-SHA-256 authentication error: %s", in[2:])
 	} else if !isv {
 		return fmt.Errorf("unsupported SCRAM-SHA-256 final message from server: %q", in)
 	}
-	if !bytes.Equal(c.serverSignature(), fields[0][2:]) {
-		return fmt.Errorf("cannot authenticate SCRAM-SHA-256 server signature: %q", fields[0][2:])
+	signature := c.serverSignature()
+	c.authMsg.Grow(b64.EncodedLen(len(signature)))
+	encodedSignature := b64.AppendEncode(c.authMsg.AvailableBuffer(), signature)
+	if !bytes.Equal(encodedSignature, in[2:]) {
+		return fmt.Errorf("cannot authenticate SCRAM-SHA-256 server signature: %q", in[2:])
 	}
 	return nil
 }
@@ -310,9 +324,7 @@ func (c *Client) clientProof() []byte {
 	for i, b := range clientKey {
 		clientProof[i] ^= b
 	}
-	clientProof64 := make([]byte, b64.EncodedLen(len(clientProof)))
-	b64.Encode(clientProof64, clientProof)
-	return clientProof64
+	return clientProof
 }
 
 func (c *Client) serverSignature() []byte {
@@ -324,7 +336,5 @@ func (c *Client) serverSignature() []byte {
 	mac.Write(c.authMsg.Bytes())
 	serverSignature := mac.Sum(nil)
 
-	encoded := make([]byte, b64.EncodedLen(len(serverSignature)))
-	b64.Encode(encoded, serverSignature)
-	return encoded
+	return serverSignature
 }

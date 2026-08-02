@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/lib/pq/internal/pgservice"
 	"github.com/lib/pq/internal/pqutil"
@@ -213,9 +214,14 @@ var requireAuths = []RequireAuth{RequireAuthNone, RequireAuthPassword, RequireAu
 
 func (r RequireAuths) String() string {
 	var b strings.Builder
+	size := max(0, len(r)-1)
+	for _, method := range r {
+		size += len(method)
+	}
+	b.Grow(size)
 	for i, rr := range r {
 		if i > 0 {
-			b.WriteString(",")
+			b.WriteByte(',')
 		}
 		b.WriteString(string(rr))
 	}
@@ -625,7 +631,14 @@ func (cfg Config) Clone() Config {
 // avoiding those unnecessary copies keeps connector construction lightweight.
 func (cfg Config) cloneForConnector() Config {
 	c := cfg
-	c.Runtime = maps.Clone(cfg.Runtime)
+	if len(cfg.Runtime) == 0 {
+		// A nil map is just as isolated as a cloned empty map and avoids the map
+		// header and first-bucket allocations for parsed configurations that do
+		// not contain runtime parameters.
+		c.Runtime = nil
+	} else {
+		c.Runtime = maps.Clone(cfg.Runtime)
+	}
 	c.Multi = slices.Clone(cfg.Multi)
 	c.RequireAuth = slices.Clone(cfg.RequireAuth)
 	return c
@@ -704,6 +717,9 @@ func newConfig(dsn string, env []string) (Config, error) {
 	if len(cfg.multiHostaddr) > len(cfg.multiHost) {
 		cfg.multiHost = make([]string, len(cfg.multiHostaddr))
 	}
+	if len(cfg.multiHost) > 0 {
+		cfg.Multi = make([]ConfigMultihost, len(cfg.multiHost))
+	}
 	for i, h := range cfg.multiHost {
 		p := cfg.Port
 		if len(cfg.multiPort) > 0 {
@@ -713,11 +729,11 @@ func newConfig(dsn string, env []string) (Config, error) {
 		if len(cfg.multiHostaddr) > 0 {
 			addr = cfg.multiHostaddr[i]
 		}
-		cfg.Multi = append(cfg.Multi, ConfigMultihost{
+		cfg.Multi[i] = ConfigMultihost{
 			Host:     h,
 			Port:     p,
 			Hostaddr: addr,
-		})
+		}
 	}
 
 	// Use the "fallback" application name if necessary
@@ -734,8 +750,9 @@ func newConfig(dsn string, env []string) (Config, error) {
 		cfg.User = u
 	}
 
-	// SSL is not necessary or supported over UNIX domain sockets.
-	if nw, _ := cfg.network(); nw == "unix" {
+	// SSL is not necessary or supported over UNIX domain sockets. Avoid
+	// formatting the TCP address here; only the network kind is needed.
+	if !cfg.Hostaddr.IsValid() && (filepath.IsAbs(cfg.Host) || strings.HasPrefix(cfg.Host, "@")) {
 		cfg.SSLMode = SSLModeDisable
 	}
 
@@ -899,105 +916,233 @@ func (cfg *Config) fromDSN(dsn string) error {
 
 func parseDSN(dsn string) (map[string]string, error) {
 	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
-		var err error
-		dsn, err = convertURL(dsn)
-		if err != nil {
-			return nil, err
-		}
+		return parseURLDSN(dsn)
 	}
+	return parseKeywordDSN(dsn)
+}
 
-	var (
-		opt  = make(map[string]string)
-		s    = []rune(dsn)
-		i    int
-		next = func() (rune, bool) {
-			if i >= len(s) {
-				return 0, false
-			}
-			r := s[i]
-			i++
-			return r, true
-		}
-		skipSpaces = func() (rune, bool) {
-			r, ok := next()
-			for unicode.IsSpace(r) && ok {
-				r, ok = next()
-			}
-			return r, ok
-		}
-	)
+func parseKeywordDSN(dsn string) (map[string]string, error) {
+	opt := make(map[string]string)
+	scanner := dsnScanner{s: dsn}
 
 	for {
-		var (
-			keyRunes, valRunes []rune
-			r                  rune
-			ok                 bool
-		)
-
-		if r, ok = skipSpaces(); !ok {
+		r, start, ok := scanner.skipSpaces()
+		if !ok {
 			break
 		}
 
 		// Scan the key
+		keyStart, keyEnd := start, start
 		for !unicode.IsSpace(r) && r != '=' {
-			keyRunes = append(keyRunes, r)
-			if r, ok = next(); !ok {
+			keyEnd = scanner.i
+			if r, _, ok = scanner.next(); !ok {
 				break
 			}
 		}
+		key := normalizeDSNToken(dsn[keyStart:keyEnd])
 
 		// Skip any whitespace if we're not at the = yet
 		if r != '=' {
-			r, ok = skipSpaces()
+			r, _, ok = scanner.skipSpaces()
 		}
 
 		// The current character should be =
 		if r != '=' || !ok {
-			return nil, fmt.Errorf(`missing "=" after %q in connection info string`, string(keyRunes))
+			return nil, fmt.Errorf(`missing "=" after %q in connection info string`, key)
 		}
 
 		// Skip any whitespace after the =
-		if r, ok = skipSpaces(); !ok {
+		var valueStart int
+		if r, valueStart, ok = scanner.skipSpaces(); !ok {
 			// If we reach the end here, the last value is just an empty string as per libpq.
-			opt[string(keyRunes)] = ""
+			opt[key] = ""
 			break
 		}
 
-		if r != '\'' {
-			for !unicode.IsSpace(r) {
-				if r == '\\' {
-					if r, ok = next(); !ok {
-						return nil, fmt.Errorf(`missing character after backslash`)
-					}
-				}
-				valRunes = append(valRunes, r)
-
-				if r, ok = next(); !ok {
-					break
-				}
-			}
-		} else {
-		quote:
-			for {
-				if r, ok = next(); !ok {
-					return nil, fmt.Errorf(`unterminated quoted string literal in connection string`)
-				}
-				switch r {
-				case '\'':
-					break quote
-				case '\\':
-					r, _ = next()
-					fallthrough
-				default:
-					valRunes = append(valRunes, r)
-				}
-			}
+		value, err := scanner.value(r, valueStart)
+		if err != nil {
+			return nil, err
 		}
-
-		opt[string(keyRunes)] = string(valRunes)
+		opt[key] = value
 	}
 
 	return opt, nil
+}
+
+type dsnScanner struct {
+	s string
+	i int
+}
+
+func (s *dsnScanner) next() (r rune, start int, ok bool) {
+	if s.i >= len(s.s) {
+		return 0, s.i, false
+	}
+	start = s.i
+	r, size := utf8.DecodeRuneInString(s.s[s.i:])
+	s.i += size
+	return r, start, true
+}
+
+func (s *dsnScanner) skipSpaces() (r rune, start int, ok bool) {
+	r, start, ok = s.next()
+	for ok && unicode.IsSpace(r) {
+		r, start, ok = s.next()
+	}
+	return r, start, ok
+}
+
+func (s *dsnScanner) value(first rune, start int) (string, error) {
+	if first == '\'' {
+		contentStart := s.i
+		escaped := false
+		for {
+			r, runeStart, ok := s.next()
+			if !ok {
+				return "", fmt.Errorf(`unterminated quoted string literal in connection string`)
+			}
+			switch r {
+			case '\'':
+				raw := s.s[contentStart:runeStart]
+				if escaped {
+					return unescapeDSNValue(raw), nil
+				}
+				return normalizeDSNValue(raw), nil
+			case '\\':
+				escaped = true
+				if _, _, ok := s.next(); !ok {
+					return "", fmt.Errorf(`unterminated quoted string literal in connection string`)
+				}
+			}
+		}
+	}
+
+	r, end, escaped := first, s.i, false
+	for !unicode.IsSpace(r) {
+		if r == '\\' {
+			escaped = true
+			if _, _, ok := s.next(); !ok {
+				return "", fmt.Errorf(`missing character after backslash`)
+			}
+		}
+		end = s.i
+		var ok bool
+		if r, _, ok = s.next(); !ok {
+			break
+		}
+	}
+	raw := s.s[start:end]
+	if escaped {
+		return unescapeDSNValue(raw), nil
+	}
+	return normalizeDSNValue(raw), nil
+}
+
+func normalizeDSNValue(value string) string {
+	if utf8.ValidString(value) {
+		return strings.Clone(value)
+	}
+	return string([]rune(value))
+}
+
+func unescapeDSNValue(value string) string {
+	var result strings.Builder
+	result.Grow(len(value))
+	scanner := dsnScanner{s: value}
+	for {
+		r, _, ok := scanner.next()
+		if !ok {
+			break
+		}
+		if r == '\\' {
+			r, _, _ = scanner.next()
+		}
+		result.WriteRune(r)
+	}
+	return result.String()
+}
+
+func normalizeDSNToken(token string) string {
+	if utf8.ValidString(token) {
+		// Recognized keys are deleted as Config is filled, so they need no copy.
+		// Runtime keys remain in the returned Config and are cloned to avoid
+		// retaining an arbitrarily large caller-owned DSN through a short slice.
+		if knownDSNSetting(token) {
+			return token
+		}
+		return strings.Clone(token)
+	}
+	return string([]rune(token))
+}
+
+func knownDSNSetting(key string) bool {
+	switch key {
+	case "application_name", "binary_parameters", "client_encoding", "connect_timeout",
+		"database", "datestyle", "dbname", "disable_prepared_binary_result",
+		"fallback_application_name", "geqo", "host", "hostaddr", "krbspn", "krbsrvname",
+		"load_balance_hosts", "max_protocol_version", "min_protocol_version", "options",
+		"passfile", "password", "port", "require_auth", "service", "ssl_max_protocol_version",
+		"ssl_min_protocol_version", "sslcert", "sslinline", "sslkey", "sslmode",
+		"sslnegotiation", "sslrootcert", "sslsni", "target_session_attrs", "tz", "user":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseURLDSN(rawURL string) (map[string]string, error) {
+	u, err := parsePostgresURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+
+	options := make(map[string]string, 8)
+	fallback := false
+	accrue := func(key, value string) {
+		if value == "" {
+			return
+		}
+		// convertURL feeds its output through the keyword parser. Preserve that
+		// path for unusual keys, invalid UTF-8, or duplicate component/query
+		// keys whose winner is determined by the sorted keyword representation.
+		if !utf8.ValidString(key) || !utf8.ValidString(value) ||
+			strings.ContainsRune(key, '=') || strings.IndexFunc(key, unicode.IsSpace) >= 0 {
+			fallback = true
+			return
+		}
+		if _, exists := options[key]; exists {
+			fallback = true
+			return
+		}
+		if !knownDSNSetting(key) {
+			key = strings.Clone(key)
+		}
+		options[key] = strings.Clone(value)
+	}
+
+	if u.User != nil {
+		password, _ := u.User.Password()
+		accrue("user", u.User.Username())
+		accrue("password", password)
+	}
+	if host, port, splitErr := net.SplitHostPort(u.Host); splitErr != nil {
+		accrue("host", u.Host)
+	} else {
+		accrue("host", host)
+		accrue("port", port)
+	}
+	if u.Path != "" {
+		accrue("dbname", u.Path[1:])
+	}
+	query := u.Query()
+	for key := range query {
+		accrue(key, query.Get(key))
+	}
+	if !fallback {
+		return options, nil
+	}
+
+	return parseKeywordDSN(convertParsedURL(u))
 }
 
 func (cfg *Config) fromService() error {
@@ -1027,6 +1172,7 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 		types  = reflect.TypeFor[Config]()
 		values = reflect.ValueOf(cfg).Elem()
 	)
+	cfg.set = slices.Grow(cfg.set, len(o))
 	for i := 0; i < types.NumField(); i++ {
 		var (
 			rt                    = types.Field(i)
@@ -1067,13 +1213,19 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 				if rt.Type == reflect.TypeFor[netip.Addr]() {
 					if hostaddr {
 						cfg.multiHostaddr = nil
-						vv := strings.Split(v, ",")
-						v = vv[0]
-						for _, vvv := range vv[1:] {
-							if vvv == "" {
-								cfg.multiHostaddr = append(cfg.multiHostaddr, netip.Addr{})
-							} else {
-								ip, err := netip.ParseAddr(vvv)
+						if count := strings.Count(v, ","); count > 0 {
+							cfg.multiHostaddr = make([]netip.Addr, 0, count)
+							first := true
+							for part := range strings.SplitSeq(v, ",") {
+								if first {
+									v, first = part, false
+									continue
+								}
+								if part == "" {
+									cfg.multiHostaddr = append(cfg.multiHostaddr, netip.Addr{})
+									continue
+								}
+								ip, err := netip.ParseAddr(part)
 								if err != nil {
 									return fmt.Errorf(f+"%w", k, err)
 								}
@@ -1114,14 +1266,22 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 				}
 				if host {
 					cfg.multiHost = nil
-					vv := strings.Split(v, ",")
-					for i := range vv {
-						if vv[i] == "" {
-							vv[i] = "localhost"
+					if count := strings.Count(v, ","); count > 0 {
+						cfg.multiHost = make([]string, 0, count)
+						first := true
+						for part := range strings.SplitSeq(v, ",") {
+							if part == "" {
+								part = "localhost"
+							}
+							if first {
+								v, first = part, false
+							} else {
+								cfg.multiHost = append(cfg.multiHost, part)
+							}
 						}
+					} else if v == "" {
+						v = "localhost"
 					}
-					v = vv[0]
-					cfg.multiHost = append(cfg.multiHost, vv[1:]...)
 				}
 				rv.SetString(v)
 			case reflect.Slice:
@@ -1131,21 +1291,22 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 						continue
 					}
 					var (
-						vv  = strings.Split(v, ",")
-						s   = make(RequireAuths, len(vv))
-						neg = len(vv) > 0 && strings.HasPrefix(vv[0], "!")
+						s   = make(RequireAuths, 0, strings.Count(v, ",")+1)
+						neg = v[0] == '!'
 					)
-					for i := range vv {
-						if !slices.Contains(requireAuths, RequireAuth(vv[i])) {
-							return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, vv[i], pqutil.Join(requireAuths))
+					for value := range strings.SplitSeq(v, ",") {
+						method := RequireAuth(value)
+						if !slices.Contains(requireAuths, method) {
+							return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, value, pqutil.Join(requireAuths))
 						}
-						if neg && !strings.HasPrefix(vv[i], "!") {
-							return fmt.Errorf(f+`require_auth method %q cannot be mixed with negative methods`, k, vv[i])
+						negative := value != "" && value[0] == '!'
+						if neg && !negative {
+							return fmt.Errorf(f+`require_auth method %q cannot be mixed with negative methods`, k, value)
 						}
-						if !neg && strings.HasPrefix(vv[i], "!") {
-							return fmt.Errorf(f+`negative require_auth method %q cannot be mixed with non-negative methods`, k, vv[i])
+						if !neg && negative {
+							return fmt.Errorf(f+`negative require_auth method %q cannot be mixed with non-negative methods`, k, value)
 						}
-						s[i] = RequireAuth(vv[i])
+						s = append(s, method)
 					}
 					rv.Set(reflect.ValueOf(s))
 				}
@@ -1165,17 +1326,23 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 			case reflect.Uint16:
 				if port {
 					cfg.multiPort = nil
-					vv := strings.Split(v, ",")
-					v = vv[0]
-					for _, vvv := range vv[1:] {
-						if vvv == "" {
-							vvv = "5432"
+					if count := strings.Count(v, ","); count > 0 {
+						cfg.multiPort = make([]uint16, 0, count)
+						first := true
+						for part := range strings.SplitSeq(v, ",") {
+							if first {
+								v, first = part, false
+								continue
+							}
+							if part == "" {
+								part = "5432"
+							}
+							n, err := strconv.ParseUint(part, 10, 16)
+							if err != nil {
+								return fmt.Errorf(f+"%w", k, err)
+							}
+							cfg.multiPort = append(cfg.multiPort, uint16(n))
 						}
-						n, err := strconv.ParseUint(vvv, 10, 16)
-						if err != nil {
-							return fmt.Errorf(f+"%w", k, err)
-						}
-						cfg.multiPort = append(cfg.multiPort, uint16(n))
 					}
 					if v == "" {
 						v = "5432"
@@ -1382,15 +1549,26 @@ func isUTF8(name string) bool {
 }
 
 func convertURL(url string) (string, error) {
-	u, err := neturl.Parse(url)
+	u, err := parsePostgresURL(url)
 	if err != nil {
 		return "", err
 	}
+	return convertParsedURL(u), nil
+}
 
-	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
-		return "", fmt.Errorf("invalid connection protocol: %s", u.Scheme)
+func parsePostgresURL(url string) (*neturl.URL, error) {
+	u, err := neturl.Parse(url)
+	if err != nil {
+		return nil, err
 	}
 
+	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
+		return nil, fmt.Errorf("invalid connection protocol: %s", u.Scheme)
+	}
+	return u, nil
+}
+
+func convertParsedURL(u *neturl.URL) string {
 	var kvs []string
 	escaper := strings.NewReplacer(`'`, `\'`, `\`, `\\`)
 	accrue := func(k, v string) {
@@ -1422,5 +1600,5 @@ func convertURL(url string) (string, error) {
 	}
 
 	sort.Strings(kvs) // Makes testing easier (not a performance concern)
-	return strings.Join(kvs, " "), nil
+	return strings.Join(kvs, " ")
 }

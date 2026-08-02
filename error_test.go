@@ -315,6 +315,34 @@ func TestAs(t *testing.T) {
 	}
 }
 
+type customPQErrorAs struct{ err *Error }
+
+func (e customPQErrorAs) Error() string { return "custom pq error adapter" }
+
+func (e customPQErrorAs) As(target any) bool {
+	pqErr, ok := target.(**Error)
+	if ok {
+		*pqErr = e.err
+	}
+	return ok
+}
+
+func TestAsPreservesWrappedJoinedAndCustomTraversal(t *testing.T) {
+	pqErr := &Error{Code: pqerror.UniqueViolation, Message: "duplicate"}
+	for _, err := range []error{
+		fmt.Errorf("wrapped: %w", pqErr),
+		errors.Join(errors.New("first"), fmt.Errorf("nested: %w", pqErr)),
+		customPQErrorAs{err: pqErr},
+	} {
+		if got := As(err, pqerror.UniqueViolation); got != pqErr {
+			t.Fatalf("As(%T) = %#v; want %#v", err, got, pqErr)
+		}
+		if got := As(err, pqerror.SyntaxError); got != nil {
+			t.Fatalf("As(%T) with a non-matching code = %#v; want nil", err, got)
+		}
+	}
+}
+
 func BenchmarkError(b *testing.B) {
 	db := pqtest.MustDB(b)
 	_, err := db.Exec(pqtest.NormalizeIndent(`

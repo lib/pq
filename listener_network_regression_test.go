@@ -228,7 +228,7 @@ func TestListenerNetworkLossMarkerFollowsRetainedNotifications(t *testing.T) {
 	listener := &Listener{
 		Notify:            make(chan *Notification),
 		done:              make(chan struct{}),
-		notificationQueue: make(chan *Notification, listenerChannelCapacity),
+		notificationQueue: make(chan listenerNotification, listenerChannelCapacity),
 	}
 	dispatcherDone := make(chan struct{})
 	go func() {
@@ -280,7 +280,7 @@ func TestListenerNetworkDirectDeliveryPreservesFallbackOrder(t *testing.T) {
 	listener := &Listener{
 		Notify:            make(chan *Notification, 1),
 		done:              make(chan struct{}),
-		notificationQueue: make(chan *Notification, listenerChannelCapacity),
+		notificationQueue: make(chan listenerNotification, listenerChannelCapacity),
 	}
 	dispatcherDone := make(chan struct{})
 	go func() {

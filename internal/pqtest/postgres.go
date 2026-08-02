@@ -19,6 +19,7 @@ import (
 const (
 	useTestcontainersEnv = "PQTEST_USE_TESTCONTAINERS"
 	postgresImageEnv     = "PQTEST_POSTGRES_IMAGE"
+	pureBenchmarkEnv     = "PQTEST_PURE_BENCHMARK"
 	defaultPostgresImage = "postgres:18"
 )
 
@@ -167,6 +168,9 @@ func Teardown() error {
 // Main supplies the standard TestMain lifecycle for packages whose tests need
 // PostgreSQL.
 func Main(m *testing.M) int {
+	if PureBenchmark() {
+		return m.Run()
+	}
 	if err := Setup(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -179,6 +183,35 @@ func Main(m *testing.M) int {
 		}
 	}
 	return code
+}
+
+// PureBenchmark reports whether the caller explicitly requested an in-memory,
+// benchmark-only run. Requiring -run '^$' prevents the opt-in from silently
+// bypassing PostgreSQL setup for ordinary tests.
+func PureBenchmark() bool {
+	if os.Getenv(pureBenchmarkEnv) != "1" {
+		return false
+	}
+	bench, hasBench := testFlagValue(os.Args, "-test.bench")
+	run, hasRun := testFlagValue(os.Args, "-test.run")
+	return hasBench && bench != "" && hasRun && run == "^$"
+}
+
+// testFlagValue reads a flag from os.Args because testing does not parse its
+// flags until testing.M.Run, after TestMain has selected the test lifecycle.
+func testFlagValue(args []string, name string) (string, bool) {
+	for i := 1; i < len(args); i++ {
+		if args[i] == name {
+			if i+1 == len(args) {
+				return "", true
+			}
+			return args[i+1], true
+		}
+		if value, ok := strings.CutPrefix(args[i], name+"="); ok {
+			return value, true
+		}
+	}
+	return "", false
 }
 
 func useTestcontainers() (bool, error) {

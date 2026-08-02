@@ -1,7 +1,6 @@
 package hstore
 
 import (
-	"bytes"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/binary"
@@ -24,14 +23,22 @@ func (h *Hstore) Scan(value any) error {
 		return nil
 	}
 	h.Map = make(map[string]sql.NullString)
+	input := value.([]byte)
+	if len(input) == 0 {
+		return nil
+	}
 	var b byte
-	pair := [][]byte{{}, {}}
+	var pairStorage [64]byte
+	pair := [2][]byte{
+		pairStorage[:0:32],
+		pairStorage[32:32:64],
+	}
 	pi := 0
 	inQuote := false
 	didQuote := false
 	sawSlash := false
 	bindex := 0
-	for bindex, b = range value.([]byte) {
+	for bindex, b = range input {
 		if sawSlash {
 			pair[pi] = append(pair[pi], b)
 			sawSlash = false
@@ -61,13 +68,13 @@ func (h *Hstore) Scan(value any) error {
 					continue
 				case ',':
 					s := string(pair[1])
-					if !didQuote && len(s) == 4 && strings.ToLower(s) == "null" {
+					if !didQuote && len(s) == 4 && strings.EqualFold(s, "null") {
 						h.Map[string(pair[0])] = sql.NullString{String: "", Valid: false}
 					} else {
-						h.Map[string(pair[0])] = sql.NullString{String: string(pair[1]), Valid: true}
+						h.Map[string(pair[0])] = sql.NullString{String: s, Valid: true}
 					}
-					pair[0] = []byte{}
-					pair[1] = []byte{}
+					pair[0] = pair[0][:0]
+					pair[1] = pair[1][:0]
 					pi = 0
 					continue
 				}
@@ -77,36 +84,35 @@ func (h *Hstore) Scan(value any) error {
 	}
 	if bindex > 0 {
 		s := string(pair[1])
-		if !didQuote && len(s) == 4 && strings.ToLower(s) == "null" {
+		if !didQuote && len(s) == 4 && strings.EqualFold(s, "null") {
 			h.Map[string(pair[0])] = sql.NullString{String: "", Valid: false}
 		} else {
-			h.Map[string(pair[0])] = sql.NullString{String: string(pair[1]), Valid: true}
+			h.Map[string(pair[0])] = sql.NullString{String: s, Valid: true}
 		}
 	}
 	return nil
 }
 
-var hQuoteRepl = strings.NewReplacer("\\", "\\\\", "\"", "\\\"")
-
-// Escapes and quotes hstore keys/values. s should be a sql.NullString or string
-func hQuote(b *bytes.Buffer, s any) {
-	var str string
-	switch v := s.(type) {
-	case sql.NullString:
-		if !v.Valid {
-			b.WriteString("NULL")
-			return
+func appendHstoreQuotedString(b []byte, str string) []byte {
+	b = append(b, '"')
+	for {
+		escape := strings.IndexAny(str, `\"`)
+		if escape < 0 {
+			b = append(b, str...)
+			break
 		}
-		str = v.String
-	case string:
-		str = v
-	default:
-		panic("not a string or sql.NullString")
+		b = append(b, str[:escape]...)
+		b = append(b, '\\', str[escape])
+		str = str[escape+1:]
 	}
+	return append(b, '"')
+}
 
-	b.WriteByte('"')
-	b.WriteString(hQuoteRepl.Replace(str))
-	b.WriteByte('"')
+func appendHstoreNullString(b []byte, value sql.NullString) []byte {
+	if !value.Valid {
+		return append(b, "NULL"...)
+	}
+	return appendHstoreQuotedString(b, value.String)
 }
 
 // Value implements the driver Valuer interface. Note if h.Map is nil, the
@@ -119,17 +125,18 @@ func (h Hstore) Value() (driver.Value, error) {
 		return []byte(""), nil
 	}
 
-	b := new(bytes.Buffer)
-	b.Grow(len(h.Map) * 8)
+	// Most hstores have short keys and values. Reserve enough room for the
+	// common case while retaining a single encoding pass for larger entries.
+	b := make([]byte, 0, len(h.Map)*32)
 	for k, v := range h.Map {
-		if b.Len() > 0 {
-			b.WriteByte(',')
+		if len(b) > 0 {
+			b = append(b, ',')
 		}
-		hQuote(b, k)
-		b.WriteString("=>")
-		hQuote(b, v)
+		b = appendHstoreQuotedString(b, k)
+		b = append(b, "=>"...)
+		b = appendHstoreNullString(b, v)
 	}
-	return b.Bytes(), nil
+	return b, nil
 }
 
 func (h Hstore) BinaryValue() ([]byte, error) {
@@ -137,7 +144,14 @@ func (h Hstore) BinaryValue() ([]byte, error) {
 		return nil, nil
 	}
 
-	b := make([]byte, 0, len(h.Map)*12)
+	size := 4
+	for k, v := range h.Map {
+		size += 8 + len(k)
+		if v.Valid {
+			size += len(v.String)
+		}
+	}
+	b := make([]byte, 0, size)
 	b = binary.BigEndian.AppendUint32(b, uint32(len(h.Map)))
 	for k, v := range h.Map {
 		b = binary.BigEndian.AppendUint32(b, uint32(len(k)))

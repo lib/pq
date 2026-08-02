@@ -65,8 +65,14 @@ func getTLSConfigClone(key string) *tls.Config {
 // Don't refer to Config.SSLMode here, as the mode in arguments may be different
 // in case of sslmode=allow or prefer.
 func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
+	if mode == SSLModeDisable || mode == SSLModeAllow {
+		return nil, nil
+	}
+
 	var (
-		home = pqutil.Home(true)
+		home              string
+		host              = cfg.Host
+		directNegotiation = cfg.SSLNegotiation == SSLNegotiationDirect
 		// Don't set defaults here, because tlsConf may be overwritten if a
 		// custom one was registered. Set it after the sslmode switch.
 		tlsConf = &tls.Config{}
@@ -74,6 +80,9 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 		verifyCaOnly    = false
 		verifyFullNoSNI = false
 	)
+	if !cfg.SSLInline {
+		home = pqutil.Home(true)
+	}
 	if mode.useSSL() && !cfg.SSLInline && cfg.SSLRootCert == "" && !cfg.isset("sslrootcert") && home != "" {
 		f := filepath.Join(home, "root.crt")
 		if _, err := os.Stat(f); err == nil {
@@ -84,9 +93,6 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 		return nil, &tls.CertificateVerificationError{Err: errors.New("pq: sslmode requires a root certificate")}
 	}
 	switch {
-	case mode == SSLModeDisable || mode == SSLModeAllow:
-		return nil, nil
-
 	case mode == SSLModeRequire || mode == SSLModePrefer:
 		// Skip TLS's own verification since it requires full verification.
 		tlsConf.InsecureSkipVerify = true
@@ -113,11 +119,11 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 		tlsConf.InsecureSkipVerify = true
 		verifyCaOnly = true
 	case mode == SSLModeVerifyFull:
-		if cfg.Host == "" {
+		if host == "" {
 			return nil, errors.New("pq: sslmode=verify-full requires a host name")
 		}
 		if cfg.SSLSNI {
-			tlsConf.ServerName = cfg.Host
+			tlsConf.ServerName = host
 		} else {
 			// crypto/tls uses ServerName for both SNI and verification. Disable
 			// its verification so we can verify the chain and hostname below
@@ -143,7 +149,7 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 
 	// ALPN is mandatory with direct SSL connections; PostgreSQL only supports
 	// one protocol.
-	if cfg.SSLNegotiation == SSLNegotiationDirect {
+	if directNegotiation {
 		tlsConf.NextProtos = []string{proto.ALPNProtocol}
 	}
 
@@ -151,7 +157,7 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 	// IPv6). This check is coded already crypto.tls.hostnameInSNI, so just
 	// always set ServerName here and let crypto/tls do the filtering.
 	if cfg.SSLSNI {
-		tlsConf.ServerName = cfg.Host
+		tlsConf.ServerName = host
 	}
 
 	err := sslClientCertificates(tlsConf, cfg, home)
@@ -166,7 +172,7 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 	if verifyFullNoSNI {
 		tlsConf.VerifyConnection = func(state tls.ConnectionState) error {
 			opts := x509.VerifyOptions{
-				DNSName:       cfg.Host,
+				DNSName:       host,
 				Intermediates: x509.NewCertPool(),
 				Roots:         tlsConf.RootCAs,
 			}
@@ -186,6 +192,8 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 	//
 	// TODO: I think this can be removed?
 	tlsConf.Renegotiation = tls.RenegotiateFreelyAsClient
+	eagerHandshake := verifyCaOnly || mode == SSLModePrefer ||
+		(mode == SSLModeVerifyFull && !verifyFullNoSNI) || directNegotiation
 
 	return func(conn net.Conn) (net.Conn, error) {
 		client := tls.Client(conn, tlsConf)
@@ -195,9 +203,6 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 		// Certificate verification errors must be reported before startup writes
 		// can classify them as safe to retry. verify-ca has always handshaken here
 		// before doing its manual chain check.
-		eagerHandshake := verifyCaOnly || mode == SSLModePrefer ||
-			(mode == SSLModeVerifyFull && !verifyFullNoSNI) ||
-			cfg.SSLNegotiation == SSLNegotiationDirect
 		if eagerHandshake {
 			if err := client.Handshake(); err != nil {
 				return client, err
@@ -215,7 +220,7 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 				return client, err
 			}
 		}
-		if cfg.SSLNegotiation == SSLNegotiationDirect &&
+		if directNegotiation &&
 			client.ConnectionState().NegotiatedProtocol != proto.ALPNProtocol {
 			return client, fmt.Errorf("pq: direct SSL connection did not negotiate ALPN protocol %q", proto.ALPNProtocol)
 		}

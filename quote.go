@@ -17,24 +17,56 @@ import (
 // sensitive when used in a query. If the input string contains a zero byte, the
 // result will be truncated immediately before it.
 func QuoteIdentifier(name string) string {
-	end := strings.IndexRune(name, 0)
+	end := strings.IndexByte(name, 0)
 	if end > -1 {
 		name = name[:end]
 	}
-	return `"` + strings.Replace(name, `"`, `""`, -1) + `"`
+	quoteCount := strings.Count(name, `"`)
+	if quoteCount == 0 {
+		return `"` + name + `"`
+	}
+
+	var buffer strings.Builder
+	buffer.Grow(len(name) + quoteCount + 2)
+	buffer.WriteByte('"')
+	writeQuotedIdentifier(name, &buffer)
+	buffer.WriteByte('"')
+	return buffer.String()
 }
 
 // BufferQuoteIdentifier satisfies the same purpose as QuoteIdentifier, but backed by a
 // byte buffer.
 func BufferQuoteIdentifier(name string, buffer *bytes.Buffer) {
 	// TODO(v2): this should have accepted an io.Writer, not *bytes.Buffer.
-	end := strings.IndexRune(name, 0)
+	end := strings.IndexByte(name, 0)
 	if end > -1 {
 		name = name[:end]
 	}
-	buffer.WriteRune('"')
-	buffer.WriteString(strings.Replace(name, `"`, `""`, -1))
-	buffer.WriteRune('"')
+	buffer.WriteByte('"')
+	for {
+		quote := strings.IndexByte(name, '"')
+		if quote < 0 {
+			buffer.WriteString(name)
+			break
+		}
+		buffer.WriteString(name[:quote+1])
+		buffer.WriteByte('"')
+		name = name[quote+1:]
+	}
+	buffer.WriteByte('"')
+}
+
+func writeQuotedIdentifier(name string, buffer *strings.Builder) {
+	for {
+		quote := strings.IndexByte(name, '"')
+		if quote < 0 {
+			buffer.WriteString(name)
+			return
+		}
+		buffer.WriteString(name[:quote+1])
+		buffer.WriteByte('"')
+		name = name[quote+1:]
+	}
 }
 
 // QuoteLiteral quotes a 'literal' (e.g. a parameter, often used to pass literal
@@ -53,19 +85,29 @@ func QuoteLiteral(literal string) string {
 	// which is found in the libpq/fe-exec.c source file:
 	// https://git.postgresql.org/gitweb/?p=postgresql.git;a=blob;f=src/interfaces/libpq/fe-exec.c
 	//
-	// substitute any single-quotes (') with two single-quotes ('')
-	literal = strings.Replace(literal, `'`, `''`, -1)
-	// determine if the string has any backslashes (\) in it.
-	// if it does, replace any backslashes (\) with two backslashes (\\)
-	// then, we need to wrap the entire string with a PostgreSQL
-	// C-style escape. Per how "PQEscapeStringInternal" handles this case, we
-	// also add a space before the "E"
-	if strings.Contains(literal, `\`) {
-		literal = strings.Replace(literal, `\`, `\\`, -1)
-		literal = ` E'` + literal + `'`
-	} else {
-		// otherwise, we can just wrap the literal with a pair of single quotes
-		literal = `'` + literal + `'`
+	quoteCount := strings.Count(literal, `'`)
+	backslashCount := strings.Count(literal, `\`)
+	if quoteCount == 0 && backslashCount == 0 {
+		return `'` + literal + `'`
 	}
-	return literal
+
+	var buffer strings.Builder
+	if backslashCount == 0 {
+		buffer.Grow(len(literal) + quoteCount + 2)
+		buffer.WriteByte('\'')
+	} else {
+		buffer.Grow(len(literal) + quoteCount + backslashCount + 4)
+		buffer.WriteString(` E'`)
+	}
+	for i := range len(literal) {
+		switch literal[i] {
+		case '\'', '\\':
+			buffer.WriteByte(literal[i])
+			buffer.WriteByte(literal[i])
+		default:
+			buffer.WriteByte(literal[i])
+		}
+	}
+	buffer.WriteByte('\'')
+	return buffer.String()
 }

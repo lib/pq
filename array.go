@@ -4,16 +4,20 @@ import (
 	"bytes"
 	"database/sql"
 	"database/sql/driver"
-	"encoding/hex"
 	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var typeByteSlice = reflect.TypeFor[[]byte]()
 var typeDriverValuer = reflect.TypeFor[driver.Valuer]()
 var typeSQLScanner = reflect.TypeFor[sql.Scanner]()
+var typeBool = reflect.TypeFor[bool]()
+var typeFloat64 = reflect.TypeFor[float64]()
+var typeInt64 = reflect.TypeFor[int64]()
+var typeString = reflect.TypeFor[string]()
 
 // Array returns the optimal driver.Valuer and sql.Scanner for an array or
 // slice of any dimension.
@@ -197,22 +201,42 @@ func (a ByteaArray) Value() (driver.Value, error) {
 		// 3*N bytes of hex formatting, and N-1 bytes of delimiters.
 		size := 1 + 6*n
 		for _, x := range a {
-			size += hex.EncodedLen(len(x))
+			size += 2 * len(x)
 		}
 
-		b := make([]byte, size)
-
-		for i, s := 0, b; i < n; i++ {
-			o := copy(s, `,"\\x`)
-			o += hex.Encode(s[o:], a[i])
-			s[o] = '"'
-			s = s[o+1:]
+		const hexDigits = "0123456789abcdef"
+		if size <= 128 {
+			var local [128]byte
+			b := append(local[:0], '{')
+			for i, value := range a {
+				if i > 0 {
+					b = append(b, ',')
+				}
+				b = append(b, `"\\x`...)
+				for _, valueByte := range value {
+					b = append(b, hexDigits[valueByte>>4], hexDigits[valueByte&0x0f])
+				}
+				b = append(b, '"')
+			}
+			return string(append(b, '}')), nil
 		}
 
-		b[0] = '{'
-		b[size-1] = '}'
-
-		return string(b), nil
+		var b strings.Builder
+		b.Grow(size)
+		b.WriteByte('{')
+		for i, value := range a {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(`"\\x`)
+			for _, valueByte := range value {
+				b.WriteByte(hexDigits[valueByte>>4])
+				b.WriteByte(hexDigits[valueByte&0x0f])
+			}
+			b.WriteByte('"')
+		}
+		b.WriteByte('}')
+		return b.String(), nil
 	}
 
 	return "{}", nil
@@ -264,17 +288,14 @@ func (a Float64Array) Value() (driver.Value, error) {
 	}
 
 	if n := len(a); n > 0 {
-		// There will be at least two curly brackets, N bytes of values,
-		// and N-1 bytes of delimiters.
-		b := make([]byte, 1, 1+2*n)
-		b[0] = '{'
-
-		b = strconv.AppendFloat(b, a[0], 'f', -1, 64)
-		for i := 1; i < n; i++ {
-			b = append(b, ',')
-			b = strconv.AppendFloat(b, a[i], 'f', -1, 64)
+		var local [256]byte
+		b := append(local[:0], '{')
+		for i, value := range a {
+			if i > 0 {
+				b = append(b, ',')
+			}
+			b = strconv.AppendFloat(b, value, 'f', -1, 64)
 		}
-
 		return string(append(b, '}')), nil
 	}
 
@@ -328,17 +349,14 @@ func (a Float32Array) Value() (driver.Value, error) {
 	}
 
 	if n := len(a); n > 0 {
-		// There will be at least two curly brackets, N bytes of values,
-		// and N-1 bytes of delimiters.
-		b := make([]byte, 1, 1+2*n)
-		b[0] = '{'
-
-		b = strconv.AppendFloat(b, float64(a[0]), 'f', -1, 32)
-		for i := 1; i < n; i++ {
-			b = append(b, ',')
-			b = strconv.AppendFloat(b, float64(a[i]), 'f', -1, 32)
+		var local [128]byte
+		b := append(local[:0], '{')
+		for i, value := range a {
+			if i > 0 {
+				b = append(b, ',')
+			}
+			b = strconv.AppendFloat(b, float64(value), 'f', -1, 32)
 		}
-
 		return string(append(b, '}')), nil
 	}
 
@@ -546,18 +564,24 @@ func (a Int64Array) Value() (driver.Value, error) {
 	}
 
 	if n := len(a); n > 0 {
-		// There will be at least two curly brackets, N bytes of values,
-		// and N-1 bytes of delimiters.
-		b := make([]byte, 1, 1+2*n)
-		b[0] = '{'
-
-		b = strconv.AppendInt(b, a[0], 10)
-		for i := 1; i < n; i++ {
-			b = append(b, ',')
-			b = strconv.AppendInt(b, a[i], 10)
+		// There will be two curly brackets, N-1 bytes of delimiters,
+		// and the decimal representation of each value.
+		size := 1 + n
+		for _, value := range a {
+			size += arrayInt64StringLen(value)
 		}
-
-		return string(append(b, '}')), nil
+		var b strings.Builder
+		b.Grow(size)
+		b.WriteByte('{')
+		var scratch [20]byte
+		for i, value := range a {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.Write(strconv.AppendInt(scratch[:0], value, 10))
+		}
+		b.WriteByte('}')
+		return b.String(), nil
 	}
 
 	return "{}", nil
@@ -609,21 +633,95 @@ func (a Int32Array) Value() (driver.Value, error) {
 	}
 
 	if n := len(a); n > 0 {
-		// There will be at least two curly brackets, N bytes of values,
-		// and N-1 bytes of delimiters.
-		b := make([]byte, 1, 1+2*n)
-		b[0] = '{'
-
-		b = strconv.AppendInt(b, int64(a[0]), 10)
-		for i := 1; i < n; i++ {
-			b = append(b, ',')
-			b = strconv.AppendInt(b, int64(a[i]), 10)
+		// Ten maximally wide int32 values, their delimiters, and braces fit in
+		// this stack buffer. Formatting directly into it avoids both a sizing
+		// pass and an intermediate heap allocation for the common small-array
+		// case.
+		if n <= 10 {
+			var local [128]byte
+			b := append(local[:0], '{')
+			for i, value := range a {
+				if i > 0 {
+					b = append(b, ',')
+				}
+				b = strconv.AppendInt(b, int64(value), 10)
+			}
+			return string(append(b, '}')), nil
 		}
 
-		return string(append(b, '}')), nil
+		// There will be two curly brackets, N-1 bytes of delimiters,
+		// and the decimal representation of each value.
+		size := 1 + n
+		for _, value := range a {
+			size += arrayInt64StringLen(int64(value))
+		}
+		var b strings.Builder
+		b.Grow(size)
+		b.WriteByte('{')
+		var scratch [20]byte
+		for i, value := range a {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.Write(strconv.AppendInt(scratch[:0], int64(value), 10))
+		}
+		b.WriteByte('}')
+		return b.String(), nil
 	}
 
 	return "{}", nil
+}
+
+func arrayInt64StringLen(value int64) int {
+	sign := 0
+	var magnitude uint64
+	if value < 0 {
+		sign = 1
+		magnitude = uint64(-(value + 1)) + 1
+	} else {
+		magnitude = uint64(value)
+	}
+
+	switch {
+	case magnitude < 10:
+		return sign + 1
+	case magnitude < 100:
+		return sign + 2
+	case magnitude < 1_000:
+		return sign + 3
+	case magnitude < 10_000:
+		return sign + 4
+	case magnitude < 100_000:
+		return sign + 5
+	case magnitude < 1_000_000:
+		return sign + 6
+	case magnitude < 10_000_000:
+		return sign + 7
+	case magnitude < 100_000_000:
+		return sign + 8
+	case magnitude < 1_000_000_000:
+		return sign + 9
+	case magnitude < 10_000_000_000:
+		return sign + 10
+	case magnitude < 100_000_000_000:
+		return sign + 11
+	case magnitude < 1_000_000_000_000:
+		return sign + 12
+	case magnitude < 10_000_000_000_000:
+		return sign + 13
+	case magnitude < 100_000_000_000_000:
+		return sign + 14
+	case magnitude < 1_000_000_000_000_000:
+		return sign + 15
+	case magnitude < 10_000_000_000_000_000:
+		return sign + 16
+	case magnitude < 100_000_000_000_000_000:
+		return sign + 17
+	case magnitude < 1_000_000_000_000_000_000:
+		return sign + 18
+	default:
+		return sign + 19
+	}
 }
 
 // StringArray represents a one-dimensional array of the PostgreSQL character types.
@@ -670,21 +768,84 @@ func (a StringArray) Value() (driver.Value, error) {
 	}
 
 	if n := len(a); n > 0 {
-		// There will be at least two curly brackets, 2*N bytes of quotes,
-		// and N-1 bytes of delimiters.
-		b := make([]byte, 1, 1+3*n)
-		b[0] = '{'
-
-		b = appendArrayQuotedBytes(b, []byte(a[0]))
-		for i := 1; i < n; i++ {
-			b = append(b, ',')
-			b = appendArrayQuotedBytes(b, []byte(a[i]))
+		// The worst case doubles every input byte because quotes and backslashes
+		// must be escaped. Use that cheap bound to select a one-pass stack path;
+		// larger values retain the exact-size builder path below.
+		if n <= (128-1)/3 {
+			worstSize := 1 + 3*n
+			useLocal := true
+			for _, value := range a {
+				if len(value) > (128-worstSize)/2 {
+					useLocal = false
+					break
+				}
+				worstSize += 2 * len(value)
+			}
+			if useLocal {
+				var local [128]byte
+				b := append(local[:0], '{')
+				for i, value := range a {
+					if i > 0 {
+						b = append(b, ',')
+					}
+					b = appendArrayQuotedStringValue(b, value)
+				}
+				return string(append(b, '}')), nil
+			}
 		}
 
-		return string(append(b, '}')), nil
+		// There will be at least two curly brackets, 2*N bytes of quotes,
+		// and N-1 bytes of delimiters.
+		size := 1 + 3*n
+		for _, value := range a {
+			size += len(value) + strings.Count(value, `\`) + strings.Count(value, `"`)
+		}
+
+		var b strings.Builder
+		b.Grow(size)
+		b.WriteByte('{')
+		for i, value := range a {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			writeArrayQuotedString(&b, value)
+		}
+		b.WriteByte('}')
+		return b.String(), nil
 	}
 
 	return "{}", nil
+}
+
+func writeArrayQuotedString(b *strings.Builder, value string) {
+	b.WriteByte('"')
+	for {
+		escape := strings.IndexAny(value, `"\`)
+		if escape < 0 {
+			b.WriteString(value)
+			break
+		}
+		b.WriteString(value[:escape])
+		b.WriteByte('\\')
+		b.WriteByte(value[escape])
+		value = value[escape+1:]
+	}
+	b.WriteByte('"')
+}
+
+func appendArrayQuotedStringValue(b []byte, value string) []byte {
+	b = append(b, '"')
+	start := 0
+	for i := 0; i < len(value); i++ {
+		if value[i] != '"' && value[i] != '\\' {
+			continue
+		}
+		b = append(b, value[start:i]...)
+		b = append(b, '\\', value[i])
+		start = i + 1
+	}
+	b = append(b, value[start:]...)
+	return append(b, '"')
 }
 
 // appendArray appends rv to the buffer, returning the extended buffer and the
@@ -730,6 +891,22 @@ func appendArrayElement(b []byte, rv reflect.Value) ([]byte, string, error) {
 		}
 	}
 
+	// Exact built-in driver value types cannot carry custom Valuer or
+	// ArrayDelimiter methods. Format them directly to avoid boxing each element
+	// into an interface and allocating in driver.DefaultParameterConverter.
+	switch rv.Type() {
+	case typeBool:
+		return strconv.AppendBool(b, rv.Bool()), ",", nil
+	case typeFloat64:
+		return strconv.AppendFloat(b, rv.Float(), 'f', -1, 64), ",", nil
+	case typeInt64:
+		return strconv.AppendInt(b, rv.Int(), 10), ",", nil
+	case typeString:
+		return appendArrayQuotedBytes(b, []byte(rv.String())), ",", nil
+	case typeByteSlice:
+		return appendArrayQuotedBytes(b, rv.Bytes()), ",", nil
+	}
+
 	var del = ","
 	var err error
 	var iv = rv.Interface()
@@ -773,11 +950,21 @@ func appendArrayQuotedBytes(b, v []byte) []byte {
 }
 
 func appendValue(b []byte, v driver.Value) ([]byte, error) {
-	enc, err := encode(v, 0)
-	if err != nil {
-		return nil, err
+	// DefaultParameterConverter has reduced the value to one of the driver
+	// types below. Append scalar encodings to the array buffer directly instead
+	// of allocating a temporary encoded slice.
+	switch v := v.(type) {
+	case int64:
+		return strconv.AppendInt(b, v, 10), nil
+	case float64:
+		return strconv.AppendFloat(b, v, 'f', -1, 64), nil
+	case bool:
+		return strconv.AppendBool(b, v), nil
+	case time.Time:
+		return appendFormatTS(b, v), nil
+	default:
+		return nil, fmt.Errorf("pq: encode: unknown type for %T", v)
 	}
-	return append(b, enc...), nil
 }
 
 // parseArray extracts the dimensions and elements of an array represented in
@@ -788,6 +975,7 @@ func appendValue(b []byte, v driver.Value) ([]byte, error) {
 // See http://www.postgresql.org/docs/current/static/arrays.html#ARRAYS-IO
 func parseArray(src, del []byte) (dims []int, elems [][]byte, err error) {
 	var depth, i int
+	var quoted []byte
 
 	if len(src) < 1 || src[0] != '{' {
 		return nil, nil, fmt.Errorf("pq: unable to parse array; expected %q at offset %d", '{', 0)
@@ -807,6 +995,10 @@ Open:
 		}
 	}
 	dims = make([]int, i)
+	// Delimiters inside quoted elements make this an upper bound. Cap the hint
+	// so a single delimiter-heavy quoted value cannot cause disproportionate
+	// allocation, while still avoiding repeated growth for typical arrays.
+	elems = make([][]byte, 0, min(bytes.Count(src[i:], del)+1, 16))
 
 Element:
 	for i < len(src) {
@@ -819,20 +1011,43 @@ Element:
 			dims[depth-1] = 0
 			i++
 		case '"':
-			var elem = []byte{}
+			if quoted == nil {
+				// All decoded quoted elements share owned backing storage. Start with
+				// a bounded allocation so a tiny quoted value in an otherwise large
+				// array does not retain memory proportional to the entire wire input;
+				// append grows the scratch in proportion to quoted content instead.
+				quoted = make([]byte, 0, min(len(src), 64))
+			}
+			// For a large remaining payload, look only as far as this quoted
+			// element's terminator and reserve its decoded size. This avoids a
+			// long sequence of growth allocations for a genuinely large quoted
+			// value without sizing scratch from unrelated unquoted input.
+			if len(src)-i > 1024 {
+				if decoded, ok := arrayQuotedElementLen(src[i+1:]); ok {
+					if decoded > cap(quoted)-len(quoted) {
+						// Earlier elements retain the old backing allocation, so
+						// starting fresh avoids copying and pinning their bytes twice.
+						quoted = make([]byte, 0, decoded)
+					}
+				}
+			}
+			start := len(quoted)
 			var escape bool
 			for i++; i < len(src); i++ {
 				if escape {
-					elem = append(elem, src[i])
+					quoted = append(quoted, src[i])
 					escape = false
 				} else {
 					switch src[i] {
 					default:
-						elem = append(elem, src[i])
+						quoted = append(quoted, src[i])
 					case '\\':
 						escape = true
 					case '"':
-						elems = append(elems, elem)
+						end := len(quoted)
+						// Limit capacity to this element so a Scanner retaining and
+						// appending to it cannot overwrite the following element.
+						elems = append(elems, quoted[start:end:end])
 						i++
 						break Element
 					}
@@ -889,6 +1104,27 @@ Close:
 		}
 	}
 	return
+}
+
+func arrayQuotedElementLen(src []byte) (int, bool) {
+	decoded := 0
+	escape := false
+	for _, value := range src {
+		if escape {
+			decoded++
+			escape = false
+			continue
+		}
+		switch value {
+		case '\\':
+			escape = true
+		case '"':
+			return decoded, true
+		default:
+			decoded++
+		}
+	}
+	return 0, false
 }
 
 func scanLinearArray(src, del []byte, typ string) (elems [][]byte, err error) {

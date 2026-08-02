@@ -155,8 +155,21 @@ func Parse(currentLocation *time.Location, str string) (time.Time, error) {
 	return t, p.err
 }
 
-// Format into Postgres' text format for timestamps.
+// Format formats t into Postgres' text format for timestamps.
 func Format(t time.Time) []byte {
+	t, bc := postgresEra(t)
+	b := []byte(t.Format("2006-01-02 15:04:05.999999999Z07:00"))
+	return appendOffsetSecondsAndEra(b, t, bc)
+}
+
+// AppendFormat appends t in Postgres' text format for timestamps to b.
+func AppendFormat(b []byte, t time.Time) []byte {
+	t, bc := postgresEra(t)
+	b = t.AppendFormat(b, "2006-01-02 15:04:05.999999999Z07:00")
+	return appendOffsetSecondsAndEra(b, t, bc)
+}
+
+func postgresEra(t time.Time) (time.Time, bool) {
 	// Need to send dates before 0001 A.D. with " BC" suffix, instead of the
 	// minus sign preferred by Go.
 	// Beware, "0000" in ISO is "1 BC", "-0001" is "2 BC" and so on
@@ -166,8 +179,10 @@ func Format(t time.Time) []byte {
 		t = t.AddDate((-t.Year())*2+1, 0, 0)
 		bc = true
 	}
-	b := []byte(t.Format("2006-01-02 15:04:05.999999999Z07:00"))
+	return t, bc
+}
 
+func appendOffsetSecondsAndEra(b []byte, t time.Time, bc bool) []byte {
 	_, offset := t.Zone()
 	offset %= 60
 	if offset != 0 {

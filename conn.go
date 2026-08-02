@@ -911,25 +911,26 @@ func (cn *conn) simpleExec(q string) (res driver.Result, commandTag string, resE
 		return nil, "", err
 	}
 
+	var r readBuf
 	for {
-		t, r, err := cn.recv1()
+		t, err := cn.recv1Buf(&r)
 		if err != nil {
 			return nil, "", err
 		}
 		switch t {
 		case proto.CommandComplete:
-			res, commandTag, err = cn.parseComplete(r.string())
+			res, commandTag, err = cn.parseCompleteResponse(&r)
 			if err != nil {
 				return nil, "", err
 			}
 		case proto.ReadyForQuery:
-			cn.processReadyForQuery(r)
+			cn.processReadyForQuery(&r)
 			if res == nil && resErr == nil {
 				resErr = errUnexpectedReady
 			}
 			return res, commandTag, resErr
 		case proto.ErrorResponse:
-			resErr = parseError(r, q)
+			resErr = parseError(&r, q)
 		case proto.EmptyQueryResponse:
 			res = emptyRows
 		case proto.RowDescription, proto.DataRow:
@@ -958,8 +959,9 @@ func (cn *conn) simpleQuery(q string) (*rows, error) {
 		res    *rows
 		resErr error
 	)
+	var r readBuf
 	for {
-		t, r, err := cn.recv1()
+		t, err := cn.recv1Buf(&r)
 		if err != nil {
 			return nil, cn.handleError(err, q)
 		}
@@ -980,7 +982,7 @@ func (cn *conn) simpleQuery(q string) (*rows, error) {
 			// query already run. Although queries usually return from here and cede
 			// control to Next, a query with zero results does not.
 			if t == proto.CommandComplete {
-				res.result, res.tag, err = cn.parseComplete(r.string())
+				res.result, res.tag, err = cn.parseCompleteResponse(&r)
 				if err != nil {
 					return nil, cn.handleError(err, q)
 				}
@@ -990,7 +992,7 @@ func (cn *conn) simpleQuery(q string) (*rows, error) {
 			}
 			res.done = true
 		case proto.ReadyForQuery:
-			cn.processReadyForQuery(r)
+			cn.processReadyForQuery(&r)
 			if resErr != nil {
 				return nil, cn.handleError(resErr, q)
 			}
@@ -1004,13 +1006,13 @@ func (cn *conn) simpleQuery(q string) (*rows, error) {
 			return res, nil
 		case proto.ErrorResponse:
 			res = nil
-			resErr = parseError(r, q)
+			resErr = parseError(&r, q)
 		case proto.DataRow:
 			if res == nil {
 				cn.err.set(driver.ErrBadConn)
 				return nil, fmt.Errorf("pq: unexpected DataRow in simple query execution")
 			}
-			return res, cn.saveMessage(t, r) // The query didn't fail; kick off to Next
+			return res, cn.saveMessage(t, &r) // The query didn't fail; kick off to Next
 		case proto.RowDescription:
 			if resErr != nil {
 				cn.err.set(driver.ErrBadConn)
@@ -1018,7 +1020,7 @@ func (cn *conn) simpleQuery(q string) (*rows, error) {
 			}
 			// res might be non-nil here if we received a previous
 			// CommandComplete, but that's fine and just overwrite it.
-			res = &rows{cn: cn, rowsHeader: parsePortalRowDescribe(r)}
+			res = &rows{cn: cn, rowsHeader: parsePortalRowDescribe(&r)}
 
 			// To work around a bug in QueryRow in Go 1.2 and earlier, wait
 			// until the first DataRow has been received.
@@ -2450,11 +2452,12 @@ func (cn *conn) parseComplete(commandTag string) (driver.Result, string, error) 
 		"MERGE ",
 	}
 
-	var affectedRows *string
+	var affectedRows string
+	hasAffectedRows := false
 	for _, tag := range commandsWithAffectedRows {
 		if strings.HasPrefix(commandTag, tag) {
-			t := commandTag[len(tag):]
-			affectedRows = &t
+			affectedRows = commandTag[len(tag):]
+			hasAffectedRows = true
 			commandTag = tag[:len(tag)-1]
 			break
 		}
@@ -2463,25 +2466,77 @@ func (cn *conn) parseComplete(commandTag string) (driver.Result, string, error) 
 	// in user tables are deprecated, and the oid is only returned when exactly
 	// one row is inserted, so it's unlikely to be of value to any real-world
 	// application and we can ignore it.
-	if affectedRows == nil && strings.HasPrefix(commandTag, "INSERT ") {
-		parts := strings.Split(commandTag, " ")
-		if len(parts) != 3 {
+	if !hasAffectedRows && strings.HasPrefix(commandTag, "INSERT ") {
+		_, affectedRows, hasAffectedRows = strings.Cut(commandTag[len("INSERT "):], " ")
+		if !hasAffectedRows || strings.Contains(affectedRows, " ") {
 			cn.err.set(driver.ErrBadConn)
 			return nil, "", fmt.Errorf("pq: unexpected INSERT command tag %s", commandTag)
 		}
-		affectedRows = &parts[len(parts)-1]
 		commandTag = "INSERT"
 	}
-	// There should be no affected rows attached to the tag, just return it
-	if affectedRows == nil {
+	if !hasAffectedRows {
 		return driver.RowsAffected(0), commandTag, nil
 	}
-	n, err := strconv.ParseInt(*affectedRows, 10, 64)
+	n, err := strconv.ParseInt(affectedRows, 10, 64)
 	if err != nil {
 		cn.err.set(driver.ErrBadConn)
 		return nil, "", fmt.Errorf("pq: could not parse commandTag: %w", err)
 	}
 	return driver.RowsAffected(n), commandTag, nil
+}
+
+// parseCompleteResponse avoids copying the complete backend tag when the
+// command name is one of PostgreSQL's fixed tags with an affected-row count.
+// Unknown and count-less tags are copied because their storage belongs to the
+// connection scratch buffer.
+func (cn *conn) parseCompleteResponse(r *readBuf) (driver.Result, string, error) {
+	payload := *r
+	if len(payload) == 0 || payload[len(payload)-1] != 0 {
+		cn.err.set(driver.ErrBadConn)
+		return nil, "", errors.New("pq: invalid CommandComplete payload")
+	}
+	*r = payload[len(payload):]
+	commandTag := payload[:len(payload)-1]
+	commandsWithAffectedRows := []string{
+		"SELECT ",
+		// INSERT is handled below
+		"UPDATE ",
+		"DELETE ",
+		"FETCH ",
+		"MOVE ",
+		"COPY ",
+		"MERGE ",
+	}
+
+	for _, tag := range commandsWithAffectedRows {
+		if bytes.HasPrefix(commandTag, []byte(tag)) {
+			n, err := strconv.ParseInt(string(commandTag[len(tag):]), 10, 64)
+			if err != nil {
+				cn.err.set(driver.ErrBadConn)
+				return nil, "", fmt.Errorf("pq: could not parse commandTag: %w", err)
+			}
+			return driver.RowsAffected(n), tag[:len(tag)-1], nil
+		}
+	}
+	// INSERT also includes the oid of the inserted row in its command tag. Oids
+	// in user tables are deprecated, and the oid is only returned when exactly
+	// one row is inserted, so it's unlikely to be of value to any real-world
+	// application and we can ignore it.
+	if bytes.HasPrefix(commandTag, []byte("INSERT ")) {
+		rest := commandTag[len("INSERT "):]
+		separator := bytes.IndexByte(rest, ' ')
+		if separator < 0 || bytes.IndexByte(rest[separator+1:], ' ') >= 0 {
+			cn.err.set(driver.ErrBadConn)
+			return nil, "", fmt.Errorf("pq: unexpected INSERT command tag %s", commandTag)
+		}
+		n, err := strconv.ParseInt(string(rest[separator+1:]), 10, 64)
+		if err != nil {
+			cn.err.set(driver.ErrBadConn)
+			return nil, "", fmt.Errorf("pq: could not parse commandTag: %w", err)
+		}
+		return driver.RowsAffected(n), "INSERT", nil
+	}
+	return driver.RowsAffected(0), string(commandTag), nil
 }
 
 func md5s(s string) string {
@@ -2604,16 +2659,17 @@ func (cn *conn) processReadyForQuery(r *readBuf) {
 }
 
 func (cn *conn) readReadyForQuery() error {
-	t, r, err := cn.recv1()
+	var r readBuf
+	t, err := cn.recv1Buf(&r)
 	if err != nil {
 		return err
 	}
 	switch t {
 	case proto.ReadyForQuery:
-		cn.processReadyForQuery(r)
+		cn.processReadyForQuery(&r)
 		return nil
 	case proto.ErrorResponse:
-		err := parseError(r, "")
+		err := parseError(&r, "")
 		cn.err.set(driver.ErrBadConn)
 		return err
 	default:
@@ -2623,7 +2679,8 @@ func (cn *conn) readReadyForQuery() error {
 }
 
 func (cn *conn) readParseResponse() error {
-	t, r, err := cn.recv1()
+	var r readBuf
+	t, err := cn.recv1Buf(&r)
 	if err != nil {
 		return err
 	}
@@ -2631,7 +2688,7 @@ func (cn *conn) readParseResponse() error {
 	case proto.ParseComplete:
 		return nil
 	case proto.ErrorResponse:
-		err := parseError(r, "")
+		err := parseError(&r, "")
 		_ = cn.readReadyForQuery()
 		return err
 	default:
@@ -2641,8 +2698,9 @@ func (cn *conn) readParseResponse() error {
 }
 
 func (cn *conn) readStatementDescribeResponse() (paramTyps []oid.Oid, colNames []string, colTyps []fieldDesc, _ error) {
+	var r readBuf
 	for {
-		t, r, err := cn.recv1()
+		t, err := cn.recv1Buf(&r)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -2656,10 +2714,10 @@ func (cn *conn) readStatementDescribeResponse() (paramTyps []oid.Oid, colNames [
 		case proto.NoData:
 			return paramTyps, nil, nil, nil
 		case proto.RowDescription:
-			colNames, colTyps = parseStatementRowDescribe(r)
+			colNames, colTyps = parseStatementRowDescribe(&r)
 			return paramTyps, colNames, colTyps, nil
 		case proto.ErrorResponse:
-			err := parseError(r, "")
+			err := parseError(&r, "")
 			_ = cn.readReadyForQuery()
 			return nil, nil, nil, err
 		default:
@@ -2670,17 +2728,18 @@ func (cn *conn) readStatementDescribeResponse() (paramTyps []oid.Oid, colNames [
 }
 
 func (cn *conn) readPortalDescribeResponse() (rowsHeader, error) {
-	t, r, err := cn.recv1()
+	var r readBuf
+	t, err := cn.recv1Buf(&r)
 	if err != nil {
 		return rowsHeader{}, err
 	}
 	switch t {
 	case proto.RowDescription:
-		return parsePortalRowDescribe(r), nil
+		return parsePortalRowDescribe(&r), nil
 	case proto.NoData:
 		return rowsHeader{}, nil
 	case proto.ErrorResponse:
-		err := parseError(r, "")
+		err := parseError(&r, "")
 		_ = cn.readReadyForQuery()
 		return rowsHeader{}, err
 	default:
@@ -2690,7 +2749,8 @@ func (cn *conn) readPortalDescribeResponse() (rowsHeader, error) {
 }
 
 func (cn *conn) readBindResponse() error {
-	t, r, err := cn.recv1()
+	var r readBuf
+	t, err := cn.recv1Buf(&r)
 	if err != nil {
 		return err
 	}
@@ -2698,7 +2758,7 @@ func (cn *conn) readBindResponse() error {
 	case proto.BindComplete:
 		return nil
 	case proto.ErrorResponse:
-		err := parseError(r, "")
+		err := parseError(&r, "")
 		_ = cn.readReadyForQuery()
 		return err
 	default:
@@ -2717,19 +2777,20 @@ func (cn *conn) postExecuteWorkaround() error {
 	// will return it as the next message for rows.Next or rows.Close.
 	// However, if it's an error, we wait until ReadyForQuery and then return
 	// the error to our caller.
+	var r readBuf
 	for {
-		t, r, err := cn.recv1()
+		t, err := cn.recv1Buf(&r)
 		if err != nil {
 			return err
 		}
 		switch t {
 		case proto.ErrorResponse:
-			err := parseError(r, "")
+			err := parseError(&r, "")
 			_ = cn.readReadyForQuery()
 			return err
 		case proto.CommandComplete, proto.DataRow, proto.EmptyQueryResponse:
 			// the query didn't fail, but we can't process this message
-			return cn.saveMessage(t, r)
+			return cn.saveMessage(t, &r)
 		default:
 			cn.err.set(driver.ErrBadConn)
 			return fmt.Errorf("pq: unexpected message during extended query execution: %q", t)
@@ -2739,8 +2800,9 @@ func (cn *conn) postExecuteWorkaround() error {
 
 // Only for Exec(), since we ignore the returned data
 func (cn *conn) readExecuteResponse(protocolState string) (res driver.Result, commandTag string, resErr error) {
+	var r readBuf
 	for {
-		t, r, err := cn.recv1()
+		t, err := cn.recv1Buf(&r)
 		if err != nil {
 			return nil, "", err
 		}
@@ -2750,18 +2812,18 @@ func (cn *conn) readExecuteResponse(protocolState string) (res driver.Result, co
 				cn.err.set(driver.ErrBadConn)
 				return nil, "", fmt.Errorf("pq: unexpected CommandComplete after error %s", resErr)
 			}
-			res, commandTag, err = cn.parseComplete(r.string())
+			res, commandTag, err = cn.parseCompleteResponse(&r)
 			if err != nil {
 				return nil, "", err
 			}
 		case proto.ReadyForQuery:
-			cn.processReadyForQuery(r)
+			cn.processReadyForQuery(&r)
 			if res == nil && resErr == nil {
 				resErr = errUnexpectedReady
 			}
 			return res, commandTag, resErr
 		case proto.ErrorResponse:
-			resErr = parseError(r, "")
+			resErr = parseError(&r, "")
 		case proto.RowDescription, proto.DataRow, proto.EmptyQueryResponse:
 			if resErr != nil {
 				cn.err.set(driver.ErrBadConn)

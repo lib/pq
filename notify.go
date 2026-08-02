@@ -1,6 +1,7 @@
 package pq
 
 import (
+	"bytes"
 	"context"
 	"database/sql/driver"
 	"errors"
@@ -22,8 +23,27 @@ type Notification struct {
 
 func recvNotification(r *readBuf) *Notification {
 	bePid := r.int32()
-	channel := r.string()
-	extra := r.string()
+	payload := *r
+	channelEnd := bytes.IndexByte(payload, 0)
+	if channelEnd < 0 {
+		panic(errors.New("pq: invalid message format; expected string terminator"))
+	}
+	extraEnd := bytes.IndexByte(payload[channelEnd+1:], 0)
+	if extraEnd < 0 {
+		panic(errors.New("pq: invalid message format; expected string terminator"))
+	}
+	extraEnd += channelEnd + 1
+
+	var channel, extra string
+	if extraEnd != 1 {
+		// The read buffer is reused for the next backend message. Copy both
+		// fields into one immutable allocation and slice it at their embedded
+		// terminator so Notification can safely outlive that buffer.
+		fields := string(payload[:extraEnd])
+		channel = fields[:channelEnd]
+		extra = fields[channelEnd+1:]
+	}
+	*r = payload[extraEnd+1:]
 	return &Notification{bePid, channel, extra}
 }
 
@@ -97,6 +117,11 @@ type listenerEvent struct {
 	typ     ListenerEventType
 	err     error
 	barrier *listenerEventBarrier
+}
+
+type listenerNotification struct {
+	notification *Notification
+	barrier      *listenerEventBarrier
 }
 
 // listenerEventBarrier lets notification delivery wait until its corresponding
@@ -651,12 +676,11 @@ type Listener struct {
 	cn                      *ListenerConn
 	connNotificationChan    <-chan *Notification
 	channels                map[string]struct{}
-	notificationQueue       chan *Notification
+	notificationQueue       chan listenerNotification
 	notificationLock        sync.Mutex
 	notificationOutstanding int
 	notificationLost        bool
 	notificationLossBarrier *listenerEventBarrier
-	notificationBarriers    map[*Notification]*listenerEventBarrier
 }
 
 // NewListener creates a new database connection dedicated to LISTEN / NOTIFY.
@@ -1488,7 +1512,7 @@ func (l *Listener) sendReconnectNotification(barrier *listenerEventBarrier) bool
 	if barrier == nil {
 		return l.sendNotification(nil)
 	}
-	return l.queueNotification(&Notification{}, barrier)
+	return l.queueNotification(nil, barrier)
 }
 
 func (l *Listener) queueNotification(notification *Notification, barrier *listenerEventBarrier) bool {
@@ -1532,36 +1556,19 @@ func (l *Listener) queueNotification(notification *Notification, barrier *listen
 		}
 	}
 
-	if barrier != nil {
-		if l.notificationBarriers == nil {
-			l.notificationBarriers = make(map[*Notification]*listenerEventBarrier)
-		}
-		l.notificationBarriers[notification] = barrier
-	}
 	select {
-	case l.notificationQueue <- notification:
+	case l.notificationQueue <- listenerNotification{notification: notification, barrier: barrier}:
 		l.notificationOutstanding++
 		l.notificationLock.Unlock()
 		return true
 	default:
 		if barrier != nil {
-			delete(l.notificationBarriers, notification)
 			l.notificationLossBarrier = barrier
 		}
 		l.notificationLost = true
 		l.notificationLock.Unlock()
 		return true
 	}
-}
-
-func (l *Listener) takeNotificationBarrier(notification *Notification) *listenerEventBarrier {
-	l.notificationLock.Lock()
-	barrier := l.notificationBarriers[notification]
-	if barrier != nil {
-		delete(l.notificationBarriers, notification)
-	}
-	l.notificationLock.Unlock()
-	return barrier
 }
 
 func (l *Listener) takeNotificationLoss() (bool, *listenerEventBarrier) {
@@ -1597,15 +1604,15 @@ func (l *Listener) waitNotificationBarrier(barrier *listenerEventBarrier) bool {
 	}
 }
 
-func (l *Listener) deliverNotification(notification *Notification) bool {
-	if barrier := l.takeNotificationBarrier(notification); barrier != nil {
-		if !l.waitNotificationBarrier(barrier) {
+func (l *Listener) deliverNotification(queued listenerNotification) bool {
+	if queued.barrier != nil {
+		if !l.waitNotificationBarrier(queued.barrier) {
 			return false
 		}
-		notification = nil
+		queued.notification = nil
 	}
 	select {
-	case l.Notify <- notification:
+	case l.Notify <- queued.notification:
 		return true
 	case <-l.done:
 		return false
@@ -1616,7 +1623,6 @@ func (l *Listener) releaseNotificationQueue() {
 	l.notificationLock.Lock()
 	l.notificationLost = false
 	l.notificationLossBarrier = nil
-	l.notificationBarriers = nil
 	l.notificationOutstanding = 0
 	for {
 		select {
@@ -1649,7 +1655,7 @@ func (l *Listener) notificationDispatcher() {
 			if !l.waitNotificationBarrier(barrier) {
 				return
 			}
-			if !l.deliverNotification(nil) {
+			if !l.deliverNotification(listenerNotification{}) {
 				return
 			}
 			l.finishNotification()
@@ -1753,7 +1759,7 @@ func (l *Listener) listenerMain() {
 		l.done = make(chan struct{})
 	}
 	if l.notificationQueue == nil {
-		l.notificationQueue = make(chan *Notification, listenerChannelCapacity)
+		l.notificationQueue = make(chan listenerNotification, listenerChannelCapacity)
 	}
 	if l.eventCallback != nil && l.eventWake == nil {
 		l.eventWake = make(chan struct{}, 1)

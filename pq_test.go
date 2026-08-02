@@ -13,6 +13,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Allocation benchmarks are entirely in-memory. Keep their measurements
+	// independent of Docker and a live PostgreSQL process when explicitly
+	// requested by the benchmark runner.
+	if pqtest.PureBenchmark() {
+		os.Exit(m.Run())
+	}
 	if err := pqtest.Setup(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

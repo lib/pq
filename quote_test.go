@@ -1,6 +1,9 @@
 package pq
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestQuoteIdentifier(t *testing.T) {
 	tests := []struct {
@@ -19,6 +22,12 @@ func TestQuoteIdentifier(t *testing.T) {
 			have := QuoteIdentifier(tt.input)
 			if have != tt.want {
 				t.Errorf("\nhave: %q\nwant: %q", have, tt.want)
+			}
+
+			var buffer bytes.Buffer
+			BufferQuoteIdentifier(tt.input, &buffer)
+			if have := buffer.String(); have != tt.want {
+				t.Errorf("BufferQuoteIdentifier:\nhave: %q\nwant: %q", have, tt.want)
 			}
 		})
 	}

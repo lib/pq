@@ -3,7 +3,6 @@
 package pq
 
 import (
-	"errors"
 	"github.com/lib/pq/pqerror"
 	"slices"
 )
@@ -16,7 +15,8 @@ import (
 //
 // This is safe to call with a nil error.
 func As(err error, codes ...pqerror.Code) *Error {
-	if pqErr, ok := errors.AsType[*Error](err); ok && (len(codes) == 0 || slices.Contains(codes, pqErr.Code)) {
+	pqErr, ok := findPQError(err)
+	if ok && (len(codes) == 0 || slices.Contains(codes, pqErr.Code)) {
 		return pqErr
 	}
 	return nil
