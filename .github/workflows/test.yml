@@ -60,14 +60,13 @@ jobs:
           docker compose logs
           exit 1
         }
-        echo '127.0.0.1 postgres postgres-invalid' | sudo tee -a /etc/hosts
     - name: 'Run tests'
       run: |
-        echo 'PGPORT=6432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...'
-        PQTEST_USE_TESTCONTAINERS=false PGPORT=6432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...
+        echo 'PGHOSTADDR=127.0.0.1 PGPORT=6432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...'
+        PQTEST_USE_TESTCONTAINERS=false PGHOSTADDR=127.0.0.1 PGPORT=6432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...
 
-        echo PGPORT=6432 'PQTEST_BINARY_PARAMETERS=yes go test -race ./...'
-        PQTEST_USE_TESTCONTAINERS=false PGPORT=6432 PQTEST_BINARY_PARAMETERS=yes go test -race ./...
+        echo PGHOSTADDR=127.0.0.1 PGPORT=6432 'PQTEST_BINARY_PARAMETERS=yes go test -race ./...'
+        PQTEST_USE_TESTCONTAINERS=false PGHOSTADDR=127.0.0.1 PGPORT=6432 PQTEST_BINARY_PARAMETERS=yes go test -race ./...
 
   cockroach:
     runs-on: 'ubuntu-latest'
@@ -81,14 +80,13 @@ jobs:
           docker compose logs
           exit 1
         }
-        echo '127.0.0.1 postgres postgres-invalid' | sudo tee -a /etc/hosts
     - name: 'Run tests'
       run: |
-        echo 'PGPORT=26257 PQTEST_BINARY_PARAMETERS=no  go test -race -skip='^Example' ./...'
-        PQTEST_USE_TESTCONTAINERS=false PGPORT=26257 PQTEST_BINARY_PARAMETERS=no  go test -race -skip='^Example' ./...
+        echo 'PGHOSTADDR=127.0.0.1 PGPORT=26257 PQTEST_BINARY_PARAMETERS=no  go test -race -skip='^Example' ./...'
+        PQTEST_USE_TESTCONTAINERS=false PGHOSTADDR=127.0.0.1 PGPORT=26257 PQTEST_BINARY_PARAMETERS=no  go test -race -skip='^Example' ./...
 
-        echo PGPORT=26257 'PQTEST_BINARY_PARAMETERS=yes go test -race -skip='^Example' ./...'
-        PQTEST_USE_TESTCONTAINERS=false PGPORT=26257 PQTEST_BINARY_PARAMETERS=yes go test -race -skip='^Example' ./...
+        echo PGHOSTADDR=127.0.0.1 PGPORT=26257 'PQTEST_BINARY_PARAMETERS=yes go test -race -skip='^Example' ./...'
+        PQTEST_USE_TESTCONTAINERS=false PGHOSTADDR=127.0.0.1 PGPORT=26257 PQTEST_BINARY_PARAMETERS=yes go test -race -skip='^Example' ./...
 
   # Disabled for now as it's kind of finecky and flaky.
   #pgpool:
@@ -107,14 +105,13 @@ jobs:
   #        docker compose logs
   #        exit 1
   #      }
-  #      echo '127.0.0.1 postgres postgres-invalid' | sudo tee -a /etc/hosts
   #  - name: 'Run tests'
   #    run: |
-  #      echo 'PGPORT=6432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...'
-  #      PGPORT=7432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...
+  #      echo 'PGHOSTADDR=127.0.0.1 PGPORT=7432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...'
+  #      PQTEST_USE_TESTCONTAINERS=false PGHOSTADDR=127.0.0.1 PGPORT=7432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...
 
-  #      echo PGPORT=6432 'PQTEST_BINARY_PARAMETERS=yes go test -race ./...'
-  #      PGPORT=7432 PQTEST_BINARY_PARAMETERS=yes go test -race ./...
+  #      echo PGHOSTADDR=127.0.0.1 PGPORT=7432 'PQTEST_BINARY_PARAMETERS=yes go test -race ./...'
+  #      PQTEST_USE_TESTCONTAINERS=false PGHOSTADDR=127.0.0.1 PGPORT=7432 PQTEST_BINARY_PARAMETERS=yes go test -race ./...
 
   # TODO: disabled for now as it's very slow and flaky.
   #macos:

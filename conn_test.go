@@ -64,7 +64,7 @@ func TestOpen(t *testing.T) {
 	}{
 		{"postgres://", ""},
 		{"postgresql://", ""},
-		{"host=doesnotexist hostaddr=127.0.0.1", ""}, // Should ignore the host
+		{"host=doesnotexist", ""}, // The test server hostaddr should override the host.
 
 		{"hostaddr=255.255.255.255", "dial tcp 255.255.255.255"},
 	}

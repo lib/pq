@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -99,11 +100,8 @@ func TestNewConnector(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := fmt.Sprintf(
-			`map[application_name:pqgo client_encoding:UTF8 connect_timeout:20 datestyle:ISO, MDY dbname:pqgo host:localhost max_protocol_version:3.0 min_protocol_version:3.0 port:%d search_path:foo sslmode:disable sslsni:yes user:pqgo]`,
-			cfg.Port)
-		if have := fmt.Sprintf("%v", c.cfg.tomap()); have != want {
-			t.Errorf("\nhave: %s\nwant: %s", have, want)
+		if have, want := c.cfg.tomap(), cfg.tomap(); !reflect.DeepEqual(have, want) {
+			t.Errorf("\nhave: %v\nwant: %v", have, want)
 		}
 
 		// pq: unsupported startup parameter: search_path (08P01)
@@ -893,6 +891,10 @@ func TestService(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		h = filepath.Dir(h)
 	}
+	pgHost := os.Getenv("PGHOST")
+	if pgHost == "" {
+		pgHost = "localhost"
+	}
 
 	// Test without ~/.pg_service.conf existing
 	t.Run("default file doesn't exist", func(t *testing.T) {
@@ -913,15 +915,15 @@ func TestService(t *testing.T) {
 	}{
 		{"service=doesntexist", nil, ``, `definition of service "doesntexist" not found`},
 		{"service=svc1", nil, `connect_timeout=20 dbname=xyz host=firsthost port=1234 service=svc1 user=pqgo`, ``},
-		{"service=svc2", nil, `connect_timeout=20 dbname='with space' host=localhost service=svc2 user=''`, ``},
+		{"service=svc2", nil, `connect_timeout=20 dbname='with space' host={{PGHOST}} service=svc2 user=''`, ``},
 		{"service=svc3", nil, ``, `pq: unknown setting "unknown" in service file for service "svc3"`},
-		{"service=svc4", nil, `connect_timeout=20 dbname=pqgo host=localhost service=svc4 user=pqgo`, ``},
-		{"service=svc5", nil, `connect_timeout=20 dbname=pqgo host=localhost service=svc5 user=pqgo`, ``},
+		{"service=svc4", nil, `connect_timeout=20 dbname=pqgo host={{PGHOST}} service=svc4 user=pqgo`, ``},
+		{"service=svc5", nil, `connect_timeout=20 dbname=pqgo host={{PGHOST}} service=svc5 user=pqgo`, ``},
 
 		{"service=svc5", map[string]string{"PGSERVICEFILE": "none"}, ``, `service file "none" not found`},
 		{"service=svc1", map[string]string{"PGSERVICEFILE": filepath.Join(h, "other")}, ``, `definition of service "svc1" not found`},
 		{"service=other", map[string]string{"PGSERVICEFILE": filepath.Join(h, "other")},
-			`connect_timeout=20 dbname=other host=localhost service=other user=pqgo`, ``},
+			`connect_timeout=20 dbname=other host={{PGHOST}} service=other user=pqgo`, ``},
 	}
 
 	pqtest.Write(t, []byte("[other]\ndbname=other"), h, "other")
@@ -955,8 +957,9 @@ func TestService(t *testing.T) {
 			if !pqtest.ErrorContains(err, tt.wantErr) {
 				t.Fatalf("wrong error\nhave: %v\nwant: %v", err, tt.wantErr)
 			}
-			if have := cfg.string(); have != tt.want {
-				t.Errorf("\nhave: %q\nwant: %q", have, tt.want)
+			want := strings.ReplaceAll(tt.want, "{{PGHOST}}", pgHost)
+			if have := cfg.string(); have != want {
+				t.Errorf("\nhave: %q\nwant: %q", have, want)
 			}
 		})
 	}

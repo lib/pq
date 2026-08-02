@@ -115,7 +115,7 @@ func Setup() error {
 	postgresTestServer.container = container
 	postgresTestServer.managed = true
 	postgresTestServer.hostaddr = hostaddr
-	os.Unsetenv("PGHOSTADDR")
+	clearManagedPostgresEnvironment()
 	os.Setenv("PGHOST", host)
 	os.Setenv("PGPORT", port.Port())
 	os.Setenv("PGDATABASE", "pqgo")
@@ -123,6 +123,26 @@ func Setup() error {
 	os.Setenv("PGCONNECT_TIMEOUT", "20")
 	os.Setenv("PGAPPNAME", "pqgo")
 	return nil
+}
+
+// clearManagedPostgresEnvironment keeps a developer's libpq environment from
+// changing the isolated Testcontainers configuration. Tests that exercise an
+// environment option set it explicitly after TestMain has called Setup.
+func clearManagedPostgresEnvironment() {
+	for _, name := range []string{
+		"PGAPPNAME", "PGCHANNELBINDING", "PGCLIENTENCODING", "PGCONNECT_TIMEOUT",
+		"PGDATABASE", "PGDATESTYLE", "PGGEQO", "PGGSSDELEGATION", "PGGSSENCMODE",
+		"PGGSSLIB", "PGHOST", "PGHOSTADDR", "PGKRBSRVNAME", "PGLOADBALANCEHOSTS",
+		"PGMAXPROTOCOLVERSION", "PGMINPROTOCOLVERSION", "PGOPTIONS", "PGPASSFILE",
+		"PGPASSWORD", "PGPORT", "PGREALM", "PGREQUIREAUTH", "PGREQUIREPEER",
+		"PGREQUIRESSL", "PGSERVICE", "PGSERVICEFILE", "PGSSLCERT", "PGSSLCERTMODE",
+		"PGSSLCOMPRESSION", "PGSSLCRL", "PGSSLCRLDIR", "PGSSLKEY",
+		"PGSSLMAXPROTOCOLVERSION", "PGSSLMINPROTOCOLVERSION", "PGSSLMODE",
+		"PGSSLNEGOTIATION", "PGSSLROOTCERT", "PGSSLSNI", "PGTARGETSESSIONATTRS",
+		"PGTZ", "PGUSER",
+	} {
+		os.Unsetenv(name)
+	}
 }
 
 // Teardown terminates a PostgreSQL container created by Setup. It is a no-op

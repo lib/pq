@@ -281,12 +281,16 @@ connection strings:
 Tests can be run against pgbouncer with:
 
     docker compose up -d pgbouncer pg18
-    PQTEST_USE_TESTCONTAINERS=false PGPORT=6432 go test ./...
+    PQTEST_USE_TESTCONTAINERS=false PGHOSTADDR=127.0.0.1 PGPORT=6432 go test ./...
 
 and pgpool with:
 
     docker compose up -d pgpool pg18
-    PQTEST_USE_TESTCONTAINERS=false PGPORT=7432 go test ./...
+    PQTEST_USE_TESTCONTAINERS=false PGHOSTADDR=127.0.0.1 PGPORT=7432 go test ./...
+
+The numeric `PGHOSTADDR` routes connections to the local proxy while tests can
+still use the logical `postgres` and `postgres-invalid` host names for TLS
+verification.
 
 ### Protocol debug output
 You can use PQGO_DEBUG=1 to make the driver print the communication with
