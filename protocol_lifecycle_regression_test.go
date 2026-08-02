@@ -92,6 +92,22 @@ func TestProtocolRegressionMalformedFrames(t *testing.T) {
 			}, nil),
 			call: regressionReadSingleRow,
 		},
+		{
+			name: "data row with too few columns",
+			input: bytes.Join([][]byte{
+				regressionBackendFrame(proto.RowDescription, regressionSingleColumnDescription(oid.T_int8, 0)),
+				regressionBackendFrame(proto.DataRow, regressionNullColumnData(0)),
+			}, nil),
+			call: regressionReadSingleRow,
+		},
+		{
+			name: "data row with too many columns",
+			input: bytes.Join([][]byte{
+				regressionBackendFrame(proto.RowDescription, regressionSingleColumnDescription(oid.T_int8, 0)),
+				regressionBackendFrame(proto.DataRow, regressionNullColumnData(2)),
+			}, nil),
+			call: regressionReadSingleRow,
+		},
 	}
 
 	for _, tt := range tests {
@@ -352,6 +368,36 @@ func TestProtocolRegressionConnectContextBoundsHandshake(t *testing.T) {
 			regressionExpectResultBeforeTimeout(t, result, dialer.Close)
 		})
 	}
+}
+
+func TestProtocolRegressionConnectContextBoundsLegacyDial(t *testing.T) {
+	dialer := &regressionBlockingDialer{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	connector, err := NewConnectorConfig(Config{
+		Host:               "context.invalid",
+		Port:               1,
+		User:               "test",
+		Database:           "test",
+		SSLMode:            SSLModeDisable,
+		MaxProtocolVersion: ProtocolVersion30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector.Dialer(dialer)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := connector.Connect(ctx)
+		result <- err
+	}()
+
+	regressionAwaitSignal(t, dialer.entered, "Connector.Connect did not enter legacy Dial")
+	cancel()
+	regressionExpectResultBeforeTimeout(t, result, func() { close(dialer.release) })
 }
 
 func TestProtocolRegressionConnectContextBoundsTargetSessionAttrs(t *testing.T) {
@@ -636,6 +682,14 @@ func regressionSingleColumnData(value []byte) []byte {
 	payload := []byte{0, 1}
 	payload = binary.BigEndian.AppendUint32(payload, uint32(len(value)))
 	return append(payload, value...)
+}
+
+func regressionNullColumnData(count uint16) []byte {
+	payload := binary.BigEndian.AppendUint16(nil, count)
+	for range count {
+		payload = binary.BigEndian.AppendUint32(payload, math.MaxUint32)
+	}
+	return payload
 }
 
 func regressionReadSingleRow(cn *conn) error {
