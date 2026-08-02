@@ -112,7 +112,10 @@ func TestProtocolRegressionOversizedLongFrameRejectedBeforeAllocation(t *testing
 		"-test.run=^TestProtocolRegressionOversizedLongFrameRejectedBeforeAllocation$",
 		"-test.count=1",
 	)
-	cmd.Env = append(os.Environ(), childEnvironment+"=1", "GOMEMLIMIT=32MiB")
+	// PQGO_DEBUG suppresses TestMain's process-wide connection leak check. The
+	// child shares the parent's test container and may otherwise observe
+	// unrelated parallel tests that are legitimately still in flight.
+	cmd.Env = append(os.Environ(), childEnvironment+"=1", "GOMEMLIMIT=32MiB", "PQGO_DEBUG=1")
 	output, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
 		t.Fatalf("memory-limited oversized-frame subprocess did not terminate: %v", ctx.Err())

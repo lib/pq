@@ -187,6 +187,7 @@ func TestSecurityRegressionRequireAuthPolicy(t *testing.T) {
 }
 
 func TestSecurityRegressionHostaddrUsesRemotePgpassIdentity(t *testing.T) {
+	pqtest.Unsetenv(t, "PGHOST")
 	passwordCh := make(chan string, 1)
 	f := pqtest.NewFake(t, func(f pqtest.Fake, cn net.Conn) {
 		defer cn.Close()
@@ -226,6 +227,7 @@ func TestSecurityRegressionHostaddrUsesRemotePgpassIdentity(t *testing.T) {
 }
 
 func TestSecurityRegressionHostaddrRequiresHostnameForTLSAndGSS(t *testing.T) {
+	pqtest.Unsetenv(t, "PGHOST")
 	t.Run("verify-full", func(t *testing.T) {
 		f := pqtest.NewFake(t, func(f pqtest.Fake, cn net.Conn) {
 			defer cn.Close()
