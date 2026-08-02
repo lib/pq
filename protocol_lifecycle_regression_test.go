@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/lib/pq/internal/proto"
+	"github.com/lib/pq/oid"
 )
 
 const regressionOperationTimeout = 250 * time.Millisecond
@@ -67,6 +68,29 @@ func TestProtocolRegressionMalformedFrames(t *testing.T) {
 			call: func(cn *conn) error {
 				return cn.startup(Config{MaxProtocolVersion: ProtocolVersion30})
 			},
+		},
+		{
+			name:  "ready-for-query with invalid status byte",
+			input: regressionBackendFrame(proto.ReadyForQuery, []byte{'X'}),
+			call: func(cn *conn) error {
+				return cn.startup(Config{MaxProtocolVersion: ProtocolVersion30})
+			},
+		},
+		{
+			name: "row-description with invalid format code",
+			input: bytes.Join([][]byte{
+				regressionBackendFrame(proto.RowDescription, regressionSingleColumnDescription(oid.T_int8, 2)),
+				regressionBackendFrame(proto.DataRow, regressionSingleColumnData(make([]byte, 8))),
+			}, nil),
+			call: regressionReadSingleRow,
+		},
+		{
+			name: "short binary data value",
+			input: bytes.Join([][]byte{
+				regressionBackendFrame(proto.RowDescription, regressionSingleColumnDescription(oid.T_int8, 1)),
+				regressionBackendFrame(proto.DataRow, regressionSingleColumnData([]byte{0})),
+			}, nil),
+			call: regressionReadSingleRow,
 		},
 	}
 
@@ -594,6 +618,32 @@ func regressionBackendFrame(code proto.ResponseCode, payload []byte) []byte {
 	frame[0] = byte(code)
 	binary.BigEndian.PutUint32(frame[1:], uint32(len(payload)+4))
 	return append(frame, payload...)
+}
+
+func regressionSingleColumnDescription(typ oid.Oid, formatCode uint16) []byte {
+	payload := []byte{0, 1}
+	payload = append(payload, "value\x00"...)
+	payload = binary.BigEndian.AppendUint32(payload, 0)
+	payload = binary.BigEndian.AppendUint16(payload, 0)
+	payload = binary.BigEndian.AppendUint32(payload, uint32(typ))
+	payload = binary.BigEndian.AppendUint16(payload, 8)
+	payload = binary.BigEndian.AppendUint32(payload, math.MaxUint32)
+	payload = binary.BigEndian.AppendUint16(payload, formatCode)
+	return payload
+}
+
+func regressionSingleColumnData(value []byte) []byte {
+	payload := []byte{0, 1}
+	payload = binary.BigEndian.AppendUint32(payload, uint32(len(value)))
+	return append(payload, value...)
+}
+
+func regressionReadSingleRow(cn *conn) error {
+	rows, err := cn.simpleQuery("select malformed")
+	if err != nil {
+		return err
+	}
+	return rows.Next(make([]driver.Value, 1))
 }
 
 func regressionCallWithoutPanic(fn func() error) (panicValue any, err error) {
