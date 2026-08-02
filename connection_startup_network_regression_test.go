@@ -489,7 +489,9 @@ func TestConnectionStartupRegressionPreferStandbyFallbackIsOneShot(t *testing.T)
 
 	got, err := connector.Connect(context.Background())
 	if got != nil {
-		_ = got.Close()
+		if concrete, ok := got.(*conn); !ok || concrete != nil {
+			_ = got.Close()
+		}
 	}
 	if err == nil {
 		t.Error("prefer-standby kept restarting after the any-host fallback pass failed")
@@ -499,6 +501,40 @@ func TestConnectionStartupRegressionPreferStandbyFallbackIsOneShot(t *testing.T)
 	}
 	if calls := dialer.Count(); calls != 2 {
 		t.Errorf("prefer-standby made %d dial attempts; want one preferred pass plus one any-host pass", calls)
+	}
+}
+
+func TestConnectionStartupRegressionConnectErrorReturnsNilConnection(t *testing.T) {
+	dialer := new(connectionStartupPreferStandbyLoopDialer)
+	connector, err := NewConnectorConfig(Config{
+		Host:               "failure.invalid",
+		Port:               1,
+		User:               "test",
+		Database:           "test",
+		SSLMode:            SSLModeDisable,
+		MaxProtocolVersion: ProtocolVersion30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector.Dialer(dialer)
+
+	got, err := connector.Connect(context.Background())
+	if !errors.Is(err, errConnectionStartupPreferStandbyDial) {
+		t.Fatalf("Connector.Connect error = %v; want intentional dial failure", err)
+	}
+	if got != nil {
+		t.Errorf("Connector.Connect returned non-nil %T containing a nil connection", got)
+	}
+
+	got, err = DialOpen(dialer,
+		"host=failure.invalid port=1 user=test dbname=test sslmode=disable",
+	)
+	if !errors.Is(err, errConnectionStartupPreferStandbyDial) {
+		t.Fatalf("DialOpen error = %v; want intentional dial failure", err)
+	}
+	if got != nil {
+		t.Errorf("DialOpen returned non-nil %T containing a nil connection", got)
 	}
 }
 
