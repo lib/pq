@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"maps"
 	"math/rand"
@@ -220,6 +221,16 @@ func (r RequireAuths) String() string {
 	return b.String()
 }
 
+func (r RequireAuths) allows(method RequireAuth) bool {
+	if len(r) == 0 {
+		return true
+	}
+	if strings.HasPrefix(string(r[0]), "!") {
+		return !slices.Contains(r, RequireAuth("!"+string(method)))
+	}
+	return slices.Contains(r, method)
+}
+
 // Connector represents a fixed configuration for the pq driver with a given
 // dsn. Connector satisfies the [database/sql/driver.Connector] interface and
 // can be used to create any number of DB Conn's via [sql.OpenDB].
@@ -245,11 +256,19 @@ func NewConnector(dsn string) (*Connector, error) {
 // create any number of equivalent Conn's. The returned connector is intended to
 // be used with [sql.OpenDB].
 func NewConnectorConfig(cfg Config) (*Connector, error) {
+	cfg = cfg.Clone()
+	if cfg.SSLRootCert == "system" && cfg.SSLMode == "" {
+		cfg.SSLMode = SSLModeVerifyFull
+	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
 	return &Connector{cfg: cfg, dialer: defaultDialer{}}, nil
 }
 
 // Connect returns a connection to the database using the fixed configuration of
-// this Connector. Context is not used.
+// this Connector. The context bounds dialing, TLS negotiation, startup, and
+// target-session checks.
 func (c *Connector) Connect(ctx context.Context) (driver.Conn, error) { return c.open(ctx) }
 
 // Dialer allows change the dialer used to open connections.
@@ -579,6 +598,8 @@ func (cfg Config) Clone() Config {
 	c := cfg
 	c.Runtime, c.Multi, c.RequireAuth, c.set = maps.Clone(cfg.Runtime), slices.Clone(cfg.Multi),
 		slices.Clone(cfg.RequireAuth), slices.Clone(cfg.set)
+	c.multiHost, c.multiHostaddr, c.multiPort = slices.Clone(cfg.multiHost),
+		slices.Clone(cfg.multiHostaddr), slices.Clone(cfg.multiPort)
 	return c
 }
 
@@ -611,25 +632,37 @@ func newConfig(dsn string, env []string) (Config, error) {
 	if err := cfg.fromEnv(env); err != nil {
 		return Config{}, err
 	}
-	if err := cfg.fromDSN(dsn); err != nil {
+
+	// The DSN selects the service, but service values have lower precedence
+	// than all other explicit DSN values. Probe a clone to discover that
+	// selector before applying the service and then the DSN exactly once.
+	probe := cfg.Clone()
+	if err := probe.fromDSN(dsn); err != nil {
 		return Config{}, err
+	}
+	if probe.isset("service") {
+		cfg.Service = probe.Service
 	}
 	if err := cfg.fromService(); err != nil {
 		return Config{}, err
 	}
+	if err := cfg.fromDSN(dsn); err != nil {
+		return Config{}, err
+	}
 
 	// Need to have exactly the same number of host and hostaddr, or only specify one.
-	if cfg.isset("host") && cfg.Host != "" && cfg.Hostaddr != (netip.Addr{}) && len(cfg.multiHost) != len(cfg.multiHostaddr) {
+	if cfg.isset("host") && cfg.isset("hostaddr") && len(cfg.multiHost) != len(cfg.multiHostaddr) {
 		return Config{}, fmt.Errorf("pq: could not match %d host names to %d hostaddr values",
 			len(cfg.multiHost)+1, len(cfg.multiHostaddr)+1)
 	}
 	// Need one port that applies to all or exactly the same number of ports as hosts.
 	l, ll := max(len(cfg.multiHost), len(cfg.multiHostaddr)), len(cfg.multiPort)
-	if l > 0 && ll > 0 && l != ll {
+	if ll > 0 && l != ll {
 		return Config{}, fmt.Errorf("pq: could not match %d port numbers to %d hosts", ll+1, l+1)
 	}
 
-	// Populate Multi
+	// Populate Multi.
+	cfg.Multi = nil
 	if len(cfg.multiHostaddr) > len(cfg.multiHost) {
 		cfg.multiHost = make([]string, len(cfg.multiHostaddr))
 	}
@@ -654,22 +687,6 @@ func newConfig(dsn string, env []string) (Config, error) {
 		cfg.ApplicationName = cfg.FallbackApplicationName
 	}
 
-	// We can't work with any client_encoding other than UTF-8 currently.
-	// However, we have historically allowed the user to set it to UTF-8
-	// explicitly, and there's no reason to break such programs, so allow that.
-	// Note that the "options" setting could also set client_encoding, but
-	// parsing its value is not worth it.  Instead, we always explicitly send
-	// client_encoding as a separate run-time parameter, which should override
-	// anything set in options.
-	if cfg.isset("client_encoding") && !isUTF8(cfg.ClientEncoding) {
-		return Config{}, fmt.Errorf(`pq: unsupported client_encoding %q: must be absent or "UTF8"`, cfg.ClientEncoding)
-	}
-	// DateStyle needs a similar treatment.
-	if cfg.isset("datestyle") && cfg.Datestyle != "ISO, MDY" {
-		return Config{}, fmt.Errorf(`pq: unsupported datestyle %q: must be absent or "ISO, MDY"`, cfg.Datestyle)
-	}
-	cfg.ClientEncoding, cfg.Datestyle = "UTF8", "ISO, MDY"
-
 	// Set default user if not explicitly provided.
 	if !cfg.isset("user") {
 		u, err := pqutil.User()
@@ -684,30 +701,108 @@ func newConfig(dsn string, env []string) (Config, error) {
 		cfg.SSLMode = SSLModeDisable
 	}
 
-	if cfg.MinProtocolVersion > cfg.MaxProtocolVersion {
-		return Config{}, fmt.Errorf("pq: min_protocol_version %q cannot be greater than max_protocol_version %q",
-			cfg.MinProtocolVersion, cfg.MaxProtocolVersion)
-	}
-	if cfg.SSLNegotiation == SSLNegotiationDirect {
-		switch cfg.SSLMode {
-		case SSLModeDisable, SSLModeAllow, SSLModePrefer:
-			return Config{}, fmt.Errorf(
-				`pq: weak sslmode %q may not be used with sslnegotiation=direct (use "require", "verify-ca", or "verify-full")`,
-				cfg.SSLMode)
-		}
-	}
 	if cfg.SSLRootCert == "system" {
 		if !cfg.isset("sslmode") {
 			cfg.SSLMode = SSLModeVerifyFull
 		}
-		if cfg.SSLMode != SSLModeVerifyFull {
-			return Config{}, fmt.Errorf(
-				`pq: weak sslmode %q may not be used with sslrootcert=system (use "verify-full")`,
+	}
+	if err := cfg.validate(); err != nil {
+		return Config{}, err
+	}
+
+	// We can't work with any client_encoding other than UTF-8. Always send our
+	// supported values so they override conflicting values in options.
+	cfg.ClientEncoding, cfg.Datestyle = "UTF8", "ISO, MDY"
+
+	return cfg, nil
+}
+
+func (cfg Config) validate() error {
+	if cfg.SSLMode != "" && !slices.Contains(sslModes, cfg.SSLMode) &&
+		!(strings.HasPrefix(string(cfg.SSLMode), "pqgo-") && hasTLSConfig(string(cfg.SSLMode)[5:])) {
+		return fmt.Errorf(`pq: wrong value for "sslmode": %q is not supported; supported values are %s`,
+			cfg.SSLMode, pqutil.Join(sslModes))
+	}
+	if cfg.SSLNegotiation != "" && !slices.Contains(sslNegotiations, cfg.SSLNegotiation) {
+		return fmt.Errorf(`pq: wrong value for "sslnegotiation": %q is not supported; supported values are %s`,
+			cfg.SSLNegotiation, pqutil.Join(sslNegotiations))
+	}
+	if cfg.TargetSessionAttrs != "" && !slices.Contains(targetSessionAttrs, cfg.TargetSessionAttrs) {
+		return fmt.Errorf(`pq: wrong value for "target_session_attrs": %q is not supported; supported values are %s`,
+			cfg.TargetSessionAttrs, pqutil.Join(targetSessionAttrs))
+	}
+	if cfg.LoadBalanceHosts != "" && !slices.Contains(loadBalanceHosts, cfg.LoadBalanceHosts) {
+		return fmt.Errorf(`pq: wrong value for "load_balance_hosts": %q is not supported; supported values are %s`,
+			cfg.LoadBalanceHosts, pqutil.Join(loadBalanceHosts))
+	}
+	for name, version := range map[string]ProtocolVersion{
+		"min_protocol_version": cfg.MinProtocolVersion,
+		"max_protocol_version": cfg.MaxProtocolVersion,
+	} {
+		if version != "" && !slices.Contains(protocolVersions, version) {
+			return fmt.Errorf(`pq: wrong value for %q: %q is not supported; supported values are %s`,
+				name, version, pqutil.Join(protocolVersions))
+		}
+	}
+	for name, version := range map[string]SSLProtocolVersion{
+		"ssl_min_protocol_version": cfg.SSLMinProtocolVersion,
+		"ssl_max_protocol_version": cfg.SSLMaxProtocolVersion,
+	} {
+		if version != "" && !slices.Contains(sslProtocolVersions, version) {
+			return fmt.Errorf(`pq: wrong value for %q: %q is not supported; supported values are %s`,
+				name, version, pqutil.Join(sslProtocolVersions))
+		}
+	}
+	if cfg.MinProtocolVersion != "" && cfg.MaxProtocolVersion != "" && cfg.MinProtocolVersion > cfg.MaxProtocolVersion {
+		return fmt.Errorf("pq: min_protocol_version %q cannot be greater than max_protocol_version %q",
+			cfg.MinProtocolVersion, cfg.MaxProtocolVersion)
+	}
+	if cfg.SSLMinProtocolVersion != "" && cfg.SSLMaxProtocolVersion != "" &&
+		cfg.SSLMinProtocolVersion.tlsconf() > cfg.SSLMaxProtocolVersion.tlsconf() {
+		return fmt.Errorf("pq: ssl_min_protocol_version %q cannot be greater than ssl_max_protocol_version %q",
+			cfg.SSLMinProtocolVersion, cfg.SSLMaxProtocolVersion)
+	}
+	if cfg.SSLNegotiation == SSLNegotiationDirect {
+		switch cfg.SSLMode {
+		case "", SSLModeDisable, SSLModeAllow, SSLModePrefer:
+			return fmt.Errorf(
+				`pq: weak sslmode %q may not be used with sslnegotiation=direct (use "require", "verify-ca", or "verify-full")`,
 				cfg.SSLMode)
 		}
 	}
-
-	return cfg, nil
+	if cfg.SSLRootCert == "system" && cfg.SSLMode != SSLModeVerifyFull {
+		return fmt.Errorf(
+			`pq: weak sslmode %q may not be used with sslrootcert=system (use "verify-full")`, cfg.SSLMode)
+	}
+	if cfg.SSLMode == SSLModeVerifyFull && cfg.Hostaddr.IsValid() && !cfg.hasExplicitHost() {
+		return errors.New("pq: sslmode=verify-full requires an explicit host name when hostaddr is set")
+	}
+	if cfg.SSLMode == SSLModeVerifyFull {
+		for _, host := range cfg.Multi {
+			if host.Hostaddr.IsValid() && host.Host == "" {
+				return errors.New("pq: sslmode=verify-full requires an explicit host name for every hostaddr")
+			}
+		}
+	}
+	if cfg.ClientEncoding != "" && !isUTF8(cfg.ClientEncoding) {
+		return fmt.Errorf(`pq: unsupported client_encoding %q: must be absent or "UTF8"`, cfg.ClientEncoding)
+	}
+	if cfg.Datestyle != "" && cfg.Datestyle != "ISO, MDY" {
+		return fmt.Errorf(`pq: unsupported datestyle %q: must be absent or "ISO, MDY"`, cfg.Datestyle)
+	}
+	if len(cfg.RequireAuth) > 0 {
+		negative := strings.HasPrefix(string(cfg.RequireAuth[0]), "!")
+		for _, method := range cfg.RequireAuth {
+			if !slices.Contains(requireAuths, method) {
+				return fmt.Errorf(`pq: wrong value for "require_auth": %q is not supported; supported values are %s`,
+					method, pqutil.Join(requireAuths))
+			}
+			if strings.HasPrefix(string(method), "!") != negative {
+				return fmt.Errorf(`pq: require_auth cannot mix positive and negative methods`)
+			}
+		}
+	}
+	return nil
 }
 
 func (cfg Config) network() (string, string) {
@@ -918,6 +1013,7 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 			case reflect.Struct:
 				if rt.Type == reflect.TypeFor[netip.Addr]() {
 					if hostaddr {
+						cfg.multiHostaddr = nil
 						vv := strings.Split(v, ",")
 						v = vv[0]
 						for _, vvv := range vv[1:] {
@@ -932,9 +1028,13 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 							}
 						}
 					}
-					ip, err := netip.ParseAddr(v)
-					if err != nil {
-						return fmt.Errorf(f+"%w", k, err)
+					var ip netip.Addr
+					if v != "" {
+						var err error
+						ip, err = netip.ParseAddr(v)
+						if err != nil {
+							return fmt.Errorf(f+"%w", k, err)
+						}
 					}
 					rv.Set(reflect.ValueOf(ip))
 				} else {
@@ -960,13 +1060,14 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 					return fmt.Errorf(f+`%q is not supported; supported values are %s`, k, v, pqutil.Join(sslProtocolVersions))
 				}
 				if host {
+					cfg.multiHost = nil
 					vv := strings.Split(v, ",")
-					v = vv[0]
-					for i, vvv := range vv[1:] {
-						if vvv == "" {
-							vv[i+1] = "localhost"
+					for i := range vv {
+						if vv[i] == "" {
+							vv[i] = "localhost"
 						}
 					}
+					v = vv[0]
 					cfg.multiHost = append(cfg.multiHost, vv[1:]...)
 				}
 				rv.SetString(v)
@@ -1006,6 +1107,7 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 				rv.SetInt(n)
 			case reflect.Uint16:
 				if port {
+					cfg.multiPort = nil
 					vv := strings.Split(v, ",")
 					v = vv[0]
 					for _, vvv := range vv[1:] {
@@ -1017,6 +1119,9 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 							return fmt.Errorf(f+"%w", k, err)
 						}
 						cfg.multiPort = append(cfg.multiPort, uint16(n))
+					}
+					if v == "" {
+						v = "5432"
 					}
 				}
 				n, err := strconv.ParseUint(v, 10, 16)
@@ -1058,6 +1163,13 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 // people go outside that.
 func (cfg Config) isset(name string) bool {
 	return slices.Contains(cfg.set, name)
+}
+
+// hasExplicitHost distinguishes the parser's localhost default from a host
+// supplied by the caller. A Config built directly has no set metadata, so a
+// non-empty Host in that form is necessarily explicit.
+func (cfg Config) hasExplicitHost() bool {
+	return cfg.Host != "" && (cfg.isset("host") || len(cfg.set) == 0 || cfg.Host != "localhost")
 }
 
 // Convert to a map; used only in tests.
@@ -1174,6 +1286,22 @@ func (cfg Config) string() string {
 		}
 	}
 	return b.String()
+}
+
+func (cfg Config) debugString() string {
+	cfg = cfg.Clone()
+	if cfg.Password != "" || cfg.isset("password") {
+		cfg.Password = "[REDACTED]"
+	}
+	if cfg.SSLInline && cfg.SSLKey != "" {
+		cfg.SSLKey = "[REDACTED]"
+	}
+	for key := range cfg.Runtime {
+		if strings.EqualFold(key, "password") {
+			cfg.Runtime[key] = "[REDACTED]"
+		}
+	}
+	return cfg.string()
 }
 
 // Recognize all sorts of silly things as "UTF-8", like Postgres does

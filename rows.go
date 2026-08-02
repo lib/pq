@@ -46,6 +46,13 @@ func (rs *rows) Close() error {
 	}
 	// no need to look at cn.bad as Next() will
 	for {
+		// The caller may have stopped after Next returned io.EOF for a
+		// RowDescription, leaving the next result set pending before Close was
+		// entered. Promote it before reading that result set's DataRows.
+		if rs.next != nil {
+			rs.rowsHeader = *rs.next
+			rs.next = nil
+		}
 		err := rs.Next(nil)
 		switch err {
 		case nil:
@@ -56,6 +63,13 @@ func (rs *rows) Close() error {
 			// for done to be set.
 			if rs.done {
 				return nil
+			}
+			// Close drains all result sets without database/sql calling
+			// NextResultSet between them. Promote the pending header so DataRow
+			// cardinality and decoding use the result set being drained.
+			if rs.next != nil {
+				rs.rowsHeader = *rs.next
+				rs.next = nil
 			}
 		default:
 			return err
@@ -93,8 +107,16 @@ func (rs *rows) Next(dest []driver.Value) (resErr error) {
 		}
 		switch t {
 		case proto.ErrorResponse:
+			if resErr != nil {
+				rs.cn.err.set(driver.ErrBadConn)
+				return fmt.Errorf("pq: unexpected second ErrorResponse after error: %w", resErr)
+			}
 			resErr = parseError(&rs.rb, "")
 		case proto.CommandComplete, proto.EmptyQueryResponse:
+			if resErr != nil {
+				rs.cn.err.set(driver.ErrBadConn)
+				return fmt.Errorf("pq: unexpected %s after error: %w", t, resErr)
+			}
 			if t == proto.CommandComplete {
 				rs.result, rs.tag, err = rs.cn.parseComplete(rs.rb.string())
 				if err != nil {
@@ -115,6 +137,10 @@ func (rs *rows) Next(dest []driver.Value) (resErr error) {
 				rs.cn.err.set(driver.ErrBadConn)
 				return fmt.Errorf("pq: unexpected DataRow after error %s", resErr)
 			}
+			if n != len(rs.colNames) {
+				rs.cn.err.set(driver.ErrBadConn)
+				return fmt.Errorf("pq: DataRow has %d columns, but RowDescription has %d", n, len(rs.colNames))
+			}
 			if n < len(dest) {
 				dest = dest[:n]
 			}
@@ -126,15 +152,21 @@ func (rs *rows) Next(dest []driver.Value) (resErr error) {
 				}
 				dest[i], err = decode(&rs.cn.parameterStatus, rs.rb.next(l), rs.colTyps[i].OID, rs.colFmts[i])
 				if err != nil {
+					rs.cn.err.set(driver.ErrBadConn)
 					return rs.cn.handleError(err)
 				}
 			}
 			return rs.cn.handleError(resErr)
 		case proto.RowDescription:
+			if resErr != nil {
+				rs.cn.err.set(driver.ErrBadConn)
+				return fmt.Errorf("pq: unexpected RowDescription after error: %w", resErr)
+			}
 			next := parsePortalRowDescribe(&rs.rb)
 			rs.next = &next
 			return io.EOF
 		default:
+			rs.cn.err.set(driver.ErrBadConn)
 			return fmt.Errorf("pq: unexpected message after execute: %q", t)
 		}
 	}
@@ -229,8 +261,14 @@ func (fd fieldDesc) Length() (length int64, ok bool) {
 	case oid.T_text, oid.T_bytea:
 		return math.MaxInt64, true
 	case oid.T_varchar, oid.T_bpchar:
+		if fd.Mod < 0 {
+			return math.MaxInt64, true
+		}
 		return int64(fd.Mod - headerSize), true
 	case oid.T_varbit, oid.T_bit:
+		if fd.Mod < 0 {
+			return math.MaxInt64, true
+		}
 		return int64(fd.Mod), true
 	default:
 		return 0, false
@@ -240,6 +278,9 @@ func (fd fieldDesc) Length() (length int64, ok bool) {
 func (fd fieldDesc) PrecisionScale() (precision, scale int64, ok bool) {
 	switch fd.OID {
 	case oid.T_numeric, oid.T__numeric:
+		if fd.Mod < 0 {
+			return 0, 0, false
+		}
 		mod := fd.Mod - headerSize
 		precision = int64((mod >> 16) & 0xffff)
 		scale = int64(mod & 0xffff)

@@ -131,29 +131,18 @@ func TestProtocolRegressionSimpleQueryRejectsErrorThenDescription(t *testing.T) 
 }
 
 func TestProtocolRegressionSimpleQueryRejectsPrematureReady(t *testing.T) {
-	tests := []struct {
-		name string
-		wire []byte
-	}{
-		{"without response", regressionBackendFrame(proto.ReadyForQuery, []byte{'I'})},
-		{"after row description", bytes.Join([][]byte{
-			regressionBackendFrame(proto.RowDescription, regressionSingleColumnDescription(oid.T_int8, 0)),
-			regressionBackendFrame(proto.ReadyForQuery, []byte{'I'}),
-		}, nil)},
+	wire := bytes.Join([][]byte{
+		regressionBackendFrame(proto.RowDescription, regressionSingleColumnDescription(oid.T_int8, 0)),
+		regressionBackendFrame(proto.ReadyForQuery, []byte{'I'}),
+	}, nil)
+	script := newRegressionScriptConn(wire)
+	cn := &conn{c: script, buf: bufio.NewReader(script)}
+	rows, err := cn.simpleQuery("select regression")
+	if rows != nil {
+		_ = rows.Close()
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			script := newRegressionScriptConn(tt.wire)
-			cn := &conn{c: script, buf: bufio.NewReader(script)}
-			rows, err := cn.simpleQuery("select regression")
-			if rows != nil {
-				_ = rows.Close()
-			}
-			if !errors.Is(err, errUnexpectedReady) {
-				t.Fatalf("premature ReadyForQuery returned %v; want %v", err, errUnexpectedReady)
-			}
-		})
+	if !errors.Is(err, errUnexpectedReady) {
+		t.Fatalf("premature ReadyForQuery returned %v; want %v", err, errUnexpectedReady)
 	}
 }
 

@@ -105,6 +105,8 @@ type ListenerConn struct {
 	connState        int32
 	notificationChan chan<- *Notification
 	replyChan        chan message
+	done             chan struct{}
+	doneOnce         sync.Once
 }
 
 // NewListenerConn creates a new ListenerConn. Use NewListener instead.
@@ -117,16 +119,37 @@ func newDialListenerConn(d Dialer, name string, c chan<- *Notification) (*Listen
 	if err != nil {
 		return nil, err
 	}
+	return startListenerConn(cn.(*conn), c), nil
+}
 
+func newDialListenerConnContext(ctx context.Context, d Dialer, name string, c chan<- *Notification) (*ListenerConn, error) {
+	connector, err := NewConnector(name)
+	if err != nil {
+		return nil, err
+	}
+	connector.Dialer(d)
+	cn, err := connector.open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = cn.Close()
+		return nil, err
+	}
+	return startListenerConn(cn, c), nil
+}
+
+func startListenerConn(cn *conn, c chan<- *Notification) *ListenerConn {
 	l := &ListenerConn{
-		cn:               cn.(*conn),
+		cn:               cn,
 		notificationChan: c,
 		connState:        connStateIdle,
 		replyChan:        make(chan message, 2),
+		done:             make(chan struct{}),
 	}
 
 	go l.listenerConnMain()
-	return l, nil
+	return l
 }
 
 // We can only allow one goroutine at a time to be running a query on the
@@ -189,7 +212,11 @@ func (l *ListenerConn) listenerConnLoop() (err error) {
 		case proto.NotificationResponse:
 			// recvNotification copies all the data so we don't need to worry
 			// about the scratch buffer being overwritten.
-			l.notificationChan <- recvNotification(r)
+			select {
+			case l.notificationChan <- recvNotification(r):
+			case <-l.done:
+				return errListenerConnClosed
+			}
 
 		case proto.RowDescription, proto.DataRow:
 			// only used by tests; ignore
@@ -249,6 +276,7 @@ func (l *ListenerConn) listenerConnMain() {
 	if l.err == nil {
 		l.err = err
 	}
+	l.signalDone()
 	_ = l.cn.Close()
 	l.connectionLock.Unlock()
 
@@ -284,10 +312,7 @@ func (l *ListenerConn) Ping() error {
 	if !sent {
 		return err
 	}
-	if err != nil { // shouldn't happen
-		panic(err)
-	}
-	return nil
+	return err
 }
 
 // Attempt to send a query on the connection. Returns an error if sending the
@@ -384,10 +409,15 @@ func (l *ListenerConn) Close() error {
 		return errListenerConnClosed
 	}
 	l.err = errListenerConnClosed
+	l.signalDone()
 	l.connectionLock.Unlock()
 	// We can't send anything on the connection without holding senderLock.
 	// Simply close the net.Conn to wake up everyone operating on it.
 	return l.cn.c.Close()
+}
+
+func (l *ListenerConn) signalDone() {
+	l.doneOnce.Do(func() { close(l.done) })
 }
 
 // Err returns the reason the connection was closed. It is not safe to call
@@ -458,9 +488,19 @@ type Listener struct {
 	dialer               Dialer
 	eventCallback        EventCallbackType
 
+	// connectLock serializes connection attempts. operationLock serializes
+	// changes to channels with queries and connection resynchronization. Neither
+	// mutex is needed by Close.
+	connectLock   sync.Mutex
+	operationLock sync.Mutex
+
 	lock                 sync.Mutex
 	isClosed             bool
+	done                 chan struct{}
 	reconnectCond        *sync.Cond
+	connectAttempt       uint64
+	connectCancel        context.CancelFunc
+	pendingCN            *ListenerConn
 	cn                   *ListenerConn
 	connNotificationChan <-chan *Notification
 	channels             map[string]struct{}
@@ -496,6 +536,7 @@ func NewDialListener(d Dialer, dsn string, minReconnect, maxReconnect time.Durat
 		eventCallback:        cb,
 		channels:             make(map[string]struct{}),
 		Notify:               make(chan *Notification, 32),
+		done:                 make(chan struct{}),
 	}
 	l.reconnectCond = sync.NewCond(&l.lock)
 	go l.listenerMain()
@@ -525,9 +566,12 @@ func (l *Listener) NotificationChannel() <-chan *Notification {
 //
 // The channel name is case-sensitive.
 func (l *Listener) Listen(channel string) error {
+	l.operationLock.Lock()
+
 	l.lock.Lock()
-	defer l.lock.Unlock()
 	if l.isClosed {
+		l.lock.Unlock()
+		l.operationLock.Unlock()
 		return net.ErrClosed
 	}
 
@@ -537,32 +581,62 @@ func (l *Listener) Listen(channel string) error {
 	// it can check the exported error and ignore it.
 	_, exists := l.channels[channel]
 	if exists {
+		l.lock.Unlock()
+		l.operationLock.Unlock()
 		return ErrChannelAlreadyOpen
 	}
 
-	if l.cn != nil {
-		// If resp is true but error is set then the query was executed on the
-		// remote server but resulted in an error. This should be relatively
-		// rare, so it's fine if we just pass the error to our caller.
-		// If resp is false then we could not complete the query on the remote
-		// server and our underlying connection is about to go away, so we only
-		// add relname to l.channels, and wait for resync() to take care of the
-		// rest.
-		resp, err := l.cn.Listen(channel)
-		if resp && err != nil {
-			return err
-		}
+	cn := l.cn
+	if cn == nil {
+		l.channels[channel] = struct{}{}
+		l.lock.Unlock()
+		l.operationLock.Unlock()
+		return l.waitForConnection(nil)
 	}
+	l.lock.Unlock()
 
+	// If resp is true but error is set then the query was executed on the
+	// remote server but resulted in an error. This should be relatively
+	// rare, so it's fine if we just pass the error to our caller.
+	// If resp is false then we could not complete the query on the remote
+	// server and our underlying connection is about to go away, so we only
+	// add relname to l.channels, and wait for resync() to take care of the
+	// rest.
+	resp, err := cn.Listen(channel)
+
+	l.lock.Lock()
+	if l.isClosed {
+		l.lock.Unlock()
+		l.operationLock.Unlock()
+		return net.ErrClosed
+	}
+	if resp && err != nil {
+		l.lock.Unlock()
+		l.operationLock.Unlock()
+		return err
+	}
 	l.channels[channel] = struct{}{}
-	for l.cn == nil {
-		l.reconnectCond.Wait()
-		// we let go of the mutex for a while
-		if l.isClosed {
-			return net.ErrClosed
-		}
-	}
+	l.lock.Unlock()
+	l.operationLock.Unlock()
 
+	if !resp {
+		return l.waitForConnection(cn)
+	}
+	return nil
+}
+
+// waitForConnection waits until old has been replaced by a live connection.
+// Callers must not hold operationLock while waiting: reconnect needs it in
+// order to synchronize the desired channel set with the new connection.
+func (l *Listener) waitForConnection(old *ListenerConn) error {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	for !l.isClosed && (l.cn == nil || l.cn == old) {
+		l.reconnectCond.Wait()
+	}
+	if l.isClosed {
+		return net.ErrClosed
+	}
 	return nil
 }
 
@@ -574,10 +648,12 @@ func (l *Listener) Listen(channel string) error {
 //
 // The channel name is case-sensitive.
 func (l *Listener) Unlisten(channel string) error {
-	l.lock.Lock()
-	defer l.lock.Unlock()
+	l.operationLock.Lock()
+	defer l.operationLock.Unlock()
 
+	l.lock.Lock()
 	if l.isClosed {
+		l.lock.Unlock()
 		return net.ErrClosed
 	}
 
@@ -585,21 +661,35 @@ func (l *Listener) Unlisten(channel string) error {
 	// useful to distinguish from the normal conditions.
 	_, exists := l.channels[channel]
 	if !exists {
+		l.lock.Unlock()
 		return ErrChannelNotOpen
 	}
 
-	if l.cn != nil {
-		// Similarly to Listen (see comment there), the caller should only be
-		// bothered with an error if it came from the backend as a response to
-		// our query.
-		resp, err := l.cn.Unlisten(channel)
-		if resp && err != nil {
-			return err
-		}
+	cn := l.cn
+	if cn == nil {
+		// Don't bother waiting for resync if there's no connection.
+		delete(l.channels, channel)
+		l.lock.Unlock()
+		return nil
 	}
+	l.lock.Unlock()
 
-	// Don't bother waiting for resync if there's no connection.
+	// Similarly to Listen (see comment there), the caller should only be
+	// bothered with an error if it came from the backend as a response to
+	// our query.
+	resp, err := cn.Unlisten(channel)
+
+	l.lock.Lock()
+	if l.isClosed {
+		l.lock.Unlock()
+		return net.ErrClosed
+	}
+	if resp && err != nil {
+		l.lock.Unlock()
+		return err
+	}
 	delete(l.channels, channel)
+	l.lock.Unlock()
 	return nil
 }
 
@@ -608,53 +698,76 @@ func (l *Listener) Unlisten(channel string) error {
 // still get notifications for any of the deleted channels even after
 // UnlistenAll has returned.
 func (l *Listener) UnlistenAll() error {
-	l.lock.Lock()
-	defer l.lock.Unlock()
+	l.operationLock.Lock()
+	defer l.operationLock.Unlock()
 
+	l.lock.Lock()
 	if l.isClosed {
+		l.lock.Unlock()
 		return net.ErrClosed
 	}
 
-	if l.cn != nil {
-		// Similarly to Listen (see comment in that function), the caller
-		// should only be bothered with an error if it came from the backend as
-		// a response to our query.
-		gotResponse, err := l.cn.UnlistenAll()
-		if gotResponse && err != nil {
-			return err
-		}
+	cn := l.cn
+	if cn == nil {
+		// Don't bother waiting for resync if there's no connection.
+		l.channels = make(map[string]struct{})
+		l.lock.Unlock()
+		return nil
 	}
+	l.lock.Unlock()
 
-	// Don't bother waiting for resync if there's no connection.
+	// Similarly to Listen (see comment in that function), the caller
+	// should only be bothered with an error if it came from the backend as
+	// a response to our query.
+	gotResponse, err := cn.UnlistenAll()
+
+	l.lock.Lock()
+	if l.isClosed {
+		l.lock.Unlock()
+		return net.ErrClosed
+	}
+	if gotResponse && err != nil {
+		l.lock.Unlock()
+		return err
+	}
 	l.channels = make(map[string]struct{})
+	l.lock.Unlock()
 	return nil
 }
 
 // Ping the remote server to make sure it's alive. Non-nil return value means
 // that there is no active connection.
 func (l *Listener) Ping() error {
-	l.lock.Lock()
-	defer l.lock.Unlock()
+	l.operationLock.Lock()
+	defer l.operationLock.Unlock()
 
+	l.lock.Lock()
 	if l.isClosed {
+		l.lock.Unlock()
 		return net.ErrClosed
 	}
-	if l.cn == nil {
+	cn := l.cn
+	l.lock.Unlock()
+	if cn == nil {
 		return errors.New("no connection")
 	}
 
-	return l.cn.Ping()
+	err := cn.Ping()
+	l.lock.Lock()
+	closed := l.isClosed
+	l.lock.Unlock()
+	if closed {
+		return net.ErrClosed
+	}
+	return err
 }
 
-// Clean up after losing the server connection. Returns l.cn.Err(), which should
+// Clean up after losing the server connection. Returns cn.Err(), which should
 // have the reason the connection was lost.
-func (l *Listener) disconnectCleanup() error {
-	l.lock.Lock()
-	defer l.lock.Unlock()
-
+func (l *Listener) disconnectCleanup(cn *ListenerConn, notificationChan <-chan *Notification) error {
 	// sanity check; can't look at Err() until the channel has been closed
 	select {
-	case _, ok := <-l.connNotificationChan:
+	case _, ok := <-notificationChan:
 		if ok {
 			panic("connNotificationChan not closed")
 		}
@@ -662,18 +775,25 @@ func (l *Listener) disconnectCleanup() error {
 		panic("connNotificationChan not closed")
 	}
 
-	err := l.cn.Err()
-	_ = l.cn.Close()
-	l.cn = nil
+	err := cn.Err()
+	_ = cn.Close()
+
+	l.lock.Lock()
+	if l.cn == cn {
+		l.cn = nil
+		l.connNotificationChan = nil
+		l.reconnectCond.Broadcast()
+	}
+	l.lock.Unlock()
 	return err
 }
 
 // Synchronize the list of channels we want to be listening on with the server
 // after the connection has been established.
-func (l *Listener) resync(cn *ListenerConn, notificationChan <-chan *Notification) error {
-	doneChan := make(chan error)
+func (l *Listener) resync(ctx context.Context, cn *ListenerConn, notificationChan <-chan *Notification, channels []string) error {
+	doneChan := make(chan error, 1)
 	go func(notificationChan <-chan *Notification) {
-		for channel := range l.channels {
+		for _, channel := range channels {
 			// If we got a response, return that error to our caller as it's
 			// going to be more descriptive than cn.Err().
 			gotResponse, err := cn.Listen(channel)
@@ -709,6 +829,9 @@ func (l *Listener) resync(cn *ListenerConn, notificationChan <-chan *Notificatio
 
 		case err := <-doneChan:
 			return err
+
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }
@@ -722,29 +845,97 @@ func (l *Listener) closed() bool {
 }
 
 func (l *Listener) connect() error {
+	l.connectLock.Lock()
+	defer l.connectLock.Unlock()
+
 	l.lock.Lock()
-	defer l.lock.Unlock()
 	if l.isClosed {
+		l.lock.Unlock()
 		return net.ErrClosed
 	}
+	l.connectAttempt++
+	attempt := l.connectAttempt
+	ctx, cancel := context.WithCancel(context.Background())
+	l.connectCancel = cancel
+	l.lock.Unlock()
 
 	notificationChan := make(chan *Notification, 32)
-
-	var err error
-	l.cn, err = newDialListenerConn(l.dialer, l.dsn, notificationChan)
+	cn, err := newDialListenerConnContext(ctx, l.dialer, l.dsn, notificationChan)
 	if err != nil {
+		cancel()
+		l.lock.Lock()
+		if l.connectAttempt == attempt {
+			l.connectCancel = nil
+		}
+		closed := l.isClosed
+		l.lock.Unlock()
+		if closed {
+			return net.ErrClosed
+		}
 		return err
 	}
 
-	err = l.resync(l.cn, notificationChan)
-	if err != nil {
-		_ = l.cn.Close()
-		return err
+	l.lock.Lock()
+	if l.isClosed || l.connectAttempt != attempt {
+		l.lock.Unlock()
+		cancel()
+		_ = cn.Close()
+		return net.ErrClosed
+	}
+	l.pendingCN = cn
+	l.lock.Unlock()
+
+	// Freeze changes to the desired channel set between taking the snapshot and
+	// publishing the resynchronized connection. Public operations may still be
+	// interrupted by Close because Close does not acquire operationLock.
+	l.operationLock.Lock()
+	l.lock.Lock()
+	if l.isClosed || l.connectAttempt != attempt || l.pendingCN != cn {
+		l.lock.Unlock()
+		l.operationLock.Unlock()
+		cancel()
+		_ = cn.Close()
+		return net.ErrClosed
+	}
+	channels := make([]string, 0, len(l.channels))
+	for channel := range l.channels {
+		channels = append(channels, channel)
+	}
+	l.lock.Unlock()
+
+	err = l.resync(ctx, cn, notificationChan, channels)
+	if err == nil {
+		l.lock.Lock()
+		if !l.isClosed && l.connectAttempt == attempt && l.pendingCN == cn {
+			l.pendingCN = nil
+			l.connectCancel = nil
+			l.cn = cn
+			l.connNotificationChan = notificationChan
+			l.reconnectCond.Broadcast()
+			l.lock.Unlock()
+			l.operationLock.Unlock()
+			cancel()
+			return nil
+		}
+		l.lock.Unlock()
 	}
 
-	l.connNotificationChan = notificationChan
-	l.reconnectCond.Broadcast()
-	return nil
+	l.lock.Lock()
+	if l.connectAttempt == attempt {
+		if l.pendingCN == cn {
+			l.pendingCN = nil
+		}
+		l.connectCancel = nil
+	}
+	closed := l.isClosed
+	l.lock.Unlock()
+	l.operationLock.Unlock()
+	cancel()
+	_ = cn.Close()
+	if closed {
+		return net.ErrClosed
+	}
+	return err
 }
 
 // Close disconnects the Listener from the database and shuts it down.
@@ -752,19 +943,38 @@ func (l *Listener) connect() error {
 // if the connection has already been closed.
 func (l *Listener) Close() error {
 	l.lock.Lock()
-	defer l.lock.Unlock()
-
 	if l.isClosed {
+		l.lock.Unlock()
 		return net.ErrClosed
 	}
 
-	if l.cn != nil {
-		_ = l.cn.Close()
-	}
 	l.isClosed = true
+	l.connectAttempt++
+	if l.done == nil {
+		l.done = make(chan struct{})
+	}
+	close(l.done)
+	cancel := l.connectCancel
+	pendingCN := l.pendingCN
+	cn := l.cn
+	l.connectCancel = nil
+	l.pendingCN = nil
+	l.cn = nil
+	l.connNotificationChan = nil
 
 	// Unblock calls to Listen()
 	l.reconnectCond.Broadcast()
+	l.lock.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if pendingCN != nil {
+		_ = pendingCN.Close()
+	}
+	if cn != nil && cn != pendingCN {
+		_ = cn.Close()
+	}
 
 	return nil
 }
@@ -772,6 +982,39 @@ func (l *Listener) Close() error {
 func (l *Listener) emitEvent(event ListenerEventType, err error) {
 	if l.eventCallback != nil {
 		l.eventCallback(event, err)
+	}
+}
+
+// waitReconnect waits for the next connection attempt or for Close. It returns
+// false when the listener has been closed.
+func (l *Listener) waitReconnect(d time.Duration) bool {
+	if d <= 0 {
+		select {
+		case <-l.done:
+			return false
+		default:
+			return true
+		}
+	}
+
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-l.done:
+		return false
+	}
+}
+
+// sendNotification forwards a notification without allowing a slow consumer
+// to prevent Close from shutting down the listener.
+func (l *Listener) sendNotification(notification *Notification) bool {
+	select {
+	case l.Notify <- notification:
+		return true
+	case <-l.done:
+		return false
 	}
 }
 
@@ -793,42 +1036,73 @@ func (l *Listener) listenerConnLoop() {
 			}
 
 			l.emitEvent(ListenerEventConnectionAttemptFailed, err)
-			time.Sleep(reconnectInterval)
+			if !l.waitReconnect(reconnectInterval) {
+				return
+			}
 			reconnectInterval *= 2
 			if reconnectInterval > l.maxReconnectInterval {
 				reconnectInterval = l.maxReconnectInterval
 			}
 		}
 
+		l.lock.Lock()
+		if l.isClosed {
+			l.lock.Unlock()
+			return
+		}
+		cn := l.cn
+		notificationChan := l.connNotificationChan
+		l.lock.Unlock()
+		if cn == nil || notificationChan == nil {
+			continue
+		}
+
 		if nextReconnect.IsZero() {
 			l.emitEvent(ListenerEventConnected, nil)
 		} else {
 			l.emitEvent(ListenerEventReconnected, nil)
-			l.Notify <- nil
+			if !l.sendNotification(nil) {
+				return
+			}
 		}
 
 		reconnectInterval = l.minReconnectInterval
 		nextReconnect = time.Now().Add(reconnectInterval)
 
+	connectionLoop:
 		for {
-			notification, ok := <-l.connNotificationChan
-			if !ok { // lost connection, loop again
-				break
+			select {
+			case notification, ok := <-notificationChan:
+				if !ok { // lost connection, loop again
+					break connectionLoop
+				}
+				if !l.sendNotification(notification) {
+					return
+				}
+			case <-l.done:
+				return
 			}
-			l.Notify <- notification
 		}
 
-		err := l.disconnectCleanup()
+		err := l.disconnectCleanup(cn, notificationChan)
 		if l.closed() {
 			return
 		}
 		l.emitEvent(ListenerEventDisconnected, err)
 
-		time.Sleep(time.Until(nextReconnect))
+		if !l.waitReconnect(time.Until(nextReconnect)) {
+			return
+		}
 	}
 }
 
 func (l *Listener) listenerMain() {
+	l.lock.Lock()
+	if l.done == nil {
+		l.done = make(chan struct{})
+	}
+	l.lock.Unlock()
+
+	defer close(l.Notify)
 	l.listenerConnLoop()
-	close(l.Notify)
 }

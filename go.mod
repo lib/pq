@@ -5,6 +5,8 @@ go 1.25.0
 require (
 	github.com/testcontainers/testcontainers-go v0.43.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.43.0
+	github.com/xdg-go/stringprep v1.0.4
+	golang.org/x/text v0.37.0
 )
 
 require (

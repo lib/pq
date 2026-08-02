@@ -2,17 +2,38 @@ package pq
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"database/sql/driver"
 
 	"github.com/lib/pq/pqerror"
 )
 
-// Never called, but need to retain them for interface compatibility.
-func (cn *conn) Prepare(q string) (driver.Stmt, error)             { panic("conn.Prepare") }
-func (cn *conn) Begin() (driver.Tx, error)                         { panic("conn.Begin") }
-func (st *stmt) Query(v []driver.Value) (r driver.Rows, err error) { panic("stmt.Query") }
-func (st *stmt) Exec(v []driver.Value) (driver.Result, error)      { panic("stmt.Exec") }
+// These methods remain for direct users of database/sql/driver's legacy
+// interfaces. database/sql generally calls their context-aware counterparts.
+func (cn *conn) Prepare(q string) (driver.Stmt, error) {
+	return cn.PrepareContext(context.Background(), q)
+}
+
+func (cn *conn) Begin() (driver.Tx, error) {
+	return cn.BeginTx(context.Background(), driver.TxOptions{})
+}
+
+func (st *stmt) Query(v []driver.Value) (driver.Rows, error) {
+	return st.QueryContext(context.Background(), deprecatedNamedValues(v))
+}
+
+func (st *stmt) Exec(v []driver.Value) (driver.Result, error) {
+	return st.ExecContext(context.Background(), deprecatedNamedValues(v))
+}
+
+func deprecatedNamedValues(values []driver.Value) []driver.NamedValue {
+	named := make([]driver.NamedValue, len(values))
+	for i, value := range values {
+		named[i] = driver.NamedValue{Ordinal: i + 1, Value: value}
+	}
+	return named
+}
 
 // [pq.Error.Severity] values.
 //

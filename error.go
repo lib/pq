@@ -180,11 +180,13 @@ func (e *Error) Error() string {
 		pos, err := strconv.Atoi(e.Position)
 		if err == nil {
 			lines := strings.Split(e.query, "\n")
-			line, col := posToLine(pos, lines)
-			if len(lines) == 1 {
-				msg += " at column " + strconv.Itoa(col)
-			} else {
-				msg += " at position " + strconv.Itoa(line) + ":" + strconv.Itoa(col)
+			line, col, ok := posToLine(pos, lines)
+			if ok {
+				if len(lines) == 1 {
+					msg += " at column " + strconv.Itoa(col)
+				} else {
+					msg += " at position " + strconv.Itoa(line) + ":" + strconv.Itoa(col)
+				}
 			}
 		}
 	}
@@ -225,7 +227,10 @@ func (e *Error) ErrorWithDetail() string {
 			return b.String()
 		}
 		lines := strings.Split(e.query, "\n")
-		line, col := posToLine(pos, lines)
+		line, col, ok := posToLine(pos, lines)
+		if !ok {
+			return b.String()
+		}
 
 		fmt.Fprintf(b, "\nCONTEXT: line %d, column %d:\n\n", line, col)
 		if line > 2 {
@@ -248,18 +253,19 @@ func (e *Error) ErrorWithDetail() string {
 	return b.String()
 }
 
-func posToLine(pos int, lines []string) (line, col int) {
+func posToLine(pos int, lines []string) (line, col int, ok bool) {
+	if pos < 1 {
+		return 0, 0, false
+	}
 	read := 0
 	for i := range lines {
-		line++
 		ll := utf8.RuneCountInString(lines[i]) + 1 // +1 for the removed newline
 		if read+ll >= pos {
-			col = max(pos-read, 1) // Should be lower than 1, but just in case.
-			break
+			return i + 1, pos - read, true
 		}
 		read += ll
 	}
-	return line, col
+	return 0, 0, false
 }
 
 func expandTab(s string) string {

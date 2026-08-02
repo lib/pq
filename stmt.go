@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/lib/pq/internal/proto"
 	"github.com/lib/pq/oid"
@@ -26,46 +27,60 @@ func (st *stmt) Close() error {
 	if err := st.cn.err.get(); err != nil {
 		return err
 	}
+	if err := st.cn.c.SetDeadline(st.cn.closeDeadline()); err != nil {
+		return st.closeError(err)
+	}
 
 	w := st.cn.writeBuf(proto.Close)
 	w.byte(proto.Sync)
 	w.string(st.name)
 	err := st.cn.send(w)
 	if err != nil {
-		return st.cn.handleError(err)
+		return st.closeError(err)
 	}
 	err = st.cn.send(st.cn.writeBuf(proto.Sync))
 	if err != nil {
-		return st.cn.handleError(err)
+		return st.closeError(err)
 	}
 
 	t, _, err := st.cn.recv1()
 	if err != nil {
-		return st.cn.handleError(err)
+		return st.closeError(err)
 	}
 	if t != proto.CloseComplete {
-		st.cn.err.set(driver.ErrBadConn)
-		return fmt.Errorf("pq: unexpected close response: %q", t)
+		return st.closeError(fmt.Errorf("pq: unexpected close response: %q", t))
 	}
-	st.closed = true
 
 	t, r, err := st.cn.recv1()
 	if err != nil {
-		return st.cn.handleError(err)
+		return st.closeError(err)
 	}
 	if t != proto.ReadyForQuery {
-		st.cn.err.set(driver.ErrBadConn)
-		return fmt.Errorf("pq: expected ready for query, but got: %q", t)
+		return st.closeError(fmt.Errorf("pq: expected ready for query, but got: %q", t))
 	}
 	st.cn.processReadyForQuery(r)
+	if err := st.cn.c.SetDeadline(time.Time{}); err != nil {
+		return st.closeError(err)
+	}
+	st.closed = true
 
 	return nil
 }
 
+func (st *stmt) closeError(err error) error {
+	st.cn.err.set(driver.ErrBadConn)
+	_ = st.cn.c.Close()
+	return st.cn.handleError(err)
+}
+
 // Implement [driver.StmtQueryContext].
 func (st *stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	finish := st.cn.watchCancel(ctx, true)
 	if err := st.cn.err.get(); err != nil {
+		finish()
 		return nil, err
 	}
 
@@ -84,6 +99,9 @@ func (st *stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (dri
 
 // Implement [driver.StmtExecContext].
 func (st *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	defer st.cn.watchCancel(ctx, true)()
 	if err := st.cn.err.get(); err != nil {
 		return nil, err

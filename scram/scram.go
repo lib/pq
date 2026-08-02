@@ -36,7 +36,62 @@ import (
 	"hash"
 	"strconv"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/xdg-go/stringprep"
+	"golang.org/x/text/unicode/norm"
 )
+
+// maxIterationCount bounds attacker-controlled PBKDF2 work while allowing
+// deployments configured substantially above PostgreSQL's default of 4096.
+const maxIterationCount = 1_000_000
+
+var postgresNonASCIISpaces = stringprep.Mapping{
+	'\u00a0': []rune{' '},
+	'\u1680': []rune{' '},
+	'\u2000': []rune{' '},
+	'\u2001': []rune{' '},
+	'\u2002': []rune{' '},
+	'\u2003': []rune{' '},
+	'\u2004': []rune{' '},
+	'\u2005': []rune{' '},
+	'\u2006': []rune{' '},
+	'\u2007': []rune{' '},
+	'\u2008': []rune{' '},
+	'\u2009': []rune{' '},
+	'\u200a': []rune{' '},
+	'\u200b': []rune{' '},
+	'\u202f': []rune{' '},
+	'\u205f': []rune{' '},
+	'\u3000': []rune{' '},
+}
+
+var postgresSASLprep = func() stringprep.Profile {
+	profile := stringprep.SASLprep
+	// PostgreSQL maps non-ASCII spaces before table B.1, then validates the
+	// mapped string before applying NFKC normalization.
+	profile.Mappings = []stringprep.Mapping{
+		postgresNonASCIISpaces,
+		stringprep.TableB1,
+	}
+	profile.Normalize = false
+	return profile
+}()
+
+func preparePassword(password string) string {
+	if !utf8.ValidString(password) {
+		return password
+	}
+
+	mapped, err := postgresSASLprep.Prepare(password)
+	if err != nil || mapped == "" {
+		// PostgreSQL accepts passwords in encodings other than UTF-8. It uses
+		// the original bytes when SASLprep rejects invalid UTF-8 or prohibited
+		// characters, or when mapping produces an empty password.
+		return password
+	}
+	return norm.NFKC.String(mapped)
+}
 
 // Client implements a SCRAM-* client (SCRAM-SHA-1, SCRAM-SHA-256, etc).
 //
@@ -76,7 +131,7 @@ func NewClient(newHash func() hash.Hash, user, pass string) *Client {
 	c := &Client{
 		newHash: newHash,
 		user:    user,
-		pass:    pass,
+		pass:    preparePassword(pass),
 	}
 	c.out.Grow(256)
 	c.authMsg.Grow(256)
@@ -161,7 +216,7 @@ func (c *Client) step2(in []byte) error {
 	if !bytes.HasPrefix(fields[1], []byte("s=")) || len(fields[1]) < 6 {
 		return fmt.Errorf("server sent an invalid SCRAM-SHA-256 salt: %q", fields[1])
 	}
-	if !bytes.HasPrefix(fields[2], []byte("i=")) || len(fields[2]) < 6 {
+	if !bytes.HasPrefix(fields[2], []byte("i=")) || len(fields[2]) == 2 {
 		return fmt.Errorf("server sent an invalid SCRAM-SHA-256 iteration count: %q", fields[2])
 	}
 
@@ -176,11 +231,11 @@ func (c *Client) step2(in []byte) error {
 		return fmt.Errorf("cannot decode SCRAM-SHA-256 salt sent by server: %q", fields[1])
 	}
 	salt = salt[:n]
-	iterCount, err := strconv.Atoi(string(fields[2][2:]))
-	if err != nil {
+	iterCount, err := strconv.ParseUint(string(fields[2][2:]), 10, 64)
+	if err != nil || iterCount == 0 || iterCount > maxIterationCount {
 		return fmt.Errorf("server sent an invalid SCRAM-SHA-256 iteration count: %q", fields[2])
 	}
-	c.saltPassword(salt, iterCount)
+	c.saltPassword(salt, int(iterCount))
 
 	c.authMsg.WriteString(",c=biws,r=")
 	c.authMsg.Write(c.serverNonce)

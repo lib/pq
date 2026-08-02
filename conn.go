@@ -2,6 +2,7 @@ package pq
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/sha256"
@@ -15,7 +16,6 @@ import (
 	"net"
 	"os"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +42,15 @@ var (
 	errNoRowsAffected  = errors.New("no RowsAffected available after the empty statement")
 	errNoLastInsertID  = errors.New("no LastInsertId available after the empty statement")
 )
+
+const defaultNetworkCloseTimeout = 5 * time.Second
+
+// Allow a responsive backend to report QueryCanceled and leave prepared
+// statement connections reusable. If no response arrives promptly, close the
+// primary connection so context cancellation cannot hang indefinitely.
+const cancelResponseGracePeriod = 100 * time.Millisecond
+
+const cancelRequestTimeout = 10 * time.Second
 
 // Compile time validation that our types implement the expected interfaces
 var (
@@ -165,12 +174,13 @@ func (d defaultDialer) DialContext(ctx context.Context, network, address string)
 }
 
 type conn struct {
-	c         net.Conn
-	buf       *bufio.Reader
-	namei     int
-	scratch   [512]byte
-	txnStatus transactionStatus
-	txnFinish func()
+	c            net.Conn
+	buf          *bufio.Reader
+	closeTimeout time.Duration
+	namei        int
+	scratch      [512]byte
+	txnStatus    transactionStatus
+	txnFinish    func()
 
 	// Save connection arguments to use during CancelRequest.
 	dialer          Dialer
@@ -190,6 +200,7 @@ type conn struct {
 	noticeHandler       func(*Error)        // If not nil, notices will be synchronously sent here
 	notificationHandler func(*Notification) // If not nil, notifications will be synchronously sent here
 	gss                 GSS                 // GSSAPI context
+	gssComplete         bool                // GSSAPI peer authentication completed
 }
 
 type syncErr struct {
@@ -273,53 +284,85 @@ restartAll:
 		}
 	restartHost:
 		if debugProto {
-			fmt.Fprintln(os.Stderr, "CONNECT ", cfg.string())
+			fmt.Fprintln(os.Stderr, "CONNECT ", cfg.debugString())
 		}
 
 		cfg.SSLMode = mode
 		cn := &conn{cfg: cfg, dialer: c.dialer}
+		pgpassHost := cn.cfg.Host
+		if cn.cfg.Hostaddr.IsValid() && !cn.cfg.hasExplicitHost() {
+			pgpassHost = cn.cfg.Hostaddr.String()
+		}
 		cn.cfg.Password = pgpass.PasswordFromPgpass(cn.cfg.Passfile, cn.cfg.User, cn.cfg.Password,
-			cn.cfg.Host, strconv.Itoa(int(cn.cfg.Port)), cn.cfg.Database)
+			pgpassHost, strconv.Itoa(int(cn.cfg.Port)), cn.cfg.Database)
 
 		var err error
 		cn.c, err = dial(ctx, c.dialer, cn.cfg)
 		if app(err, cfg) {
 			continue
 		}
+		handshakeConn := cn.c
+		stopContext := context.AfterFunc(ctx, func() {
+			_ = handshakeConn.SetDeadline(time.Now())
+		})
+		closeHandshake := func() {
+			stopContext()
+			_ = cn.c.Close()
+		}
+		contextError := func(err error) error {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			return err
+		}
 
 		err = cn.ssl(cn.cfg, mode)
 		if err != nil && mode == SSLModePrefer {
+			closeHandshake()
+			if err = ctx.Err(); err != nil {
+				app(err, cfg)
+				continue
+			}
 			mode = SSLModeDisable
 			goto restartHost
 		}
+		err = contextError(err)
 		if app(err, cfg) {
-			if cn.c != nil {
-				_ = cn.c.Close()
-			}
+			closeHandshake()
 			continue
 		}
 
 		cn.buf = bufio.NewReader(cn.c)
 		err = cn.startup(cn.cfg)
 		if err != nil && mode == SSLModeAllow {
+			closeHandshake()
+			if err = ctx.Err(); err != nil {
+				app(err, cfg)
+				continue
+			}
 			mode = SSLModeRequire
 			goto restartHost
 		}
+		err = contextError(err)
 		if app(err, cfg) {
-			_ = cn.c.Close()
+			closeHandshake()
 			continue
 		}
 
-		// Reset the deadline, in case one was set (see dial)
-		if cn.cfg.ConnectTimeout > 0 {
-			err := cn.c.SetDeadline(time.Time{})
-			if app(err, cfg) {
-				_ = cn.c.Close()
-				continue
-			}
+		err = cn.checkTSA(tsa)
+		err = contextError(err)
+		if app(err, cfg) {
+			closeHandshake()
+			continue
 		}
 
-		err = cn.checkTSA(tsa)
+		stopContext()
+		if err = contextError(nil); app(err, cfg) {
+			_ = cn.c.Close()
+			continue
+		}
+		// Reset deadlines set by connect_timeout, or by cancellation of ctx.
+		err = cn.c.SetDeadline(time.Time{})
 		if app(err, cfg) {
 			_ = cn.c.Close()
 			continue
@@ -453,23 +496,87 @@ func dial(ctx context.Context, d Dialer, cfg Config) (net.Conn, error) {
 			conn     net.Conn
 			err      error
 		)
+		dialCtx, cancel := context.WithTimeout(ctx, cfg.ConnectTimeout)
+		defer cancel()
 		if dctx, ok := d.(DialerContext); ok {
-			ctx, cancel := context.WithTimeout(ctx, cfg.ConnectTimeout)
-			defer cancel()
-			conn, err = dctx.DialContext(ctx, network, address)
+			conn, err = dctx.DialContext(dialCtx, network, address)
 		} else {
-			conn, err = d.DialTimeout(network, address, cfg.ConnectTimeout)
+			conn, err = dialLegacy(dialCtx, func() (net.Conn, error) {
+				return d.DialTimeout(network, address, cfg.ConnectTimeout)
+			})
 		}
+		conn, err = checkedDialResult(conn, err)
 		if err != nil {
 			return nil, err
 		}
 		err = conn.SetDeadline(deadline)
-		return conn, err
+		if err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		return conn, nil
 	}
 	if dctx, ok := d.(DialerContext); ok {
-		return dctx.DialContext(ctx, network, address)
+		conn, err := dctx.DialContext(ctx, network, address)
+		return checkedDialResult(conn, err)
 	}
-	return d.Dial(network, address)
+	return dialLegacy(ctx, func() (net.Conn, error) {
+		return d.Dial(network, address)
+	})
+}
+
+type legacyDialResult struct {
+	conn net.Conn
+	err  error
+}
+
+func dialLegacy(ctx context.Context, call func() (net.Conn, error)) (net.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if ctx.Done() == nil {
+		conn, err := call()
+		return checkedDialResult(conn, err)
+	}
+
+	result := make(chan legacyDialResult)
+	go func() {
+		conn, err := call()
+		r := legacyDialResult{conn: conn, err: err}
+		select {
+		case result <- r:
+		case <-ctx.Done():
+			if conn != nil {
+				_ = conn.Close()
+			}
+		}
+	}()
+
+	select {
+	case r := <-result:
+		if err := ctx.Err(); err != nil {
+			if r.conn != nil {
+				_ = r.conn.Close()
+			}
+			return nil, err
+		}
+		return checkedDialResult(r.conn, r.err)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func checkedDialResult(conn net.Conn, err error) (net.Conn, error) {
+	if err != nil {
+		if conn != nil {
+			_ = conn.Close()
+		}
+		return nil, err
+	}
+	if conn == nil {
+		return nil, errors.New("pq: dialer returned a nil connection without an error")
+	}
+	return conn, nil
 }
 
 func (cn *conn) isInTransaction() bool {
@@ -513,21 +620,28 @@ func (cn *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, 
 	if err := cn.checkIsInTransaction(false); err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
+	finish := cn.watchCancel(ctx, false)
 	_, commandTag, err := cn.simpleExec("BEGIN" + mode)
 	if err != nil {
+		finish()
 		return nil, cn.handleError(err)
 	}
 	if commandTag != "BEGIN" {
+		finish()
 		cn.err.set(driver.ErrBadConn)
 		return nil, fmt.Errorf("unexpected command tag %s", commandTag)
 	}
 	if cn.txnStatus != txnStatusIdleInTransaction {
+		finish()
 		cn.err.set(driver.ErrBadConn)
 		return nil, fmt.Errorf("unexpected transaction status %v", cn.txnStatus)
 	}
 
-	cn.txnFinish = cn.watchCancel(ctx, false)
+	cn.txnFinish = finish
 	return cn, nil
 }
 
@@ -701,10 +815,17 @@ func (cn *conn) simpleQuery(q string) (*rows, error) {
 			res.done = true
 		case proto.ReadyForQuery:
 			cn.processReadyForQuery(r)
-			if err == nil && res == nil {
-				res = &rows{done: true}
+			if resErr != nil {
+				return nil, cn.handleError(resErr, q)
 			}
-			return res, cn.handleError(resErr, q) // done
+			if res == nil {
+				return &rows{done: true}, nil
+			}
+			if !res.done {
+				cn.err.set(driver.ErrBadConn)
+				return nil, errUnexpectedReady
+			}
+			return res, nil
 		case proto.ErrorResponse:
 			res = nil
 			resErr = parseError(r, q)
@@ -715,6 +836,10 @@ func (cn *conn) simpleQuery(q string) (*rows, error) {
 			}
 			return res, cn.saveMessage(t, r) // The query didn't fail; kick off to Next
 		case proto.RowDescription:
+			if resErr != nil {
+				cn.err.set(driver.ErrBadConn)
+				return nil, fmt.Errorf("pq: unexpected RowDescription after error: %w", resErr)
+			}
 			// res might be non-nil here if we received a previous
 			// CommandComplete, but that's fine and just overwrite it.
 			res = &rows{cn: cn, rowsHeader: parsePortalRowDescribe(r)}
@@ -825,6 +950,9 @@ func (cn *conn) prepareTo(q, stmtName string) (*stmt, error) {
 
 // Implement [driver.ConnPrepareContext].
 func (cn *conn) PrepareContext(ctx context.Context, q string) (driver.Stmt, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	defer cn.watchCancel(ctx, false)()
 	if err := cn.err.get(); err != nil {
 		return nil, err
@@ -842,14 +970,29 @@ func (cn *conn) PrepareContext(ctx context.Context, q string) (driver.Stmt, erro
 }
 
 func (cn *conn) Close() error {
+	if cn.c == nil {
+		return nil
+	}
+	if err := cn.c.SetWriteDeadline(cn.closeDeadline()); err != nil {
+		_ = cn.c.Close()
+		return cn.handleError(err)
+	}
 	// Don't go through send(); ListenerConn relies on us not scribbling on the
 	// scratch buffer of this connection.
 	err := cn.sendSimpleMessage(proto.Terminate)
+	closeErr := cn.c.Close()
 	if err != nil {
-		_ = cn.c.Close() // Ensure that cn.c.Close is always run.
 		return cn.handleError(err)
 	}
-	return cn.c.Close()
+	return closeErr
+}
+
+func (cn *conn) closeDeadline() time.Time {
+	timeout := cn.closeTimeout
+	if timeout <= 0 {
+		timeout = defaultNetworkCloseTimeout
+	}
+	return time.Now().Add(timeout)
 }
 
 // CheckNamedValue implements [driver.NamedValueChecker].
@@ -901,6 +1044,9 @@ func (cn *conn) CheckNamedValue(nv *driver.NamedValue) error {
 
 // Implement [driver.QueryerContext].
 func (cn *conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	finish := cn.watchCancel(ctx, false)
 	r, err := cn.query(query, args)
 	if err != nil {
@@ -970,6 +1116,9 @@ func (cn *conn) query(query string, args []driver.NamedValue) (*rows, error) {
 
 // Implement [driver.ExecerContext].
 func (cn *conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	defer cn.watchCancel(ctx, false)()
 	if err := cn.err.get(); err != nil {
 		return nil, err
@@ -1013,14 +1162,18 @@ func (cn *conn) ExecContext(ctx context.Context, query string, args []driver.Nam
 	if err != nil {
 		return nil, cn.handleError(err, query)
 	}
-	r, err := st.ExecContext(ctx, args)
+	err = st.exec(args)
 	if err != nil {
 		return nil, cn.handleError(err, query)
 	}
-	return r, nil
+	r, _, err := cn.readExecuteResponse("simple query")
+	return r, cn.handleError(err, query)
 }
 
 func (cn *conn) Ping(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	defer cn.watchCancel(ctx, false)()
 	rows, err := cn.simpleQuery(";")
 	if err != nil {
@@ -1040,7 +1193,11 @@ func (cn *conn) send(m *writeBuf) error {
 		for len(w) > 0 { // Can contain multiple messages.
 			c := proto.RequestCode(w[0])
 			l := int(binary.BigEndian.Uint32(w[1:5])) - 4
-			fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n", c, l, w[5:l+5])
+			payload := w[5 : l+5]
+			if c == proto.PasswordMessage {
+				payload = []byte("[REDACTED]")
+			}
+			fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n", c, l, payload)
 			w = w[l+5:]
 		}
 	}
@@ -1055,10 +1212,55 @@ func (cn *conn) send(m *writeBuf) error {
 func (cn *conn) sendStartupPacket(m *writeBuf) error {
 	if debugProto {
 		w := m.wrap()
-		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n", "Startup", int(binary.BigEndian.Uint32(w[1:5]))-4, w[5:])
+		name := "Startup"
+		payload := w[5:]
+		if len(payload) >= 4 && int32(binary.BigEndian.Uint32(payload[:4])) == proto.CancelRequestCode {
+			name = "CancelRequest"
+			payload = []byte("[REDACTED]")
+		} else {
+			payload = debugStartupPayload(payload)
+		}
+		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n", name, int(binary.BigEndian.Uint32(w[1:5]))-4, payload)
 	}
 	_, err := cn.c.Write((m.wrap())[1:])
 	return err
+}
+
+func debugStartupPayload(payload []byte) []byte {
+	if len(payload) < 4 {
+		return []byte("[REDACTED MALFORMED STARTUP]")
+	}
+
+	redacted := append([]byte(nil), payload[:4]...)
+	fields := payload[4:]
+	for {
+		keyEnd := bytes.IndexByte(fields, 0)
+		if keyEnd < 0 {
+			return []byte("[REDACTED MALFORMED STARTUP]")
+		}
+		key := fields[:keyEnd]
+		fields = fields[keyEnd+1:]
+		redacted = append(redacted, key...)
+		redacted = append(redacted, 0)
+		if len(key) == 0 {
+			if len(fields) != 0 {
+				return []byte("[REDACTED MALFORMED STARTUP]")
+			}
+			return redacted
+		}
+
+		valueEnd := bytes.IndexByte(fields, 0)
+		if valueEnd < 0 {
+			return []byte("[REDACTED MALFORMED STARTUP]")
+		}
+		value := fields[:valueEnd]
+		fields = fields[valueEnd+1:]
+		if bytes.EqualFold(key, []byte("password")) {
+			value = []byte("[REDACTED]")
+		}
+		redacted = append(redacted, value...)
+		redacted = append(redacted, 0)
+	}
 }
 
 // Send a message of type typ to the server on the other end of cn. The message
@@ -1101,12 +1303,14 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 	x := cn.scratch[:5]
 	_, err := io.ReadFull(cn.buf, x)
 	if err != nil {
-		return 0, err
+		return 0, cn.badBackendMessage(err)
 	}
 
-	// Read the type and length of the message that follows.
+	// Read the type and length of the message that follows. The protocol length
+	// is unsigned on the wire, so validate it before converting to int or
+	// subtracting the four-byte length word.
 	t := proto.ResponseCode(x[0])
-	n := int(binary.BigEndian.Uint32(x[1:])) - 4
+	wireLength := binary.BigEndian.Uint32(x[1:])
 
 	// When PostgreSQL cannot start a backend (e.g., an external process limit),
 	// it sends plain text like "Ecould not fork new process [..]", which
@@ -1116,13 +1320,25 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 	// but check < 4 since n represents bytes remaining to be read after length.
 	//
 	// Use txnStatus to check if we're in the startup phase.
-	if cn.txnStatus == 0 && t == proto.ErrorResponse && (n < 4 || n > proto.MaxMsgLen) {
-		msg, _ := cn.buf.ReadString('\x00')
-		return 0, fmt.Errorf("pq: server error: %s%s", string(x[1:]), strings.TrimSuffix(msg, "\x00"))
+	if cn.txnStatus == 0 && t == proto.ErrorResponse &&
+		(wireLength < 8 || wireLength-4 > proto.MaxMsgLen) {
+		msg := readPreProtocolError(cn.buf, proto.MaxMsgLen-len(x[1:]))
+		return 0, cn.badBackendMessage(fmt.Errorf("pq: server error: %s%s", string(x[1:]), msg))
 	}
-	if !proto.ValidLongMessageType(t) && n > proto.MaxMsgLen {
-		return 0, fmt.Errorf("pq: lost synchronization with server: got message type %q, length %d", t, n)
+	if wireLength < 4 {
+		return 0, cn.badBackendMessage(fmt.Errorf("pq: lost synchronization with server: got message type %q, invalid length %d", t, wireLength))
 	}
+	payloadLength := wireLength - 4
+	if t == proto.ParameterDescription && payloadLength > proto.MaxParameterDescriptionLen {
+		return 0, cn.badBackendMessage(fmt.Errorf("pq: lost synchronization with server: got ParameterDescription length %d, maximum is %d", payloadLength, proto.MaxParameterDescriptionLen))
+	}
+	if wireLength > proto.MaxLongMsgLen {
+		return 0, cn.badBackendMessage(fmt.Errorf("pq: lost synchronization with server: got message type %q, length %d exceeds maximum %d", t, wireLength, proto.MaxLongMsgLen))
+	}
+	if !proto.ValidLongMessageType(t) && payloadLength > proto.MaxMsgLen {
+		return 0, cn.badBackendMessage(fmt.Errorf("pq: lost synchronization with server: got message type %q, length %d", t, payloadLength))
+	}
+	n := int(payloadLength)
 
 	var y []byte
 	if n <= len(cn.scratch) {
@@ -1132,13 +1348,247 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 	}
 	_, err = io.ReadFull(cn.buf, y)
 	if err != nil {
-		return 0, err
+		return 0, cn.badBackendMessage(err)
+	}
+	if err := validateBackendMessage(t, y); err != nil {
+		return 0, cn.badBackendMessage(err)
 	}
 	*r = y
 	if debugProto {
-		fmt.Fprintf(os.Stderr, "SERVER ← %-20s %5d  %q\n", t, n, y)
+		payload := y
+		if t == proto.AuthenticationRequest || t == proto.BackendKeyData {
+			payload = []byte("[REDACTED]")
+		}
+		fmt.Fprintf(os.Stderr, "SERVER ← %-20s %5d  %q\n", t, n, payload)
 	}
 	return t, nil
+}
+
+func (cn *conn) badBackendMessage(err error) error {
+	cn.err.set(driver.ErrBadConn)
+	return err
+}
+
+func readPreProtocolError(r *bufio.Reader, limit int) string {
+	msg := make([]byte, 0, min(limit, 256))
+	for len(msg) < limit {
+		b, err := r.ReadByte()
+		if err != nil || b == 0 {
+			break
+		}
+		msg = append(msg, b)
+	}
+	return string(msg)
+}
+
+func validateBackendMessage(t proto.ResponseCode, payload []byte) error {
+	minimum := 0
+	switch t {
+	case proto.ReadyForQuery:
+		minimum = 1
+	case proto.AuthenticationRequest, proto.FunctionCallResponse:
+		minimum = 4
+	case proto.BackendKeyData, proto.NegotiateProtocolVersion:
+		minimum = 8
+	case proto.DataRow, proto.RowDescription, proto.ParameterDescription:
+		minimum = 2
+	case proto.CopyInResponse, proto.CopyOutResponse, proto.CopyBothResponse:
+		minimum = 3
+	case proto.NotificationResponse:
+		minimum = 6 // PID and two empty, NUL-terminated strings.
+	case proto.ParameterStatus:
+		minimum = 2 // Two empty, NUL-terminated strings.
+	case proto.CommandComplete, proto.ErrorResponse, proto.NoticeResponse:
+		minimum = 1 // At least the terminating NUL byte.
+	}
+	if len(payload) < minimum {
+		return fmt.Errorf("pq: invalid %s payload: got %d bytes, need at least %d", t, len(payload), minimum)
+	}
+
+	switch t {
+	case proto.ReadyForQuery:
+		if len(payload) != 1 {
+			return fmt.Errorf("pq: invalid %s payload length: got %d, want 1", t, len(payload))
+		}
+		switch transactionStatus(payload[0]) {
+		case txnStatusIdle, txnStatusIdleInTransaction, txnStatusInFailedTransaction:
+		default:
+			return fmt.Errorf("pq: invalid %s transaction status %q", t, payload[0])
+		}
+	case proto.AuthenticationRequest:
+		code := proto.AuthCode(int32(binary.BigEndian.Uint32(payload)))
+		switch code {
+		case proto.AuthReqOk, proto.AuthReqKrb4, proto.AuthReqKrb5,
+			proto.AuthReqPassword, proto.AuthReqGSS, proto.AuthReqSSPI:
+			if len(payload) != 4 {
+				return fmt.Errorf("pq: invalid %s payload length for %s: got %d, want 4", t, code, len(payload))
+			}
+		case proto.AuthReqCrypt:
+			if len(payload) != 6 {
+				return fmt.Errorf("pq: invalid %s payload length for %s: got %d, want 6", t, code, len(payload))
+			}
+		case proto.AuthReqMD5:
+			if len(payload) != 8 {
+				return fmt.Errorf("pq: invalid %s payload length for %s: got %d, want 8", t, code, len(payload))
+			}
+		case proto.AuthReqSASL:
+			if !validSASLMechanismList(payload) {
+				return fmt.Errorf("pq: invalid %s SASL mechanism list", t)
+			}
+		}
+	case proto.CommandComplete:
+		if end, ok := backendCString(payload, 0); !ok || end != len(payload) {
+			return fmt.Errorf("pq: invalid %s payload: command tag is not NUL-terminated", t)
+		}
+	case proto.ParameterStatus:
+		end, ok := backendCString(payload, 0)
+		if !ok {
+			return fmt.Errorf("pq: invalid %s payload: parameter name is not NUL-terminated", t)
+		}
+		if end, ok = backendCString(payload, end); !ok || end != len(payload) {
+			return fmt.Errorf("pq: invalid %s payload: parameter value is not NUL-terminated", t)
+		}
+	case proto.NotificationResponse:
+		end, ok := backendCString(payload, 4)
+		if !ok {
+			return fmt.Errorf("pq: invalid %s payload: channel is not NUL-terminated", t)
+		}
+		if end, ok = backendCString(payload, end); !ok || end != len(payload) {
+			return fmt.Errorf("pq: invalid %s payload: notification payload is not NUL-terminated", t)
+		}
+	case proto.ErrorResponse, proto.NoticeResponse:
+		if !validBackendErrorFields(payload) {
+			return fmt.Errorf("pq: invalid %s payload: fields are not NUL-terminated", t)
+		}
+	case proto.DataRow:
+		if !validDataRow(payload) {
+			return fmt.Errorf("pq: invalid %s payload: invalid column data", t)
+		}
+	case proto.RowDescription:
+		if !validRowDescription(payload) {
+			return fmt.Errorf("pq: invalid %s payload: invalid field description", t)
+		}
+	case proto.ParameterDescription:
+		count := int(binary.BigEndian.Uint16(payload))
+		if len(payload) != 2+count*4 {
+			return fmt.Errorf("pq: invalid %s payload length %d for %d parameters", t, len(payload), count)
+		}
+	case proto.CopyInResponse, proto.CopyOutResponse, proto.CopyBothResponse:
+		count := int(binary.BigEndian.Uint16(payload[1:]))
+		if len(payload) != 3+count*2 {
+			return fmt.Errorf("pq: invalid %s payload length %d for %d columns", t, len(payload), count)
+		}
+		if payload[0] > byte(formatBinary) {
+			return fmt.Errorf("pq: invalid %s overall format code %d", t, payload[0])
+		}
+		for pos := 3; pos < len(payload); pos += 2 {
+			if formatCode := binary.BigEndian.Uint16(payload[pos:]); formatCode > uint16(formatBinary) {
+				return fmt.Errorf("pq: invalid %s column format code %d", t, formatCode)
+			}
+		}
+	case proto.FunctionCallResponse:
+		length := int32(binary.BigEndian.Uint32(payload))
+		if length < -1 || (length == -1 && len(payload) != 4) ||
+			(length >= 0 && int64(length) != int64(len(payload)-4)) {
+			return fmt.Errorf("pq: invalid %s result length %d for %d payload bytes", t, length, len(payload)-4)
+		}
+	case proto.NegotiateProtocolVersion:
+		if !validNegotiateProtocolVersion(payload) {
+			return fmt.Errorf("pq: invalid %s payload", t)
+		}
+	}
+	return nil
+}
+
+func backendCString(payload []byte, start int) (int, bool) {
+	for i := start; i < len(payload); i++ {
+		if payload[i] == 0 {
+			return i + 1, true
+		}
+	}
+	return 0, false
+}
+
+func validBackendErrorFields(payload []byte) bool {
+	for pos := 0; pos < len(payload); {
+		if payload[pos] == 0 {
+			return pos == len(payload)-1
+		}
+		var ok bool
+		pos, ok = backendCString(payload, pos+1)
+		if !ok {
+			return false
+		}
+	}
+	return false
+}
+
+func validDataRow(payload []byte) bool {
+	count := int(binary.BigEndian.Uint16(payload))
+	pos := 2
+	for range count {
+		if len(payload)-pos < 4 {
+			return false
+		}
+		length := int32(binary.BigEndian.Uint32(payload[pos:]))
+		pos += 4
+		switch {
+		case length == -1:
+		case length < -1 || int64(length) > int64(len(payload)-pos):
+			return false
+		default:
+			pos += int(length)
+		}
+	}
+	return pos == len(payload)
+}
+
+func validRowDescription(payload []byte) bool {
+	count := int(binary.BigEndian.Uint16(payload))
+	pos := 2
+	for range count {
+		var ok bool
+		pos, ok = backendCString(payload, pos)
+		if !ok || len(payload)-pos < 18 {
+			return false
+		}
+		formatCode := binary.BigEndian.Uint16(payload[pos+16 : pos+18])
+		if formatCode > uint16(formatBinary) {
+			return false
+		}
+		pos += 18
+	}
+	return pos == len(payload)
+}
+
+func validNegotiateProtocolVersion(payload []byte) bool {
+	count := int32(binary.BigEndian.Uint32(payload[4:]))
+	if count < 0 {
+		return false
+	}
+	pos := 8
+	for range count {
+		var ok bool
+		pos, ok = backendCString(payload, pos)
+		if !ok {
+			return false
+		}
+	}
+	return pos == len(payload)
+}
+
+func validSASLMechanismList(payload []byte) bool {
+	for pos := 4; pos < len(payload); {
+		end, ok := backendCString(payload, pos)
+		if !ok {
+			return false
+		}
+		if end == pos+1 {
+			return end == len(payload)
+		}
+		pos = end
+	}
+	return false
 }
 
 // recvError receives a message from the backend, returning an error if an error
@@ -1218,52 +1668,122 @@ func (cn *conn) watchCancel(ctx context.Context, fromStmt bool) func() {
 		return func() {}
 	}
 
-	finished := make(chan struct{}, 1)
+	finished := make(chan struct{})
+	done := make(chan struct{})
+	var finishOnce sync.Once
+	canceled := false
 	go func() {
+		defer close(done)
 		select {
 		case <-finished: // Query finished successfully.
 		case <-ctx.Done():
-			select {
-			case finished <- struct{}{}:
-			default: // Raced with the finish func, let the next query handle this with the context.
-				return
+			canceled = true
+			cancelCtx, stopCancel := context.WithTimeout(context.Background(), cancelRequestTimeout)
+			defer stopCancel()
+			cancelResult := make(chan error, 1)
+			go func() { cancelResult <- cn.sendCancelRequestContext(cancelCtx) }()
+
+			timer := time.NewTimer(cancelResponseGracePeriod)
+			defer timer.Stop()
+			queryFinished, cancelComplete := false, false
+			finishedWait := (<-chan struct{})(finished)
+			for {
+				select {
+				case <-finishedWait:
+					queryFinished = true
+					finishedWait = nil
+					if cancelComplete {
+						return
+					}
+
+				case cancelErr := <-cancelResult:
+					if queryFinished {
+						return
+					}
+					select {
+					case <-finishedWait:
+						return
+					default:
+					}
+					if cancelErr == nil {
+						// The request was delivered; wait for the primary response or
+						// for the grace period to expire.
+						cancelComplete = true
+						cancelResult = nil
+						continue
+					}
+					cn.invalidateCanceledOperation(ctx, fromStmt)
+					return
+
+				case <-timer.C:
+					// Stop an in-flight side channel and make a late result harmless.
+					// The primary is no longer reusable, so there is no next query for
+					// a late CancelRequest to race.
+					stopCancel()
+					cn.invalidateCanceledOperation(ctx, fromStmt)
+					return
+				}
 			}
-			if !fromStmt {
-				cn.err.set(ctx.Err()) // Set the connection state to bad so it does not get reused.
-			}
-			cn.sendCancelRequest() // TODO: maybe handle error, somehow?
 		}
 	}()
 
 	return func() {
-		select {
-		case <-finished:
-			if !fromStmt {
-				cn.err.set(ctx.Err())
-				cn.Close()
+		finishOnce.Do(func() { close(finished) })
+		<-done
+		if canceled && !fromStmt {
+			cn.err.set(ctx.Err())
+			if cn.c != nil {
+				_ = cn.c.Close()
 			}
-		case finished <- struct{}{}:
 		}
 	}
 }
 
+func (cn *conn) invalidateCanceledOperation(ctx context.Context, fromStmt bool) {
+	if fromStmt {
+		cn.err.set(driver.ErrBadConn)
+	} else {
+		cn.err.set(ctx.Err())
+	}
+	if cn.c != nil {
+		_ = cn.c.Close()
+	}
+}
+
 func (cn *conn) sendCancelRequest() error {
+	ctx, cancel := context.WithTimeout(context.Background(), cancelRequestTimeout)
+	defer cancel()
+	return cn.sendCancelRequestContext(ctx)
+}
+
+func (cn *conn) sendCancelRequestContext(ctx context.Context) error {
 	// Use a copy since a new connection is created here. This is necessary
 	// because cancel is called from a goroutine in watchCancel.
 	cfg := cn.cfg.Clone()
 
-	// Can't pass in context from parent, as that one may be cancelled.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // TODO: use connect_timeout?
-	defer cancel()
+	// Legacy Dialer implementations only receive the timeout through
+	// DialTimeout, not through ctx. Preserve a shorter configured timeout, but
+	// never permit a CancelRequest dial to outlive its own context.
+	if cfg.ConnectTimeout <= 0 || cfg.ConnectTimeout > cancelRequestTimeout {
+		cfg.ConnectTimeout = cancelRequestTimeout
+	}
 
 	c, err := dial(ctx, cn.dialer, cfg)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
+	stopContext := context.AfterFunc(ctx, func() {
+		_ = c.SetDeadline(time.Now())
+		_ = c.Close()
+	})
+	defer stopContext()
 
 	cn2 := conn{c: c}
 	if err := cn2.ssl(cfg, cfg.SSLMode); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		return err
 	}
 	w := cn2.writeBuf(0)
@@ -1276,6 +1796,9 @@ func (cn *conn) sendCancelRequest() error {
 
 	// Read until EOF to ensure that the server received the cancel.
 	_, err = io.Copy(io.Discard, c)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
 	return err
 }
 
@@ -1388,7 +1911,10 @@ func (cn *conn) startup(cfg Config) error {
 				return fmt.Errorf("pq: protocol version mismatch: min_protocol_version=%s; server supports up to 3.%d", cfg.MinProtocolVersion, newestMinor)
 			}
 		case proto.ReadyForQuery:
-			if len(cn.cfg.RequireAuth) > 0 && !didauth && !slices.Contains(cn.cfg.RequireAuth, RequireAuthNone) {
+			if cn.gss != nil && !cn.gssComplete {
+				return errors.New("pq: GSSAPI mutual authentication did not complete")
+			}
+			if !didauth && !cn.cfg.RequireAuth.allows(RequireAuthNone) {
 				return fmt.Errorf("pq: authentication method requirement %q failed: server did not perform any authentication", cn.cfg.RequireAuth)
 			}
 			cn.processReadyForQuery(r)
@@ -1406,10 +1932,13 @@ func (cn *conn) auth(code proto.AuthCode, r *readBuf, cfg Config) error {
 	case proto.AuthReqKrb4, proto.AuthReqKrb5, proto.AuthReqCrypt, proto.AuthReqSSPI:
 		return fmt.Errorf("pq: unsupported authentication method: %s", code)
 	case proto.AuthReqOk:
+		if cn.gss != nil && !cn.gssComplete {
+			return errors.New("pq: GSSAPI mutual authentication did not complete")
+		}
 		return nil
 
 	case proto.AuthReqPassword:
-		if len(cn.cfg.RequireAuth) > 0 && !slices.Contains(cn.cfg.RequireAuth, RequireAuthPassword) && !slices.Contains(cn.cfg.RequireAuth, RequireAuthAny) {
+		if !cn.cfg.RequireAuth.allows(RequireAuthPassword) {
 			return fmt.Errorf("pq: authentication method requirement %q failed: server requested %q", cn.cfg.RequireAuth, RequireAuthPassword)
 		}
 		w := cn.writeBuf(proto.PasswordMessage)
@@ -1419,7 +1948,7 @@ func (cn *conn) auth(code proto.AuthCode, r *readBuf, cfg Config) error {
 		return cn.send(w)
 
 	case proto.AuthReqMD5:
-		if len(cn.cfg.RequireAuth) > 0 && !slices.Contains(cn.cfg.RequireAuth, RequireAuthMD5) && !slices.Contains(cn.cfg.RequireAuth, RequireAuthAny) {
+		if !cn.cfg.RequireAuth.allows(RequireAuthMD5) {
 			return fmt.Errorf("pq: authentication method requirement %q failed: server requested %q", cn.cfg.RequireAuth, RequireAuthMD5)
 		}
 		s := string(r.next(4))
@@ -1429,6 +1958,12 @@ func (cn *conn) auth(code proto.AuthCode, r *readBuf, cfg Config) error {
 		return cn.send(w)
 
 	case proto.AuthReqGSS: // GSSAPI, startup
+		if !cn.cfg.RequireAuth.allows(RequireAuthGSS) {
+			return fmt.Errorf("pq: authentication method requirement %q failed: server requested %q", cn.cfg.RequireAuth, RequireAuthGSS)
+		}
+		if cfg.KrbSpn == "" && cfg.Hostaddr.IsValid() && !cfg.hasExplicitHost() {
+			return errors.New("pq: GSSAPI authentication requires an explicit host name when krbspn is not set")
+		}
 		if newGss == nil {
 			return fmt.Errorf("pq: kerberos error: no GSSAPI provider registered (import github.com/lib/pq/auth/kerberos)")
 		}
@@ -1462,6 +1997,7 @@ func (cn *conn) auth(code proto.AuthCode, r *readBuf, cfg Config) error {
 
 		// Store for GSSAPI continue message
 		cn.gss = cli
+		cn.gssComplete = false
 		return nil
 
 	case proto.AuthReqGSSCont: // GSSAPI continue
@@ -1470,22 +2006,35 @@ func (cn *conn) auth(code proto.AuthCode, r *readBuf, cfg Config) error {
 		}
 
 		done, tokOut, err := cn.gss.Continue([]byte(*r))
-		if err == nil && !done {
-			w := cn.writeBuf(proto.SASLInitialResponse)
+		if err != nil {
+			return fmt.Errorf("pq: GSSAPI continuation failed: %w", err)
+		}
+		if len(tokOut) > 0 {
+			w := cn.writeBuf(proto.GSSResponse)
 			w.bytes(tokOut)
-			err = cn.send(w)
-			if err != nil {
+			if err := cn.send(w); err != nil {
 				return err
 			}
 		}
-
-		// Errors fall through and read the more detailed message from the
-		// server.
+		cn.gssComplete = done
 		return nil
 
 	case proto.AuthReqSASL:
-		if len(cn.cfg.RequireAuth) > 0 && !slices.Contains(cn.cfg.RequireAuth, RequireAuthScramSHA256) && !slices.Contains(cn.cfg.RequireAuth, RequireAuthAny) {
+		if !cn.cfg.RequireAuth.allows(RequireAuthScramSHA256) {
 			return fmt.Errorf("pq: authentication method requirement %q failed: server requested %q", cn.cfg.RequireAuth, RequireAuthScramSHA256)
+		}
+		var offered bool
+		for {
+			mechanism := r.string()
+			if mechanism == "" {
+				break
+			}
+			if mechanism == "SCRAM-SHA-256" {
+				offered = true
+			}
+		}
+		if !offered {
+			return errors.New("pq: server did not offer the supported SASL mechanism SCRAM-SHA-256")
 		}
 		sc := scram.NewClient(sha256.New, cfg.User, cfg.Password)
 		sc.Step(nil)
@@ -1564,6 +2113,7 @@ func (cn *conn) parseComplete(commandTag string) (driver.Result, string, error) 
 		"FETCH ",
 		"MOVE ",
 		"COPY ",
+		"MERGE ",
 	}
 
 	var affectedRows *string

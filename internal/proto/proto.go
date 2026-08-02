@@ -22,7 +22,7 @@ const (
 func ValidLongMessageType(c ResponseCode) bool {
 	switch c {
 	case CopyDataResponse, DataRow, ErrorResponse, FunctionCallResponse,
-		NoticeResponse, NotificationResponse, RowDescription:
+		NoticeResponse, NotificationResponse, ParameterDescription, RowDescription:
 		return true
 	}
 	return false
@@ -31,6 +31,16 @@ func ValidLongMessageType(c ResponseCode) bool {
 // Constants from fe-connect.c
 const (
 	MaxMsgLen = 30_000 // https://github.com/postgres/postgres/blob/c6a10a89f/src/interfaces/libpq/fe-connect.c#L4067
+
+	// PostgreSQL cannot construct a protocol message larger than MaxAllocSize.
+	// Keep this separate from MaxMsgLen: DataRow, CopyData, and a handful of
+	// other response types are legitimately much larger than ordinary control
+	// messages.
+	MaxLongMsgLen = 0x3fffffff
+
+	// A ParameterDescription contains a uint16 count followed by one uint32 OID
+	// per parameter, so its payload has a much smaller protocol-defined bound.
+	MaxParameterDescriptionLen = 2 + 65535*4
 )
 
 // RequestCode is a request codes sent by the frontend.

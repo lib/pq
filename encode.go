@@ -58,7 +58,7 @@ func decode(ps *parameterStatus, s []byte, typ oid.Oid, f format) (any, error) {
 	case formatText:
 		return textDecode(ps, s, typ)
 	default:
-		panic("unreachable")
+		return nil, fmt.Errorf("pq: unknown result format code %d", f)
 	}
 }
 
@@ -67,10 +67,19 @@ func binaryDecode(s []byte, typ oid.Oid) (any, error) {
 	case oid.T_bytea:
 		return s, nil
 	case oid.T_int8:
+		if len(s) != 8 {
+			return nil, fmt.Errorf("pq: unable to decode binary int8; bad length: %d", len(s))
+		}
 		return int64(binary.BigEndian.Uint64(s)), nil
 	case oid.T_int4:
+		if len(s) != 4 {
+			return nil, fmt.Errorf("pq: unable to decode binary int4; bad length: %d", len(s))
+		}
 		return int64(int32(binary.BigEndian.Uint32(s))), nil
 	case oid.T_int2:
+		if len(s) != 2 {
+			return nil, fmt.Errorf("pq: unable to decode binary int2; bad length: %d", len(s))
+		}
 		return int64(int16(binary.BigEndian.Uint16(s))), nil
 	case oid.T_uuid:
 		return decodeUUIDBinary(s)
@@ -115,6 +124,9 @@ func textDecode(ps *parameterStatus, s []byte, typ oid.Oid) (any, error) {
 	case oid.T_timetz:
 		return parseTime(typ, s)
 	case oid.T_bool:
+		if len(s) != 1 || (s[0] != 't' && s[0] != 'f') {
+			return nil, fmt.Errorf("pq: unable to decode text bool %q", s)
+		}
 		return s[0] == 't', nil
 	case oid.T_int8, oid.T_int4, oid.T_int2:
 		i, err := strconv.ParseInt(string(s), 10, 64)

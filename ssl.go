@@ -71,13 +71,17 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 		// custom one was registered. Set it after the sslmode switch.
 		tlsConf = &tls.Config{}
 		// Only verify the CA signing but not the hostname.
-		verifyCaOnly = false
+		verifyCaOnly    = false
+		verifyFullNoSNI = false
 	)
-	if mode.useSSL() && !cfg.SSLInline && cfg.SSLRootCert == "" && home != "" {
+	if mode.useSSL() && !cfg.SSLInline && cfg.SSLRootCert == "" && !cfg.isset("sslrootcert") && home != "" {
 		f := filepath.Join(home, "root.crt")
 		if _, err := os.Stat(f); err == nil {
 			cfg.SSLRootCert = f
 		}
+	}
+	if (mode == SSLModeVerifyCA || mode == SSLModeVerifyFull) && cfg.SSLRootCert == "" {
+		return nil, &tls.CertificateVerificationError{Err: errors.New("pq: sslmode requires a root certificate")}
 	}
 	switch {
 	case mode == SSLModeDisable || mode == SSLModeAllow:
@@ -109,7 +113,18 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 		tlsConf.InsecureSkipVerify = true
 		verifyCaOnly = true
 	case mode == SSLModeVerifyFull:
-		tlsConf.ServerName = cfg.Host
+		if cfg.Host == "" {
+			return nil, errors.New("pq: sslmode=verify-full requires a host name")
+		}
+		if cfg.SSLSNI {
+			tlsConf.ServerName = cfg.Host
+		} else {
+			// crypto/tls uses ServerName for both SNI and verification. Disable
+			// its verification so we can verify the chain and hostname below
+			// without disclosing the hostname in ClientHello.
+			tlsConf.InsecureSkipVerify = true
+			verifyFullNoSNI = true
+		}
 	case strings.HasPrefix(string(mode), "pqgo-"):
 		tlsConf = getTLSConfigClone(string(mode[5:]))
 		if tlsConf == nil {
@@ -119,8 +134,12 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 		panic("unreachable")
 	}
 
-	tlsConf.MinVersion = cfg.SSLMinProtocolVersion.tlsconf()
-	tlsConf.MaxVersion = cfg.SSLMaxProtocolVersion.tlsconf()
+	if cfg.SSLMinProtocolVersion != "" {
+		tlsConf.MinVersion = cfg.SSLMinProtocolVersion.tlsconf()
+	}
+	if cfg.SSLMaxProtocolVersion != "" {
+		tlsConf.MaxVersion = cfg.SSLMaxProtocolVersion.tlsconf()
+	}
 
 	// ALPN is mandatory with direct SSL connections; PostgreSQL only supports
 	// one protocol.
@@ -144,6 +163,20 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 		return nil, err
 	}
 	sslAppendIntermediates(tlsConf, cfg, rootPem)
+	if verifyFullNoSNI {
+		tlsConf.VerifyConnection = func(state tls.ConnectionState) error {
+			opts := x509.VerifyOptions{
+				DNSName:       cfg.Host,
+				Intermediates: x509.NewCertPool(),
+				Roots:         tlsConf.RootCAs,
+			}
+			for _, cert := range state.PeerCertificates[1:] {
+				opts.Intermediates.AddCert(cert)
+			}
+			_, err := state.PeerCertificates[0].Verify(opts)
+			return err
+		}
+	}
 
 	// Accept renegotiation requests initiated by the backend.
 	//

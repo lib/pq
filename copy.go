@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/lib/pq/internal/proto"
 )
@@ -65,18 +66,32 @@ awaitCopyInResponse:
 		if err != nil {
 			return nil, err
 		}
+		if resErr != nil && t != proto.ErrorResponse && t != proto.ReadyForQuery {
+			cn.err.set(driver.ErrBadConn)
+			return nil, fmt.Errorf("pq: unexpected %s after COPY error: %w", t, resErr)
+		}
 		switch t {
 		case proto.CopyInResponse:
 			if r.byte() != 0 {
 				resErr = errBinaryCopyNotSupported
 				break awaitCopyInResponse
 			}
+			columns := r.int16()
+			for range columns {
+				if r.int16() != 0 {
+					resErr = errBinaryCopyNotSupported
+					break awaitCopyInResponse
+				}
+			}
 			go ci.resploop()
 			return ci, nil
 		case proto.CopyOutResponse:
-			resErr = errCopyToNotSupported
-			break awaitCopyInResponse
+			return nil, cn.drainRejectedCopyOut()
 		case proto.ErrorResponse:
+			if resErr != nil {
+				ci.setBad(driver.ErrBadConn)
+				return nil, fmt.Errorf("pq: unexpected second ErrorResponse after COPY error: %w", resErr)
+			}
 			resErr = parseError(r, q)
 		case proto.ReadyForQuery:
 			if resErr == nil {
@@ -118,6 +133,24 @@ awaitCopyInResponse:
 	}
 }
 
+func (cn *conn) drainRejectedCopyOut() error {
+	for {
+		t, r, err := cn.recv1()
+		if err != nil {
+			return err
+		}
+		switch t {
+		case proto.CopyDataResponse, proto.CopyDoneResponse, proto.CommandComplete, proto.ErrorResponse:
+		case proto.ReadyForQuery:
+			cn.processReadyForQuery(r)
+			return errCopyToNotSupported
+		default:
+			cn.err.set(driver.ErrBadConn)
+			return fmt.Errorf("pq: unknown response while draining COPY TO: %q", t)
+		}
+	}
+}
+
 func (ci *copyin) flush(buf []byte) error {
 	if len(buf)-1 > proto.MaxUint32 {
 		return errors.New("pq: too many columns")
@@ -132,8 +165,7 @@ func (ci *copyin) flush(buf []byte) error {
 
 func (ci *copyin) resploop() {
 	for {
-		var r readBuf
-		t, err := ci.cn.recvMessage(&r)
+		t, r, err := ci.cn.recv1()
 		if err != nil {
 			ci.setBad(driver.ErrBadConn)
 			ci.setError(err)
@@ -145,19 +177,18 @@ func (ci *copyin) resploop() {
 			// complete
 			res, _, err := ci.cn.parseComplete(r.string())
 			if err != nil {
-				panic(err)
+				ci.setBad(driver.ErrBadConn)
+				ci.setError(err)
+				ci.done <- true
+				return
 			}
 			ci.setResult(res)
-		case proto.NoticeResponse:
-			if n := ci.cn.noticeHandler; n != nil {
-				n(parseError(&r, ""))
-			}
 		case proto.ReadyForQuery:
-			ci.cn.processReadyForQuery(&r)
+			ci.cn.processReadyForQuery(r)
 			ci.done <- true
 			return
 		case proto.ErrorResponse:
-			err := parseError(&r, "")
+			err := parseError(r, "")
 			ci.setError(err)
 		default:
 			ci.setBad(driver.ErrBadConn)
@@ -278,6 +309,9 @@ func (ci *copyin) Exec(v []driver.Value) (driver.Result, error) {
 // errors from pending data, since Stmt.Close() doesn't return errors
 // to the user.
 func (ci *copyin) CopyData(ctx context.Context, line string) (driver.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if ci.closed {
 		return nil, errCopyInClosed
 	}
@@ -314,23 +348,42 @@ func (ci *copyin) Close() error {
 	if err := ci.getBad(); err != nil {
 		return err
 	}
+	if err := ci.cn.c.SetDeadline(ci.cn.closeDeadline()); err != nil {
+		return ci.closeError(err)
+	}
 
 	if len(ci.buffer) > 0 {
 		err := ci.flush(ci.buffer)
 		if err != nil {
-			return ci.cn.handleError(err)
+			return ci.closeError(err)
 		}
 	}
 	// Avoid touching the scratch buffer as resploop could be using it.
 	err := ci.cn.sendSimpleMessage(proto.CopyDoneRequest)
 	if err != nil {
-		return ci.cn.handleError(err)
+		return ci.closeError(err)
 	}
 
 	<-ci.done
 
+	if bad := ci.getBad(); bad != nil {
+		_ = ci.cn.c.Close()
+		if err := ci.err(); err != nil {
+			return err
+		}
+		return bad
+	}
+	if err := ci.cn.c.SetDeadline(time.Time{}); err != nil {
+		return ci.closeError(err)
+	}
 	if err := ci.err(); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (ci *copyin) closeError(err error) error {
+	ci.setBad(driver.ErrBadConn)
+	_ = ci.cn.c.Close()
+	return ci.cn.handleError(err)
 }

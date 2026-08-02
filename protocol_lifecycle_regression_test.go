@@ -158,6 +158,39 @@ func TestProtocolRegressionRowsUnexpectedMessagesPoisonConnection(t *testing.T) 
 	}
 }
 
+func TestProtocolRegressionRowsClosePromotesPendingHeader(t *testing.T) {
+	wire := bytes.Join([][]byte{
+		regressionBackendFrame(proto.RowDescription, regressionSingleColumnDescription(oid.T_int8, 0)),
+		regressionBackendFrame(proto.DataRow, regressionNullColumnData(1)),
+		regressionBackendFrame(proto.CommandComplete, []byte("SELECT 1\x00")),
+		regressionBackendFrame(proto.RowDescription, regressionColumnDescription(2, oid.T_int8, 0)),
+		regressionBackendFrame(proto.DataRow, regressionNullColumnData(2)),
+		regressionBackendFrame(proto.CommandComplete, []byte("SELECT 1\x00")),
+		regressionBackendFrame(proto.ReadyForQuery, []byte{'I'}),
+	}, nil)
+	script := newRegressionScriptConn(wire)
+	cn := &conn{c: script, buf: bufio.NewReader(script)}
+	rows, err := cn.simpleQuery("select one; select two, three")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rows.Next(make([]driver.Value, 1)); err != nil {
+		t.Fatalf("first row: %v", err)
+	}
+	if err := rows.Next(make([]driver.Value, 1)); !errors.Is(err, io.EOF) {
+		t.Fatalf("result-set boundary: got %v, want io.EOF", err)
+	}
+	if rows.next == nil {
+		t.Fatal("second result-set header was not left pending")
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("close rows with pending result set: %v", err)
+	}
+	if err := cn.err.get(); err != nil {
+		t.Errorf("draining valid result sets poisoned connection: %v", err)
+	}
+}
+
 func TestProtocolRegressionOversizedLongFrameRejectedBeforeAllocation(t *testing.T) {
 	const childEnvironment = "PQ_PROTOCOL_LIFECYCLE_OVERSIZED_CHILD"
 	if os.Getenv(childEnvironment) == "1" {
@@ -543,7 +576,7 @@ func TestProtocolRegressionFallbackClosesAbandonedSocket(t *testing.T) {
 func TestProtocolRegressionCloseOperationsAreBounded(t *testing.T) {
 	t.Run("connection", func(t *testing.T) {
 		client, server := net.Pipe()
-		cn := &conn{c: client, buf: bufio.NewReader(client)}
+		cn := &conn{c: client, buf: bufio.NewReader(client), closeTimeout: 50 * time.Millisecond}
 		regressionExpectCompletionBeforeTimeout(t, regressionAsync(cn.Close), func() {
 			_ = server.Close()
 			_ = client.Close()
@@ -553,7 +586,7 @@ func TestProtocolRegressionCloseOperationsAreBounded(t *testing.T) {
 	t.Run("statement", func(t *testing.T) {
 		client, server := net.Pipe()
 		go func() { _, _ = io.Copy(io.Discard, server) }()
-		cn := &conn{c: client, buf: bufio.NewReader(client)}
+		cn := &conn{c: client, buf: bufio.NewReader(client), closeTimeout: 50 * time.Millisecond}
 		st := &stmt{cn: cn, name: "regression"}
 		regressionExpectCompletionBeforeTimeout(t, regressionAsync(st.Close), func() {
 			_ = server.Close()
@@ -564,7 +597,7 @@ func TestProtocolRegressionCloseOperationsAreBounded(t *testing.T) {
 	t.Run("copy", func(t *testing.T) {
 		client, server := net.Pipe()
 		go func() { _, _ = io.Copy(io.Discard, server) }()
-		cn := &conn{c: client, buf: bufio.NewReader(client)}
+		cn := &conn{c: client, buf: bufio.NewReader(client), closeTimeout: 50 * time.Millisecond}
 		ci := &copyin{
 			cn:     cn,
 			buffer: []byte{byte(proto.CopyDataRequest), 0, 0, 0, 0},
@@ -695,14 +728,20 @@ func regressionBackendFrame(code proto.ResponseCode, payload []byte) []byte {
 }
 
 func regressionSingleColumnDescription(typ oid.Oid, formatCode uint16) []byte {
-	payload := []byte{0, 1}
-	payload = append(payload, "value\x00"...)
-	payload = binary.BigEndian.AppendUint32(payload, 0)
-	payload = binary.BigEndian.AppendUint16(payload, 0)
-	payload = binary.BigEndian.AppendUint32(payload, uint32(typ))
-	payload = binary.BigEndian.AppendUint16(payload, 8)
-	payload = binary.BigEndian.AppendUint32(payload, math.MaxUint32)
-	payload = binary.BigEndian.AppendUint16(payload, formatCode)
+	return regressionColumnDescription(1, typ, formatCode)
+}
+
+func regressionColumnDescription(count uint16, typ oid.Oid, formatCode uint16) []byte {
+	payload := binary.BigEndian.AppendUint16(nil, count)
+	for range count {
+		payload = append(payload, "value\x00"...)
+		payload = binary.BigEndian.AppendUint32(payload, 0)
+		payload = binary.BigEndian.AppendUint16(payload, 0)
+		payload = binary.BigEndian.AppendUint32(payload, uint32(typ))
+		payload = binary.BigEndian.AppendUint16(payload, 8)
+		payload = binary.BigEndian.AppendUint32(payload, math.MaxUint32)
+		payload = binary.BigEndian.AppendUint16(payload, formatCode)
+	}
 	return payload
 }
 
