@@ -67,6 +67,31 @@ func securityRegressionConnect(t *testing.T, dsn string) error {
 	return err
 }
 
+func securityRegressionCaptureDebug(t *testing.T, fn func()) string {
+	t.Helper()
+	capture, err := os.CreateTemp(t.TempDir(), "pq-debug")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStderr, oldDebug := os.Stderr, debugProto
+	os.Stderr, debugProto = capture, true
+	t.Cleanup(func() {
+		os.Stderr, debugProto = oldStderr, oldDebug
+		_ = capture.Close()
+	})
+
+	fn()
+	os.Stderr, debugProto = oldStderr, oldDebug
+	if _, err := capture.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	output, err := io.ReadAll(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(output)
+}
+
 func TestSecurityRegressionGSSRequiresCryptographicCompletion(t *testing.T) {
 	gss := &securityRegressionGSS{initToken: []byte("client-init-token")}
 	securityRegressionRegisterGSS(t, gss)
@@ -533,5 +558,75 @@ func TestSecurityRegressionDebugRedactsCredentialsAndAuthPayloads(t *testing.T) 
 		if strings.Contains(string(output), secret) {
 			t.Errorf("PQGO_DEBUG exposed secret %q in output:\n%s", secret, output)
 		}
+	}
+}
+
+func TestSecurityRegressionDebugRedactsInlineSSLKey(t *testing.T) {
+	const privateKey = "-----BEGIN PRIVATE KEY-----\nINLINE_SSL_KEY_MUST_NOT_BE_LOGGED\n-----END PRIVATE KEY-----"
+	output := securityRegressionCaptureDebug(t, func() {
+		connector, err := NewConnectorConfig(Config{
+			Host:      "debug.invalid",
+			Port:      1,
+			SSLMode:   SSLModeDisable,
+			SSLInline: true,
+			SSLKey:    privateKey,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		connector.Dialer(protocolLifecycleCancelDialer{err: errors.New("deliberate debug dial failure")})
+		if _, err := connector.Connect(context.Background()); err == nil {
+			t.Fatal("debug connection unexpectedly succeeded")
+		}
+	})
+
+	if strings.Contains(output, privateKey) || strings.Contains(output, "INLINE_SSL_KEY_MUST_NOT_BE_LOGGED") {
+		t.Fatalf("PQGO_DEBUG exposed inline SSL private-key material:\n%s", output)
+	}
+}
+
+func TestSecurityRegressionDebugRedactsStartupRuntimePassword(t *testing.T) {
+	const password = "STARTUP_RUNTIME_PASSWORD_MUST_NOT_BE_LOGGED"
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	go func() {
+		defer server.Close()
+		if !regressionReadStartupPacket(server) {
+			return
+		}
+		responses := append(
+			regressionBackendFrame(proto.AuthenticationRequest, []byte{0, 0, 0, 0}),
+			regressionBackendFrame(proto.ReadyForQuery, []byte{'I'})...,
+		)
+		_, _ = server.Write(responses)
+		_, _ = io.Copy(io.Discard, server)
+	}()
+
+	connector, err := NewConnectorConfig(Config{
+		Host:               "debug.invalid",
+		Port:               1,
+		User:               "test",
+		Database:           "test",
+		SSLMode:            SSLModeDisable,
+		MaxProtocolVersion: ProtocolVersion30,
+		Runtime:            map[string]string{"password": password},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector.Dialer(protocolLifecycleFixedDialer{conn: client})
+
+	output := securityRegressionCaptureDebug(t, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		cn, err := connector.Connect(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = cn.Close()
+	})
+	if strings.Contains(output, password) {
+		t.Fatalf("PQGO_DEBUG exposed a password in the Startup packet:\n%s", output)
 	}
 }
