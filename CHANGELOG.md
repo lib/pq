@@ -5,7 +5,9 @@ unreleased
   default `sslmode` from `require` to `prefer`, which is the default used by
   libpq and the rest of the PostgreSQL ecosystem ([#1271]).
 
-- pq now requires Go 1.23.
+- pq now requires Go 1.25.
+
+- Tests now provision PostgreSQL automatically with Testcontainers for Go.
 
 ### Features
 

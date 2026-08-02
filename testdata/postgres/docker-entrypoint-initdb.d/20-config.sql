@@ -1,7 +1,7 @@
 alter system set ssl           = 'on';
-alter system set ssl_ca_file   = '/ssl2/root.crt';
-alter system set ssl_cert_file = '/ssl2/server.crt';
-alter system set ssl_key_file  = '/ssl2/server.key';
+alter system set ssl_ca_file   = '/tmp/testcontainers-go/postgres/ca_cert.pem';
+alter system set ssl_cert_file = '/tmp/testcontainers-go/postgres/server.cert';
+alter system set ssl_key_file  = '/tmp/testcontainers-go/postgres/server.key';
 
 create role pqgossl      with login nocreatedb nocreaterole nosuperuser;
 create role pqgosslcert  with login nocreatedb nocreaterole nosuperuser;

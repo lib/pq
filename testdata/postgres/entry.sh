@@ -4,12 +4,18 @@
 # directory, as that runs as the postgres user rather than root.
 set -eu
 
-mkdir -p /docker-entrypoint-initdb.d /ssl2
+mkdir -p /docker-entrypoint-initdb.d /ssl2 /tmp/testcontainers-go/postgres
 
 cd /ssl
 cp *.key *.crt /ssl2
 chown postgres:postgres /ssl2/*
 chmod 600 /ssl2/*
+
+cp root.crt /tmp/testcontainers-go/postgres/ca_cert.pem
+cp server.crt /tmp/testcontainers-go/postgres/server.cert
+cp server.key /tmp/testcontainers-go/postgres/server.key
+chown postgres:postgres /tmp/testcontainers-go/postgres/*
+chmod 600 /tmp/testcontainers-go/postgres/*
 
 cd /init
 cp ./docker-entrypoint-initdb.d/* /docker-entrypoint-initdb.d

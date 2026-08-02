@@ -32,16 +32,11 @@ func Example_open() {
 }
 
 func Example_openConfig() {
-	cfg := pq.Config{
-		Host: "localhost",
-		Port: 5432,
-		User: "pqgo",
+	// NewConfig loads the environment and applies any values from its DSN.
+	cfg, err := pq.NewConfig("")
+	if err != nil {
+		log.Fatal(err)
 	}
-	// Or: create a new Config from the defaults, environment, and DSN.
-	// cfg, err := pq.NewConfig("host=postgres dbname=pqgo")
-	// if err != nil {
-	//     log.Fatal(err)
-	// }
 
 	c, err := pq.NewConnectorConfig(cfg)
 	if err != nil {
@@ -194,7 +189,7 @@ func Example_copyFromStdin() {
 }
 
 func ExampleNewConnector() {
-	c, err := pq.NewConnector("host=postgres dbname=pqgo")
+	c, err := pq.NewConnector("dbname=pqgo")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -264,10 +259,11 @@ func ExampleRegisterTLSConfig() {
 		ServerName:   "postgres",
 	})
 
-	db, err := sql.Open("postgres", "host=postgres dbname=pqgo sslmode=pqgo-mytls")
+	c, err := pq.NewConnector("dbname=pqgo sslmode=pqgo-mytls sslsni=0")
 	if err != nil {
 		log.Fatal(err)
 	}
+	db := sql.OpenDB(c)
 	defer db.Close()
 
 	err = db.Ping()

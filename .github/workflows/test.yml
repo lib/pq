@@ -1,7 +1,7 @@
 name: 'test'
 on:
   pull_request:
-    paths: ['**.go', 'go.mod', '.github/workflows/*', 'compose.yaml']
+    paths: ['**.go', 'go.mod', 'go.sum', '.github/workflows/*', 'compose.yaml', 'testdata/postgres/**']
   push:
     branches: ['main', 'master']
 
@@ -27,21 +27,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pg: ['14', '15', '16', '17', '18', '19']
-        go: ['1.23', '1.26']
+        postgres: ['postgres:14', 'postgres:15', 'postgres:16', 'postgres:17', 'postgres:18', 'postgres:19beta2']
+        go: ['1.25', '1.26']
     steps:
     - uses: 'actions/checkout@v6'
     - uses: 'actions/setup-go@v6'
       with:
         go-version: ${{ matrix.go }}
-    - name: 'Start PostgreSQL'
-      run: |
-        docker compose up pg${{ matrix.pg }} -d --wait || {
-          docker compose logs
-          exit 1
-        }
-        echo '127.0.0.1 postgres postgres-invalid' | sudo tee -a /etc/hosts
     - name: 'Run tests'
+      env:
+        PQTEST_POSTGRES_IMAGE: ${{ matrix.postgres }}
       run: |
         echo 'PQTEST_BINARY_PARAMETERS=no  go test -race ./...'
         PQTEST_BINARY_PARAMETERS=no  go test -race ./...
@@ -69,10 +64,10 @@ jobs:
     - name: 'Run tests'
       run: |
         echo 'PGPORT=6432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...'
-        PGPORT=6432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...
+        PQTEST_USE_TESTCONTAINERS=false PGPORT=6432 PQTEST_BINARY_PARAMETERS=no  go test -race ./...
 
         echo PGPORT=6432 'PQTEST_BINARY_PARAMETERS=yes go test -race ./...'
-        PGPORT=6432 PQTEST_BINARY_PARAMETERS=yes go test -race ./...
+        PQTEST_USE_TESTCONTAINERS=false PGPORT=6432 PQTEST_BINARY_PARAMETERS=yes go test -race ./...
 
   cockroach:
     runs-on: 'ubuntu-latest'
@@ -90,10 +85,10 @@ jobs:
     - name: 'Run tests'
       run: |
         echo 'PGPORT=26257 PQTEST_BINARY_PARAMETERS=no  go test -race -skip='^Example' ./...'
-        PGPORT=26257 PQTEST_BINARY_PARAMETERS=no  go test -race -skip='^Example' ./...
+        PQTEST_USE_TESTCONTAINERS=false PGPORT=26257 PQTEST_BINARY_PARAMETERS=no  go test -race -skip='^Example' ./...
 
         echo PGPORT=26257 'PQTEST_BINARY_PARAMETERS=yes go test -race -skip='^Example' ./...'
-        PGPORT=26257 PQTEST_BINARY_PARAMETERS=yes go test -race -skip='^Example' ./...
+        PQTEST_USE_TESTCONTAINERS=false PGPORT=26257 PQTEST_BINARY_PARAMETERS=yes go test -race -skip='^Example' ./...
 
   # Disabled for now as it's kind of finecky and flaky.
   #pgpool:

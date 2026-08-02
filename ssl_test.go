@@ -302,7 +302,7 @@ func TestSSLSNI(t *testing.T) {
 			// We are okay to skip this error as we are polling errCh and we'll
 			// get an error or timeout from the server side in case of problems
 			// here.
-			db, _ := sql.Open("postgres", fmt.Sprintf("host=%s port=%s %s", tt.hostname, port, tt.connect))
+			db, _ := sql.Open("postgres", fmt.Sprintf("host=%s hostaddr=127.0.0.1 port=%s %s", tt.hostname, port, tt.connect))
 			_, _ = db.Exec("select 1")
 
 			// Check SNI data

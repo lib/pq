@@ -13,39 +13,50 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	pqtest.DSN("") // Called for the side-effect of setting the environment.
-	e := m.Run()
-	if e > 0 {
-		os.Exit(e)
-	}
-
-	for _, f := range os.Args {
-		if strings.HasPrefix(f, "-test.fuzz") {
-			return
-		}
-	}
-	if debugProto { // It's just confusing/annoying when running with PQGO_DEBUG=1
-		return
-	}
-
-	fatal := func(msg any) {
-		fmt.Fprintln(os.Stderr, msg)
+	if err := pqtest.Setup(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
+	e := m.Run()
+
+	fuzzing := false
+	for _, f := range os.Args {
+		if strings.HasPrefix(f, "-test.fuzz") {
+			fuzzing = true
+			break
+		}
+	}
+	if e == 0 && !fuzzing && !debugProto {
+		if err := checkLeakedConnections(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			e = 1
+		}
+	}
+
+	if err := pqtest.Teardown(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		if e == 0 {
+			e = 1
+		}
+	}
+	os.Exit(e)
+}
+
+func checkLeakedConnections() error {
 	db, err := sql.Open("postgres", pqtest.DSN(""))
 	if err != nil {
-		fatal(err)
+		return err
 	}
 	defer db.Close()
 
 	rows, err := db.Query(`select pid, query from pg_stat_activity where application_name='pqgo' and pid != pg_backend_pid()`)
 	if err != nil {
-		fatal(err)
+		return err
 	}
 	defer rows.Close()
 
-	e = 0
+	leaked := false
 	for rows.Next() {
 		var (
 			pid   int64
@@ -53,15 +64,18 @@ func TestMain(m *testing.M) {
 		)
 		err := rows.Scan(&pid, &query)
 		if err != nil {
-			fatal(err)
+			return err
 		}
-		e = 1
+		leaked = true
 		fmt.Printf("connection still active: pid=%d; query=%q\n", pid, query)
 	}
 	if rows.Err() != nil {
-		fatal(rows.Err())
+		return rows.Err()
 	}
-	os.Exit(e)
+	if leaked {
+		return fmt.Errorf("test connections still active")
+	}
+	return nil
 }
 
 // mustAs calls As(), calling t.Fatal() if the error is nil or if this fails.

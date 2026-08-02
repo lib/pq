@@ -83,21 +83,11 @@ func Ptr[T any](t T) *T {
 	return &t
 }
 
-var envOnce sync.Once
-
 func DSN(conninfo string) string {
-	envOnce.Do(func() {
-		defaultTo := func(k string, v string) {
-			if _, ok := os.LookupEnv(k); !ok {
-				os.Setenv(k, v)
-			}
-		}
-		defaultTo("PGHOST", "localhost")
-		defaultTo("PGDATABASE", "pqgo")
-		defaultTo("PGUSER", "pqgo")
-		defaultTo("PGCONNECT_TIMEOUT", "20")
-		os.Setenv("PGAPPNAME", "pqgo")
-	})
+	if err := Setup(); err != nil {
+		panic(err)
+	}
+	conninfo = addContainerHostaddr(conninfo)
 
 	if ForceBinaryParameters() &&
 		!strings.HasPrefix(conninfo, "postgres://") &&

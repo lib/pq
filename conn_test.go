@@ -581,7 +581,10 @@ func TestUnexpectedEOF(t *testing.T) {
 func TestConnClose(t *testing.T) {
 	// Ensure the underlying connection can be closed with Close after an error.
 	t.Run("CloseBadConn", func(t *testing.T) {
-		host := os.Getenv("PGHOST")
+		host := os.Getenv("PGHOSTADDR")
+		if host == "" {
+			host = os.Getenv("PGHOST")
+		}
 		if host == "" {
 			host = "localhost"
 		}

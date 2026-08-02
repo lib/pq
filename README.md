@@ -252,27 +252,25 @@ use a string instead of []byte. See #1023
 Development
 -----------
 ### Running tests
-Tests need to be run against a PostgreSQL database; you can use Docker compose
-to start one:
+Tests use Testcontainers for Go and start an isolated `postgres:18` container
+automatically. With a Docker-compatible container runtime available, run:
 
-    docker compose up -d
+	go test ./...
 
-This starts the latest PostgreSQL; use `docker compose up -d pg«v»` to start a
-different version.
+Use `PQTEST_POSTGRES_IMAGE` to test a different PostgreSQL image:
 
-In addition, your `/etc/hosts` needs an entry:
+	PQTEST_POSTGRES_IMAGE=postgres:17 go test ./...
 
-    127.0.0.1 postgres postgres-invalid
-
-Or you can use any other PostgreSQL instance; see
-`testdata/postgres/docker-entrypoint-initdb.d` for the required setup. You can use
-the standard `PG*` environment variables to control the connection details; it
-uses the following defaults:
+To use an external PostgreSQL instance instead, set `PGHOST`, `PGHOSTADDR`, or
+`PGPORT`, or set `PQTEST_USE_TESTCONTAINERS=false`. See
+`testdata/postgres/docker-entrypoint-initdb.d` for the required server setup.
+When Testcontainers is disabled, the standard `PG*` environment variables
+control the connection and use these defaults:
 
     PGHOST=localhost
     PGDATABASE=pqgo
     PGUSER=pqgo
-    PGSSLMODE=disable
+    PGSSLMODE=prefer
     PGCONNECT_TIMEOUT=20
 
 `PQTEST_BINARY_PARAMETERS` can be used to add `binary_parameters=yes` to all
@@ -283,12 +281,12 @@ connection strings:
 Tests can be run against pgbouncer with:
 
     docker compose up -d pgbouncer pg18
-    PGPORT=6432 go test ./...
+    PQTEST_USE_TESTCONTAINERS=false PGPORT=6432 go test ./...
 
 and pgpool with:
 
     docker compose up -d pgpool pg18
-    PGPORT=7432 go test ./...
+    PQTEST_USE_TESTCONTAINERS=false PGPORT=7432 go test ./...
 
 ### Protocol debug output
 You can use PQGO_DEBUG=1 to make the driver print the communication with
