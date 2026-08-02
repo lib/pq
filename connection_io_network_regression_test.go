@@ -143,6 +143,30 @@ func TestConnectionIONetworkRegressionSendPartialWritePoisons(t *testing.T) {
 	}
 }
 
+func TestConnectionIONetworkRegressionStartupWritePreservesUnderlyingError(t *testing.T) {
+	wire := newConnectionIOWriteConn(connectionIOWriteZeroError, nil)
+	connector, err := NewConnectorConfig(Config{
+		Host:               "write.invalid",
+		Port:               1,
+		User:               "test",
+		Database:           "test",
+		SSLMode:            SSLModeDisable,
+		MaxProtocolVersion: ProtocolVersion30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector.Dialer(protocolLifecycleFixedDialer{conn: wire})
+
+	got, err := connector.Connect(context.Background())
+	if got != nil {
+		_ = got.Close()
+	}
+	if !errors.Is(err, errConnectionIOWrite) {
+		t.Fatalf("startup write error = %v; want it to wrap %v", err, errConnectionIOWrite)
+	}
+}
+
 func TestConnectionIONetworkRegressionCopyFlushPoisonsPartialWrite(t *testing.T) {
 	tests := []struct {
 		name string
