@@ -84,6 +84,36 @@ func TestListenerNetworkListenContextCancelsBlackholedQuery(t *testing.T) {
 	}
 }
 
+func TestListenerNetworkCanceledListenDoesNotPersistDesiredChannel(t *testing.T) {
+	dialer := &listenerNetworkContextBlockingDialer{entered: make(chan struct{})}
+	listener := NewDialListener(
+		dialer,
+		"host=listener.invalid port=1 user=test dbname=test sslmode=disable",
+		time.Hour,
+		time.Hour,
+		nil,
+	)
+	t.Cleanup(func() {
+		_ = listener.Close()
+		listenerNetworkAwaitNotificationCloseCleanup(t, listener.Notify)
+	})
+	listenerNetworkAwait(t, dialer.entered, "listener did not enter its initial connection attempt")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	const channel = "listener_network_canceled_before_connect"
+	if err := listener.ListenContext(ctx, channel); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ListenContext error = %v; want %v", err, context.DeadlineExceeded)
+	}
+
+	listener.lock.Lock()
+	_, retained := listener.channels[channel]
+	listener.lock.Unlock()
+	if retained {
+		t.Error("canceled ListenContext remained in the desired channel set and can subscribe on a later reconnect")
+	}
+}
+
 func TestListenerNetworkFullNotifyDoesNotBlockPing(t *testing.T) {
 	client, server := net.Pipe()
 	connected := make(chan struct{})
