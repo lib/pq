@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"io"
 	"net"
 	"runtime"
 	"sync"
@@ -43,6 +44,34 @@ type listenerNetworkBlockingWriteConn struct {
 	writeStarted chan struct{}
 	releaseWrite <-chan struct{}
 	writeOnce    sync.Once
+}
+
+type listenerNetworkCallbackDialer struct {
+	conn         net.Conn
+	calls        atomic.Int32
+	firstEntered chan struct{}
+	releaseFirst <-chan struct{}
+}
+
+func (d *listenerNetworkCallbackDialer) dial() (net.Conn, error) {
+	switch d.calls.Add(1) {
+	case 1:
+		close(d.firstEntered)
+		<-d.releaseFirst
+		return nil, errors.New("intentional callback reconnect failure")
+	case 2:
+		return d.conn, nil
+	default:
+		return nil, errors.New("unexpected callback reconnect attempt")
+	}
+}
+
+func (d *listenerNetworkCallbackDialer) Dial(string, string) (net.Conn, error) {
+	return d.dial()
+}
+
+func (d *listenerNetworkCallbackDialer) DialTimeout(string, string, time.Duration) (net.Conn, error) {
+	return d.dial()
 }
 
 func (c *listenerNetworkBlockingWriteConn) Write([]byte) (int, error) {
@@ -242,6 +271,74 @@ func TestListenerNetworkLossMarkerFollowsRetainedNotifications(t *testing.T) {
 	}
 	if want := listenerChannelCapacity + 1; nilIndex != want {
 		t.Errorf("loss marker index = %d; want %d after every retained pre-loss notification", nilIndex, want)
+	}
+}
+
+func TestListenerNetworkCallbackCanListenDuringReconnect(t *testing.T) {
+	client, server := net.Pipe()
+	releaseFirst := make(chan struct{})
+	dialer := &listenerNetworkCallbackDialer{
+		conn:         client,
+		firstEntered: make(chan struct{}),
+		releaseFirst: releaseFirst,
+	}
+	backendDone := make(chan struct{})
+	go func() {
+		defer close(backendDone)
+		defer server.Close()
+		if !regressionReadStartupPacket(server) {
+			return
+		}
+		if _, err := server.Write(bytes.Join([][]byte{
+			regressionBackendFrame(proto.AuthenticationRequest, []byte{0, 0, 0, 0}),
+			regressionBackendFrame(proto.ReadyForQuery, []byte{'I'}),
+		}, nil)); err != nil {
+			return
+		}
+		if !regressionReadFrontendMessage(server) {
+			return
+		}
+		if _, err := server.Write(bytes.Join([][]byte{
+			regressionBackendFrame(proto.CommandComplete, []byte("LISTEN\x00")),
+			regressionBackendFrame(proto.ReadyForQuery, []byte{'I'}),
+		}, nil)); err != nil {
+			return
+		}
+		_, _ = io.Copy(io.Discard, server)
+	}()
+
+	callbackResult := make(chan error, 1)
+	var listener *Listener
+	listener = NewDialListener(
+		dialer,
+		"host=listener.invalid port=1 user=test dbname=test sslmode=disable connect_timeout=0",
+		5*time.Millisecond,
+		5*time.Millisecond,
+		func(event ListenerEventType, _ error) {
+			if event != ListenerEventConnectionAttemptFailed {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+			defer cancel()
+			callbackResult <- listener.ListenContext(ctx, "listener_network_callback")
+		},
+	)
+	t.Cleanup(func() {
+		_ = listener.Close()
+		_ = client.Close()
+		_ = server.Close()
+		listenerNetworkAwaitCleanup(t, backendDone, "callback reconnect backend did not stop")
+	})
+	listenerNetworkAwait(t, dialer.firstEntered, "listener did not begin its first connection attempt")
+	close(releaseFirst)
+
+	select {
+	case err := <-callbackResult:
+		if err != nil {
+			t.Fatalf("Listener callback could not wait for reconnect and LISTEN: %v", err)
+		}
+	case <-time.After(listenerNetworkTestTimeout):
+		t.Fatal("Listener callback deadlocked the reconnect needed by ListenContext")
 	}
 }
 
