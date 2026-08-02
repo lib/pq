@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"sync"
@@ -100,6 +101,45 @@ func TestConnectionStartupRegressionSQLDriverTypePreserved(t *testing.T) {
 	defer db.Close()
 	if _, ok := db.Driver().(*Driver); !ok {
 		t.Fatalf("sql.DB.Driver type = %T; want *pq.Driver", db.Driver())
+	}
+}
+
+func TestConnectionStartupRegressionDriverConnectorRetriesTransientConfigError(t *testing.T) {
+	serviceFile := filepath.Join(t.TempDir(), "pg_service.conf")
+	t.Setenv("PGSERVICEFILE", serviceFile)
+
+	driverConnector, err := (&Driver{}).OpenConnector("service=recovered")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstConn, firstErr := driverConnector.Connect(context.Background())
+	if firstConn != nil {
+		_ = firstConn.Close()
+		t.Fatal("connection unexpectedly succeeded with a missing service file")
+	}
+	if firstErr == nil {
+		t.Fatal("missing service file did not fail connection configuration")
+	}
+
+	service := []byte("[recovered]\n" +
+		"host=127.0.0.1\n" +
+		"port=1\n" +
+		"user=test\n" +
+		"dbname=test\n" +
+		"sslmode=disable\n" +
+		"connect_timeout=1\n")
+	if err := os.WriteFile(serviceFile, service, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	secondConn, secondErr := driverConnector.Connect(ctx)
+	if secondConn != nil {
+		_ = secondConn.Close()
+	}
+	if secondErr != nil && secondErr.Error() == firstErr.Error() {
+		t.Fatalf("Driver connector permanently cached transient configuration error: %v", secondErr)
 	}
 }
 

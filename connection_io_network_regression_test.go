@@ -285,6 +285,8 @@ func TestConnectionIONetworkRegressionCopyExecContextInterruptsBlockedFlush(t *t
 	}
 	if got.err == nil {
 		t.Errorf("blocked COPY ExecContext returned success: %v", got.result)
+	} else if !errors.Is(got.err, context.DeadlineExceeded) {
+		t.Errorf("blocked COPY ExecContext error = %v; want %v", got.err, context.DeadlineExceeded)
 	}
 	if err := cn.err.get(); err != driver.ErrBadConn {
 		t.Errorf("canceled blocked COPY left connection reusable: %v", err)
