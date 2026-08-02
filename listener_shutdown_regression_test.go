@@ -2,6 +2,7 @@ package pq
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"net"
 	"sync"
@@ -184,6 +185,92 @@ func TestListenerRegressionCloseInterruptsInFlightListen(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Listener.Listen remained blocked after shutdown")
 	}
+	regressionAwaitListenerClosed(t, listener.Notify)
+}
+
+func TestListenerRegressionCloseUnblocksSaturatedConnectionNotifications(t *testing.T) {
+	client, server := net.Pipe()
+	defer server.Close()
+
+	connected := make(chan struct{})
+	flooded := make(chan struct{})
+	go func() {
+		if !regressionReadStartupPacket(server) {
+			return
+		}
+		_, _ = server.Write(bytes.Join([][]byte{
+			regressionBackendFrame(proto.AuthenticationRequest, []byte{0, 0, 0, 0}),
+			regressionBackendFrame(proto.ReadyForQuery, []byte{'I'}),
+		}, nil))
+
+		payload := binary.BigEndian.AppendUint32(nil, 42)
+		payload = append(payload, "regression_flood\x00payload\x00"...)
+		frame := regressionBackendFrame(proto.NotificationResponse, payload)
+		// Listener.Notify and the per-connection notification channel each have
+		// capacity 32. One more notification can be held by the forwarding loop;
+		// the 66th therefore leaves ListenerConn blocked trying to forward it.
+		for range 66 {
+			if _, err := server.Write(frame); err != nil {
+				return
+			}
+		}
+		close(flooded)
+	}()
+
+	listener := NewDialListener(
+		protocolLifecycleFixedDialer{conn: client},
+		"host=listener.invalid port=1 user=test dbname=test sslmode=disable",
+		time.Hour,
+		time.Hour,
+		func(event ListenerEventType, _ error) {
+			if event == ListenerEventConnected {
+				close(connected)
+			}
+		},
+	)
+	t.Cleanup(func() {
+		_ = server.Close()
+		_ = listener.Close()
+	})
+	regressionAwaitSignal(t, connected, "listener did not establish its initial connection")
+
+	listener.lock.Lock()
+	listenerConn := listener.cn
+	connectionNotifications := listener.connNotificationChan
+	listener.lock.Unlock()
+	if listenerConn == nil || connectionNotifications == nil {
+		t.Fatal("listener did not publish its per-connection notification channel")
+	}
+	regressionAwaitSignal(t, flooded, "listener notification buffers did not saturate")
+
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	stalled := false
+	select {
+	case _, ok := <-listenerConn.replyChan:
+		if ok {
+			t.Error("ListenerConn produced an unexpected query reply during shutdown")
+		}
+	case <-time.After(regressionOperationTimeout):
+		stalled = true
+		t.Error("Listener.Close left the per-connection receiver blocked forwarding a notification")
+	}
+
+	// Draining before the timeout would itself release the bug. Drain only as
+	// cleanup (and to verify eventual channel closure) after checking the
+	// receiver's independent reply channel completion signal.
+	drained := make(chan struct{})
+	go func() {
+		for range connectionNotifications {
+		}
+		close(drained)
+	}()
+	if stalled {
+		_ = server.Close()
+	}
+	regressionAwaitSignal(t, drained, "per-connection notification channel did not close")
 	regressionAwaitListenerClosed(t, listener.Notify)
 }
 
