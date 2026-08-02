@@ -189,11 +189,21 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 
 	return func(conn net.Conn) (net.Conn, error) {
 		client := tls.Client(conn, tlsConf)
-		if verifyCaOnly {
-			err := client.Handshake()
-			if err != nil {
+		// For sslmode=prefer, the handshake has to happen before this upgrader
+		// returns so the caller can retry the host without TLS. Direct TLS also
+		// needs an eager handshake so its mandatory ALPN result can be checked.
+		// Certificate verification errors must be reported before startup writes
+		// can classify them as safe to retry. verify-ca has always handshaken here
+		// before doing its manual chain check.
+		eagerHandshake := verifyCaOnly || mode == SSLModePrefer ||
+			(mode == SSLModeVerifyFull && !verifyFullNoSNI) ||
+			cfg.SSLNegotiation == SSLNegotiationDirect
+		if eagerHandshake {
+			if err := client.Handshake(); err != nil {
 				return client, err
 			}
+		}
+		if verifyCaOnly {
 			var (
 				certs = client.ConnectionState().PeerCertificates
 				opts  = x509.VerifyOptions{Intermediates: x509.NewCertPool(), Roots: tlsConf.RootCAs}
@@ -201,8 +211,13 @@ func ssl(cfg Config, mode SSLMode) (func(net.Conn) (net.Conn, error), error) {
 			for _, cert := range certs[1:] {
 				opts.Intermediates.AddCert(cert)
 			}
-			_, err = certs[0].Verify(opts)
-			return client, err
+			if _, err := certs[0].Verify(opts); err != nil {
+				return client, err
+			}
+		}
+		if cfg.SSLNegotiation == SSLNegotiationDirect &&
+			client.ConnectionState().NegotiatedProtocol != proto.ALPNProtocol {
+			return client, fmt.Errorf("pq: direct SSL connection did not negotiate ALPN protocol %q", proto.ALPNProtocol)
 		}
 		return client, nil
 	}, nil

@@ -101,11 +101,17 @@ anything other than LISTEN / NOTIFY. Calling Listen will open a "notification
 channel"; once a notification channel is open, a notification generated on that
 channel will effect a send on the Listener.Notify channel. A notification
 channel will remain open until Unlisten is called, though connection loss might
-result in some notifications being lost. To solve this problem, Listener sends a
-nil pointer over the Notify channel any time the connection is re-established
-following a connection loss. The application can get information about the state
-of the underlying connection by setting an event callback in the call to
-NewListener.
+result in some notifications being lost.
+
+Listener uses finite buffers so a consumer which stops receiving cannot prevent
+protocol replies, disconnect detection, or reconnection. If those buffers fill,
+Listener drops notifications and later sends a single nil pointer over Notify to
+report possible loss. Listener also sends nil any time the connection is
+re-established following a connection loss. Applications should therefore treat
+nil as a signal to refresh any state derived from notifications, and should
+continue to receive from Notify promptly. The application can get information
+about the state of the underlying connection by setting an event callback in the
+call to NewListener.
 
 A single [Listener] can safely be used from concurrent goroutines, which means
 that there is often no need to create more than one Listener in your

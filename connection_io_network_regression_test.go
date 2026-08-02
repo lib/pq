@@ -387,17 +387,17 @@ func TestConnectionIONetworkRegressionPingPropagatesDrainFailure(t *testing.T) {
 	})
 }
 
-func TestConnectionIONetworkRegressionPingRejectsBareReadyForQuery(t *testing.T) {
+func TestConnectionIONetworkRegressionPingPreservesBareReadyForQueryCompatibility(t *testing.T) {
 	script := newRegressionScriptConn(
 		regressionBackendFrame(proto.ReadyForQuery, []byte{'I'}),
 	)
 	cn := &conn{c: script, buf: bufio.NewReader(script), txnStatus: txnStatusIdle}
 
-	if err := cn.Ping(context.Background()); err == nil {
-		t.Fatal("Ping accepted ReadyForQuery without the expected EmptyQueryResponse")
+	if err := cn.Ping(context.Background()); err != nil {
+		t.Fatalf("Ping rejected a fully drained bare ReadyForQuery response: %v", err)
 	}
-	if err := cn.err.get(); err != driver.ErrBadConn {
-		t.Errorf("bare ReadyForQuery left Ping connection reusable: %v", err)
+	if err := cn.err.get(); err != nil {
+		t.Errorf("bare ReadyForQuery poisoned the connection: %v", err)
 	}
 }
 

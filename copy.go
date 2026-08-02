@@ -33,6 +33,8 @@ type copyin struct {
 	}
 }
 
+var _ driver.StmtExecContext = (*copyin)(nil)
+
 const (
 	ciBufferSize = 64 * 1024
 	// flush buffer before the buffer is filled up and needs reallocation
@@ -159,8 +161,7 @@ func (ci *copyin) flush(buf []byte) error {
 		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n", proto.RequestCode(buf[0]), len(buf)-5, buf[5:])
 	}
 	binary.BigEndian.PutUint32(buf[1:], uint32(len(buf)-1)) // Set message length (without message identifier).
-	_, err := ci.cn.c.Write(buf)
-	return err
+	return ci.cn.write(buf)
 }
 
 func (ci *copyin) resploop() {
@@ -256,6 +257,31 @@ func (ci *copyin) Query(v []driver.Value) (r driver.Rows, err error) {
 // errors from pending data, since Stmt.Close() doesn't return errors
 // to the user.
 func (ci *copyin) Exec(v []driver.Value) (driver.Result, error) {
+	return ci.exec(v)
+}
+
+// ExecContext inserts values into the COPY stream while allowing a blocked
+// network flush to be interrupted by ctx.
+func (ci *copyin) ExecContext(ctx context.Context, v []driver.NamedValue) (driver.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	finish := ci.cn.watchCancel(ctx, true)
+	defer finish()
+
+	values := make([]driver.Value, len(v))
+	for i := range v {
+		values[i] = v[i].Value
+	}
+	result, err := ci.exec(values)
+	finish()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	return result, err
+}
+
+func (ci *copyin) exec(v []driver.Value) (driver.Result, error) {
 	if ci.closed {
 		return nil, errCopyInClosed
 	}

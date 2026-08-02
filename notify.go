@@ -93,13 +93,23 @@ type message struct {
 	err error
 }
 
+type listenerEvent struct {
+	typ ListenerEventType
+	err error
+}
+
 var errListenerConnClosed = errors.New("pq: ListenerConn has been closed")
+
+const (
+	listenerChannelCapacity = 32
+)
 
 // ListenerConn is a low-level interface for waiting for notifications. You
 // should use [Listener] instead.
 type ListenerConn struct {
-	connectionLock   sync.Mutex // guards cn and err
-	senderLock       sync.Mutex // the sending goroutine will be holding this lock
+	connectionLock   sync.Mutex    // guards cn and err
+	senderLock       chan struct{} // the sending goroutine holds the token in this channel
+	senderLockOnce   sync.Once
 	cn               *conn
 	err              error
 	connState        int32
@@ -158,22 +168,42 @@ func startListenerConn(cn *conn, c chan<- *Notification) *ListenerConn {
 //
 // Returns an error if an unrecoverable error has occurred and the ListenerConn
 // should be abandoned.
-func (l *ListenerConn) acquireSenderLock() error {
-	// we must acquire senderLock first to avoid deadlocks; see ExecSimpleQuery
-	l.senderLock.Lock()
+func (l *ListenerConn) acquireSenderLock(ctx context.Context) error {
+	l.senderLockOnce.Do(func() {
+		l.senderLock = make(chan struct{}, 1)
+		l.senderLock <- struct{}{}
+	})
+
+	// We must acquire senderLock first to avoid deadlocks; see
+	// ExecSimpleQueryContext. A channel token lets a canceled caller stop waiting
+	// behind another query without abandoning a goroutine on a sync.Mutex.
+	select {
+	case <-l.senderLock:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-l.done:
+		l.connectionLock.Lock()
+		err := l.err
+		l.connectionLock.Unlock()
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		l.releaseSenderLock()
+		return err
+	}
 
 	l.connectionLock.Lock()
 	err := l.err
 	l.connectionLock.Unlock()
 	if err != nil {
-		l.senderLock.Unlock()
+		l.releaseSenderLock()
 		return err
 	}
 	return nil
 }
 
 func (l *ListenerConn) releaseSenderLock() {
-	l.senderLock.Unlock()
+	l.senderLock <- struct{}{}
 }
 
 // setState advances the protocol state to newState. Returns false if moving
@@ -277,8 +307,11 @@ func (l *ListenerConn) listenerConnMain() {
 		l.err = err
 	}
 	l.signalDone()
-	_ = l.cn.Close()
 	l.connectionLock.Unlock()
+	// The receive loop has already failed, so a graceful Terminate exchange is
+	// neither useful nor safe. Raw-close without holding connectionLock so a
+	// concurrent Close or context cancellation cannot wait behind network I/O.
+	_ = l.cn.c.Close()
 
 	// There might be a query in-flight; make sure nobody's waiting for a
 	// response to it, since there's not going to be one.
@@ -292,23 +325,49 @@ func (l *ListenerConn) listenerConnMain() {
 
 // Listen sends a LISTEN query to the server. See ExecSimpleQuery.
 func (l *ListenerConn) Listen(channel string) (bool, error) {
-	return l.ExecSimpleQuery("LISTEN " + QuoteIdentifier(channel))
+	return l.ListenContext(context.Background(), channel)
+}
+
+// ListenContext sends a LISTEN query to the server. Canceling ctx invalidates
+// the dedicated connection because its protocol state can no longer be known.
+func (l *ListenerConn) ListenContext(ctx context.Context, channel string) (bool, error) {
+	return l.ExecSimpleQueryContext(ctx, "LISTEN "+QuoteIdentifier(channel))
 }
 
 // Unlisten sends an UNLISTEN query to the server. See ExecSimpleQuery.
 func (l *ListenerConn) Unlisten(channel string) (bool, error) {
-	return l.ExecSimpleQuery("UNLISTEN " + QuoteIdentifier(channel))
+	return l.UnlistenContext(context.Background(), channel)
+}
+
+// UnlistenContext sends an UNLISTEN query to the server. Canceling ctx
+// invalidates the dedicated connection because its protocol state can no
+// longer be known.
+func (l *ListenerConn) UnlistenContext(ctx context.Context, channel string) (bool, error) {
+	return l.ExecSimpleQueryContext(ctx, "UNLISTEN "+QuoteIdentifier(channel))
 }
 
 // UnlistenAll sends an `UNLISTEN *` query to the server. See ExecSimpleQuery.
 func (l *ListenerConn) UnlistenAll() (bool, error) {
-	return l.ExecSimpleQuery("UNLISTEN *")
+	return l.UnlistenAllContext(context.Background())
+}
+
+// UnlistenAllContext sends an `UNLISTEN *` query to the server. Canceling ctx
+// invalidates the dedicated connection because its protocol state can no
+// longer be known.
+func (l *ListenerConn) UnlistenAllContext(ctx context.Context) (bool, error) {
+	return l.ExecSimpleQueryContext(ctx, "UNLISTEN *")
 }
 
 // Ping the remote server to make sure it's alive. Non-nil error means the
 // connection has failed and should be abandoned.
 func (l *ListenerConn) Ping() error {
-	sent, err := l.ExecSimpleQuery("")
+	return l.PingContext(context.Background())
+}
+
+// PingContext pings the remote server. Canceling ctx invalidates the dedicated
+// connection so a blackholed read or write cannot leave the call blocked.
+func (l *ListenerConn) PingContext(ctx context.Context) error {
+	sent, err := l.ExecSimpleQueryContext(ctx, "")
 	if !sent {
 		return err
 	}
@@ -347,35 +406,79 @@ func (l *ListenerConn) sendSimpleQuery(q string) (err error) {
 // connection has either been closed or will be closed shortly thereafter, and
 // all subsequently executed queries will return an error.
 func (l *ListenerConn) ExecSimpleQuery(q string) (executed bool, err error) {
-	if err = l.acquireSenderLock(); err != nil {
+	return l.ExecSimpleQueryContext(context.Background(), q)
+}
+
+// ExecSimpleQueryContext is like ExecSimpleQuery, but permits a caller to bound
+// both writing the query and waiting for its response. Once a query has begun,
+// canceling ctx closes this ListenerConn: PostgreSQL's simple-query protocol
+// provides no way to resume safely without consuming the complete response.
+func (l *ListenerConn) ExecSimpleQueryContext(ctx context.Context, q string) (executed bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if err = l.acquireSenderLock(ctx); err != nil {
 		return false, err
 	}
 	defer l.releaseSenderLock()
 
+	stopCancel := func() {}
+	if ctx.Done() != nil {
+		var operationActive atomic.Bool
+		operationActive.Store(true)
+		cancelDone := make(chan struct{})
+		stop := context.AfterFunc(ctx, func() {
+			if operationActive.CompareAndSwap(true, false) {
+				l.invalidate(ctx.Err())
+			}
+			close(cancelDone)
+		})
+		stopCancel = func() {
+			if operationActive.CompareAndSwap(true, false) {
+				if !stop() {
+					<-cancelDone
+				}
+				return
+			}
+			<-cancelDone
+		}
+	}
+	defer stopCancel()
+
 	err = l.sendSimpleQuery(q)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			l.invalidate(ctxErr)
+			return false, ctxErr
+		}
 		// We can't know what state the protocol is in, so we need to abandon
 		// this connection.
-		l.connectionLock.Lock()
-		// Set the error pointer if it hasn't been set already; see
-		// listenerConnMain.
-		if l.err == nil {
-			l.err = err
-		}
-		l.connectionLock.Unlock()
-		_ = l.cn.c.Close()
+		l.invalidate(err)
 		return false, err
 	}
 
 	// now we just wait for a reply..
 	for {
-		m, ok := <-l.replyChan
+		var (
+			m  message
+			ok bool
+		)
+		select {
+		case m, ok = <-l.replyChan:
+		case <-ctx.Done():
+			l.invalidate(ctx.Err())
+			return false, ctx.Err()
+		}
 		if !ok {
 			// We lost the connection to server, don't bother waiting for a
 			// a response. err should have been set already.
 			l.connectionLock.Lock()
 			err := l.err
 			l.connectionLock.Unlock()
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				l.invalidate(ctxErr)
+				return false, ctxErr
+			}
 			return false, err
 		}
 		switch m.typ {
@@ -383,6 +486,10 @@ func (l *ListenerConn) ExecSimpleQuery(q string) (executed bool, err error) {
 			// sanity check
 			if m.err != nil {
 				panic("m.err != nil")
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				l.invalidate(ctxErr)
+				return false, ctxErr
 			}
 			// done; err might or might not be set
 			return true, err
@@ -399,6 +506,19 @@ func (l *ListenerConn) ExecSimpleQuery(q string) (executed bool, err error) {
 			return false, fmt.Errorf("unknown response for simple query: %q", m.typ)
 		}
 	}
+}
+
+// invalidate records err and closes the network connection. It is safe to call
+// concurrently and is used when an in-flight operation can no longer consume
+// the remainder of its protocol response.
+func (l *ListenerConn) invalidate(err error) {
+	l.connectionLock.Lock()
+	if l.err == nil {
+		l.err = err
+	}
+	l.signalDone()
+	l.connectionLock.Unlock()
+	_ = l.cn.c.Close()
 }
 
 // Close closes the connection.
@@ -479,7 +599,8 @@ func (l ListenerEventType) String() string {
 // Listener can safely be used from concurrently running goroutines.
 type Listener struct {
 	// Channel for receiving notifications from the database. In some cases a
-	// nil value will be sent. See section "Notifications" above.
+	// nil value will be sent to report possible notification loss. See section
+	// "Notifications" above.
 	Notify chan *Notification
 
 	dsn                  string
@@ -487,12 +608,17 @@ type Listener struct {
 	maxReconnectInterval time.Duration
 	dialer               Dialer
 	eventCallback        EventCallbackType
+	eventLock            sync.Mutex
+	eventQueue           []listenerEvent
+	eventWake            chan struct{}
 
 	// connectLock serializes connection attempts. operationLock serializes
 	// changes to channels with queries and connection resynchronization. Neither
-	// mutex is needed by Close.
-	connectLock   sync.Mutex
-	operationLock sync.Mutex
+	// lock is needed by Close. operationLock is a channel token so a context can
+	// cancel while an operation is queued behind another operation.
+	connectLock       sync.Mutex
+	operationLock     chan struct{}
+	operationLockOnce sync.Once
 
 	lock                 sync.Mutex
 	isClosed             bool
@@ -504,6 +630,8 @@ type Listener struct {
 	cn                   *ListenerConn
 	connNotificationChan <-chan *Notification
 	channels             map[string]struct{}
+	notificationQueue    chan *Notification
+	notificationLost     atomic.Bool
 }
 
 // NewListener creates a new database connection dedicated to LISTEN / NOTIFY.
@@ -517,25 +645,29 @@ type Listener struct {
 // completing the connection establishment procedure resets the interval back to
 // minReconnect.
 //
+// If maxReconnect is less than minReconnect, it is raised to minReconnect.
+//
 // The last parameter cb can be set to a function which will be called by the
-// Listener when the state of the underlying database connection changes. This
-// callback will be called by the goroutine which dispatches the notifications
-// over the Notify channel, so you should try to avoid doing potentially
-// time-consuming operations from the callback.
+// Listener when the state of the underlying database connection changes.
+// Callbacks are delivered in order by a dedicated goroutine, so a callback may
+// call Listener methods. You should still avoid potentially time-consuming
+// work because it delays later callbacks.
 func NewListener(dsn string, minReconnect, maxReconnect time.Duration, cb EventCallbackType) *Listener {
 	return NewDialListener(defaultDialer{}, dsn, minReconnect, maxReconnect, cb)
 }
 
 // NewDialListener is like NewListener but it takes a Dialer.
 func NewDialListener(d Dialer, dsn string, minReconnect, maxReconnect time.Duration, cb EventCallbackType) *Listener {
+	minReconnect, maxReconnect = normalizeReconnectIntervals(minReconnect, maxReconnect)
 	l := &Listener{
 		dsn:                  dsn,
 		minReconnectInterval: minReconnect,
 		maxReconnectInterval: maxReconnect,
 		dialer:               d,
 		eventCallback:        cb,
+		eventWake:            make(chan struct{}, 1),
 		channels:             make(map[string]struct{}),
-		Notify:               make(chan *Notification, 32),
+		Notify:               make(chan *Notification, listenerChannelCapacity),
 		done:                 make(chan struct{}),
 	}
 	l.reconnectCond = sync.NewCond(&l.lock)
@@ -543,11 +675,49 @@ func NewDialListener(d Dialer, dsn string, minReconnect, maxReconnect time.Durat
 	return l
 }
 
+func normalizeReconnectIntervals(minReconnect, maxReconnect time.Duration) (time.Duration, time.Duration) {
+	if maxReconnect < minReconnect {
+		maxReconnect = minReconnect
+	}
+	return minReconnect, maxReconnect
+}
+
 // NotificationChannel returns the notification channel for this listener. This
 // is the same channel as Notify, and will not be recreated during the life time
 // of the Listener.
 func (l *Listener) NotificationChannel() <-chan *Notification {
 	return l.Notify
+}
+
+func (l *Listener) acquireOperationLock(ctx context.Context) error {
+	l.operationLockOnce.Do(func() {
+		l.operationLock = make(chan struct{}, 1)
+		l.operationLock <- struct{}{}
+	})
+
+	select {
+	case <-l.operationLock:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-l.done:
+		return net.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		l.releaseOperationLock()
+		return err
+	}
+	l.lock.Lock()
+	closed := l.isClosed
+	l.lock.Unlock()
+	if closed {
+		l.releaseOperationLock()
+		return net.ErrClosed
+	}
+	return nil
+}
+
+func (l *Listener) releaseOperationLock() {
+	l.operationLock <- struct{}{}
 }
 
 // Listen starts listening for notifications on a channel. Calls to this
@@ -566,76 +736,110 @@ func (l *Listener) NotificationChannel() <-chan *Notification {
 //
 // The channel name is case-sensitive.
 func (l *Listener) Listen(channel string) error {
-	l.operationLock.Lock()
+	return l.ListenContext(context.Background(), channel)
+}
 
-	l.lock.Lock()
-	if l.isClosed {
+// ListenContext is like Listen, but ctx bounds waiting to send LISTEN, receive
+// its acknowledgement, or obtain a replacement connection. If ctx is canceled
+// while a query is in flight, the dedicated connection is discarded and the
+// Listener reconnects before it is used again.
+//
+// As with other context-aware database operations, cancellation can race with
+// completion. A nil return means the acknowledgement was received. A context
+// error means the caller cannot know whether the request took effect before
+// the connection was discarded.
+func (l *Listener) ListenContext(ctx context.Context, channel string) error {
+	for {
+		if err := l.acquireOperationLock(ctx); err != nil {
+			return err
+		}
+
+		l.lock.Lock()
+		if l.isClosed {
+			l.lock.Unlock()
+			l.releaseOperationLock()
+			return net.ErrClosed
+		}
+
+		// The server allows LISTEN on a channel which is already open, but
+		// reporting this catches mistakes in application logic.
+		if _, exists := l.channels[channel]; exists {
+			l.lock.Unlock()
+			l.releaseOperationLock()
+			return ErrChannelAlreadyOpen
+		}
+		cn := l.cn
 		l.lock.Unlock()
-		l.operationLock.Unlock()
-		return net.ErrClosed
-	}
 
-	// The server allows you to issue a LISTEN on a channel which is already
-	// open, but it seems useful to be able to detect this case to spot for
-	// mistakes in application logic. If the application genuinely does't care,
-	// it can check the exported error and ignore it.
-	_, exists := l.channels[channel]
-	if exists {
+		if cn == nil {
+			l.releaseOperationLock()
+			if err := l.waitForConnectionContext(ctx, nil); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// Record desired state only after PostgreSQL acknowledges LISTEN. If
+		// the connection fails first, wait for its replacement and retry; this
+		// prevents a canceled caller from creating a future subscription.
+		responded, err := cn.ListenContext(ctx, channel)
+		l.lock.Lock()
+		if l.isClosed {
+			l.lock.Unlock()
+			l.releaseOperationLock()
+			return net.ErrClosed
+		}
+		if responded {
+			if err != nil {
+				l.lock.Unlock()
+				l.releaseOperationLock()
+				return err
+			}
+			l.channels[channel] = struct{}{}
+			l.lock.Unlock()
+			l.releaseOperationLock()
+			return nil
+		}
 		l.lock.Unlock()
-		l.operationLock.Unlock()
-		return ErrChannelAlreadyOpen
-	}
+		l.releaseOperationLock()
 
-	cn := l.cn
-	if cn == nil {
-		l.channels[channel] = struct{}{}
-		l.lock.Unlock()
-		l.operationLock.Unlock()
-		return l.waitForConnection(nil)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if err := l.waitForConnectionContext(ctx, cn); err != nil {
+			return err
+		}
 	}
-	l.lock.Unlock()
-
-	// If resp is true but error is set then the query was executed on the
-	// remote server but resulted in an error. This should be relatively
-	// rare, so it's fine if we just pass the error to our caller.
-	// If resp is false then we could not complete the query on the remote
-	// server and our underlying connection is about to go away, so we only
-	// add relname to l.channels, and wait for resync() to take care of the
-	// rest.
-	resp, err := cn.Listen(channel)
-
-	l.lock.Lock()
-	if l.isClosed {
-		l.lock.Unlock()
-		l.operationLock.Unlock()
-		return net.ErrClosed
-	}
-	if resp && err != nil {
-		l.lock.Unlock()
-		l.operationLock.Unlock()
-		return err
-	}
-	l.channels[channel] = struct{}{}
-	l.lock.Unlock()
-	l.operationLock.Unlock()
-
-	if !resp {
-		return l.waitForConnection(cn)
-	}
-	return nil
 }
 
 // waitForConnection waits until old has been replaced by a live connection.
 // Callers must not hold operationLock while waiting: reconnect needs it in
 // order to synchronize the desired channel set with the new connection.
 func (l *Listener) waitForConnection(old *ListenerConn) error {
+	return l.waitForConnectionContext(context.Background(), old)
+}
+
+func (l *Listener) waitForConnectionContext(ctx context.Context, old *ListenerConn) error {
+	stopWake := func() bool { return true }
+	if ctx.Done() != nil {
+		stopWake = context.AfterFunc(ctx, func() {
+			l.lock.Lock()
+			l.reconnectCond.Broadcast()
+			l.lock.Unlock()
+		})
+	}
+	defer stopWake()
+
 	l.lock.Lock()
 	defer l.lock.Unlock()
-	for !l.isClosed && (l.cn == nil || l.cn == old) {
+	for !l.isClosed && ctx.Err() == nil && (l.cn == nil || l.cn == old) {
 		l.reconnectCond.Wait()
 	}
 	if l.isClosed {
 		return net.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -648,8 +852,17 @@ func (l *Listener) waitForConnection(old *ListenerConn) error {
 //
 // The channel name is case-sensitive.
 func (l *Listener) Unlisten(channel string) error {
-	l.operationLock.Lock()
-	defer l.operationLock.Unlock()
+	return l.UnlistenContext(context.Background(), channel)
+}
+
+// UnlistenContext is like Unlisten, but ctx bounds waiting to send UNLISTEN
+// and receive its acknowledgement. Canceling an in-flight request discards the
+// dedicated connection so it can be resynchronized safely.
+func (l *Listener) UnlistenContext(ctx context.Context, channel string) error {
+	if err := l.acquireOperationLock(ctx); err != nil {
+		return err
+	}
+	defer l.releaseOperationLock()
 
 	l.lock.Lock()
 	if l.isClosed {
@@ -677,12 +890,18 @@ func (l *Listener) Unlisten(channel string) error {
 	// Similarly to Listen (see comment there), the caller should only be
 	// bothered with an error if it came from the backend as a response to
 	// our query.
-	resp, err := cn.Unlisten(channel)
+	resp, err := cn.UnlistenContext(ctx, channel)
 
 	l.lock.Lock()
 	if l.isClosed {
 		l.lock.Unlock()
 		return net.ErrClosed
+	}
+	if !resp {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			l.lock.Unlock()
+			return ctxErr
+		}
 	}
 	if resp && err != nil {
 		l.lock.Unlock()
@@ -698,8 +917,17 @@ func (l *Listener) Unlisten(channel string) error {
 // still get notifications for any of the deleted channels even after
 // UnlistenAll has returned.
 func (l *Listener) UnlistenAll() error {
-	l.operationLock.Lock()
-	defer l.operationLock.Unlock()
+	return l.UnlistenAllContext(context.Background())
+}
+
+// UnlistenAllContext is like UnlistenAll, but ctx bounds waiting to send
+// UNLISTEN * and receive its acknowledgement. Canceling an in-flight request
+// discards the dedicated connection so it can be resynchronized safely.
+func (l *Listener) UnlistenAllContext(ctx context.Context) error {
+	if err := l.acquireOperationLock(ctx); err != nil {
+		return err
+	}
+	defer l.releaseOperationLock()
 
 	l.lock.Lock()
 	if l.isClosed {
@@ -719,12 +947,18 @@ func (l *Listener) UnlistenAll() error {
 	// Similarly to Listen (see comment in that function), the caller
 	// should only be bothered with an error if it came from the backend as
 	// a response to our query.
-	gotResponse, err := cn.UnlistenAll()
+	gotResponse, err := cn.UnlistenAllContext(ctx)
 
 	l.lock.Lock()
 	if l.isClosed {
 		l.lock.Unlock()
 		return net.ErrClosed
+	}
+	if !gotResponse {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			l.lock.Unlock()
+			return ctxErr
+		}
 	}
 	if gotResponse && err != nil {
 		l.lock.Unlock()
@@ -738,8 +972,17 @@ func (l *Listener) UnlistenAll() error {
 // Ping the remote server to make sure it's alive. Non-nil return value means
 // that there is no active connection.
 func (l *Listener) Ping() error {
-	l.operationLock.Lock()
-	defer l.operationLock.Unlock()
+	return l.PingContext(context.Background())
+}
+
+// PingContext pings the remote server and bounds both the network write and the
+// response wait with ctx. Canceling an in-flight ping discards the dedicated
+// connection; Listener will reconnect automatically.
+func (l *Listener) PingContext(ctx context.Context) error {
+	if err := l.acquireOperationLock(ctx); err != nil {
+		return err
+	}
+	defer l.releaseOperationLock()
 
 	l.lock.Lock()
 	if l.isClosed {
@@ -752,12 +995,15 @@ func (l *Listener) Ping() error {
 		return errors.New("no connection")
 	}
 
-	err := cn.Ping()
+	err := cn.PingContext(ctx)
 	l.lock.Lock()
 	closed := l.isClosed
 	l.lock.Unlock()
 	if closed {
 		return net.ErrClosed
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
 	}
 	return err
 }
@@ -796,7 +1042,7 @@ func (l *Listener) resync(ctx context.Context, cn *ListenerConn, notificationCha
 		for _, channel := range channels {
 			// If we got a response, return that error to our caller as it's
 			// going to be more descriptive than cn.Err().
-			gotResponse, err := cn.Listen(channel)
+			gotResponse, err := cn.ListenContext(ctx, channel)
 			if gotResponse && err != nil {
 				doneChan <- err
 				return
@@ -888,11 +1134,27 @@ func (l *Listener) connect() error {
 	// Freeze changes to the desired channel set between taking the snapshot and
 	// publishing the resynchronized connection. Public operations may still be
 	// interrupted by Close because Close does not acquire operationLock.
-	l.operationLock.Lock()
+	if err = l.acquireOperationLock(ctx); err != nil {
+		l.lock.Lock()
+		if l.connectAttempt == attempt {
+			if l.pendingCN == cn {
+				l.pendingCN = nil
+			}
+			l.connectCancel = nil
+		}
+		closed := l.isClosed
+		l.lock.Unlock()
+		cancel()
+		_ = cn.Close()
+		if closed {
+			return net.ErrClosed
+		}
+		return err
+	}
 	l.lock.Lock()
 	if l.isClosed || l.connectAttempt != attempt || l.pendingCN != cn {
 		l.lock.Unlock()
-		l.operationLock.Unlock()
+		l.releaseOperationLock()
 		cancel()
 		_ = cn.Close()
 		return net.ErrClosed
@@ -913,7 +1175,7 @@ func (l *Listener) connect() error {
 			l.connNotificationChan = notificationChan
 			l.reconnectCond.Broadcast()
 			l.lock.Unlock()
-			l.operationLock.Unlock()
+			l.releaseOperationLock()
 			cancel()
 			return nil
 		}
@@ -929,7 +1191,7 @@ func (l *Listener) connect() error {
 	}
 	closed := l.isClosed
 	l.lock.Unlock()
-	l.operationLock.Unlock()
+	l.releaseOperationLock()
 	cancel()
 	_ = cn.Close()
 	if closed {
@@ -980,8 +1242,53 @@ func (l *Listener) Close() error {
 }
 
 func (l *Listener) emitEvent(event ListenerEventType, err error) {
-	if l.eventCallback != nil {
-		l.eventCallback(event, err)
+	if l.eventCallback == nil {
+		return
+	}
+	select {
+	case <-l.done:
+		return
+	default:
+	}
+
+	l.eventLock.Lock()
+	l.eventQueue = append(l.eventQueue, listenerEvent{typ: event, err: err})
+	l.eventLock.Unlock()
+	select {
+	case l.eventWake <- struct{}{}:
+	default:
+	}
+}
+
+func (l *Listener) eventDispatcher() {
+	for {
+		select {
+		case <-l.eventWake:
+		case <-l.done:
+			return
+		}
+
+		for {
+			select {
+			case <-l.done:
+				return
+			default:
+			}
+
+			l.eventLock.Lock()
+			if len(l.eventQueue) == 0 {
+				l.eventLock.Unlock()
+				break
+			}
+			event := l.eventQueue[0]
+			l.eventQueue[0] = listenerEvent{}
+			l.eventQueue = l.eventQueue[1:]
+			if len(l.eventQueue) == 0 {
+				l.eventQueue = nil
+			}
+			l.eventLock.Unlock()
+			l.eventCallback(event.typ, event.err)
+		}
 	}
 }
 
@@ -1007,14 +1314,70 @@ func (l *Listener) waitReconnect(d time.Duration) bool {
 	}
 }
 
-// sendNotification forwards a notification without allowing a slow consumer
-// to prevent Close from shutting down the listener.
+// sendNotification places a notification on a finite internal delivery queue.
+// A slow public Notify consumer must not stop protocol processing or reconnects.
+// When the queue is full, the notification is dropped and notificationLost
+// causes the dispatcher to deliver a coalesced nil loss marker when possible.
 func (l *Listener) sendNotification(notification *Notification) bool {
 	select {
-	case l.Notify <- notification:
+	case <-l.done:
+		return false
+	default:
+	}
+	// Once a gap has occurred, drop subsequent notifications until the
+	// dispatcher claims the loss marker. That marker is an ordering barrier:
+	// retained pre-gap notifications are delivered before it, and accepted
+	// post-gap notifications after it.
+	if l.notificationLost.Load() {
+		return true
+	}
+
+	select {
+	case l.notificationQueue <- notification:
 		return true
 	case <-l.done:
 		return false
+	default:
+		l.notificationLost.Store(true)
+		return true
+	}
+}
+
+func (l *Listener) notificationDispatcher() {
+	defer close(l.Notify)
+	for {
+		// Drain the retained prefix before reporting a gap. A non-blocking
+		// receive is needed here so loss markers cannot overtake queued data.
+		select {
+		case notification := <-l.notificationQueue:
+			select {
+			case l.Notify <- notification:
+			case <-l.done:
+				return
+			}
+			continue
+		default:
+		}
+
+		if l.notificationLost.CompareAndSwap(true, false) {
+			select {
+			case l.Notify <- nil:
+				continue
+			case <-l.done:
+				return
+			}
+		}
+
+		select {
+		case notification := <-l.notificationQueue:
+			select {
+			case l.Notify <- notification:
+			case <-l.done:
+				return
+			}
+		case <-l.done:
+			return
+		}
 	}
 }
 
@@ -1039,9 +1402,10 @@ func (l *Listener) listenerConnLoop() {
 			if !l.waitReconnect(reconnectInterval) {
 				return
 			}
-			reconnectInterval *= 2
-			if reconnectInterval > l.maxReconnectInterval {
+			if reconnectInterval > l.maxReconnectInterval/2 {
 				reconnectInterval = l.maxReconnectInterval
+			} else {
+				reconnectInterval *= 2
 			}
 		}
 
@@ -1101,8 +1465,17 @@ func (l *Listener) listenerMain() {
 	if l.done == nil {
 		l.done = make(chan struct{})
 	}
+	if l.notificationQueue == nil {
+		l.notificationQueue = make(chan *Notification, listenerChannelCapacity)
+	}
+	if l.eventCallback != nil && l.eventWake == nil {
+		l.eventWake = make(chan struct{}, 1)
+	}
 	l.lock.Unlock()
 
-	defer close(l.Notify)
+	if l.eventCallback != nil {
+		go l.eventDispatcher()
+	}
+	go l.notificationDispatcher()
 	l.listenerConnLoop()
 }

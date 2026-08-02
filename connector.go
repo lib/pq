@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"math/rand"
 	"net"
 	"net/netip"
@@ -269,7 +270,13 @@ func NewConnectorConfig(cfg Config) (*Connector, error) {
 // Connect returns a connection to the database using the fixed configuration of
 // this Connector. The context bounds dialing, TLS negotiation, startup, and
 // target-session checks.
-func (c *Connector) Connect(ctx context.Context) (driver.Conn, error) { return c.open(ctx) }
+func (c *Connector) Connect(ctx context.Context) (driver.Conn, error) {
+	cn, err := c.open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return cn, nil
+}
 
 // Dialer allows change the dialer used to open connections.
 func (c *Connector) Dialer(dialer Dialer) { c.dialer = dialer }
@@ -1102,7 +1109,11 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 					return fmt.Errorf(f+"%w", k, err)
 				}
 				if connectTimeout {
-					n = int64(time.Duration(n) * time.Second)
+					seconds := int64(time.Second)
+					if n > math.MaxInt64/seconds || n < math.MinInt64/seconds {
+						return fmt.Errorf(f+"value overflows time.Duration", k)
+					}
+					n *= seconds
 				}
 				rv.SetInt(n)
 			case reflect.Uint16:

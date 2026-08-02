@@ -54,8 +54,9 @@ const cancelRequestTimeout = 10 * time.Second
 
 // Compile time validation that our types implement the expected interfaces
 var (
-	_ driver.Driver = Driver{}
-	//_ driver.DriverContext                  = Driver{} // TODO: https://github.com/lib/pq/pull/900
+	_ driver.Driver                         = Driver{}
+	_ driver.DriverContext                  = (*Driver)(nil)
+	_ driver.Connector                      = (*driverConnector)(nil)
 	_ driver.Connector                      = (*Connector)(nil)
 	_ driver.Conn                           = (*conn)(nil)
 	_ driver.ConnBeginTx                    = (*conn)(nil)
@@ -97,6 +98,40 @@ type Driver struct{}
 // library.
 func (d Driver) Open(name string) (driver.Conn, error) {
 	return Open(name)
+}
+
+// OpenConnector returns a connector whose Connect method receives the context
+// supplied by database/sql. This lets cancellation interrupt startup as well
+// as queries on established connections.
+func (d *Driver) OpenConnector(name string) (driver.Connector, error) {
+	return &driverConnector{driver: d, name: name}, nil
+}
+
+// driverConnector preserves Driver.Open's historical behavior of deferring
+// data source parsing until each physical connection attempt rather than doing
+// it during sql.Open. Rebuilding the Connector also preserves the historical
+// behavior of re-reading environment and service-file configuration.
+type driverConnector struct {
+	driver *Driver
+	name   string
+}
+
+func (c *driverConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	connector, err := NewConnector(c.name)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	return connector.Connect(ctx)
+}
+
+func (c *driverConnector) Driver() driver.Driver {
+	return c.driver
 }
 
 // Parameters sent by PostgreSQL on startup.
@@ -177,6 +212,7 @@ type conn struct {
 	c            net.Conn
 	buf          *bufio.Reader
 	closeTimeout time.Duration
+	startupPhase bool
 	namei        int
 	scratch      [512]byte
 	txnStatus    transactionStatus
@@ -259,7 +295,11 @@ func DialOpen(d Dialer, dsn string) (_ driver.Conn, err error) {
 		return nil, err
 	}
 	c.Dialer(d)
-	return c.open(context.Background())
+	cn, err := c.open(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return cn, nil
 }
 
 func (c *Connector) open(ctx context.Context) (*conn, error) {
@@ -298,12 +338,19 @@ restartAll:
 
 		var err error
 		cn.c, err = dial(ctx, c.dialer, cn.cfg)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if cn.c != nil {
+				_ = cn.c.Close()
+			}
+			return nil, ctxErr
+		}
 		if app(err, cfg) {
 			continue
 		}
 		handshakeConn := cn.c
 		stopContext := context.AfterFunc(ctx, func() {
 			_ = handshakeConn.SetDeadline(time.Now())
+			_ = handshakeConn.Close()
 		})
 		closeHandshake := func() {
 			stopContext()
@@ -355,6 +402,11 @@ restartAll:
 			closeHandshake()
 			continue
 		}
+		err = contextError(cn.err.get())
+		if app(err, cfg) {
+			closeHandshake()
+			continue
+		}
 
 		stopContext()
 		if err = contextError(nil); app(err, cfg) {
@@ -373,7 +425,7 @@ restartAll:
 
 	// target_session_attrs=prefer-standby is treated as standby in checkTSA; we
 	// ran out of hosts so none are on standby. Clear the setting and try again.
-	if c.cfg.TargetSessionAttrs == TargetSessionAttrsPreferStandby {
+	if tsa == TargetSessionAttrsPreferStandby {
 		tsa = TargetSessionAttrsAny
 		goto restartAll
 	}
@@ -386,12 +438,16 @@ restartAll:
 	return nil, fmt.Errorf("pq: could not connect to any of the hosts:\n%w", errors.Join(errs...))
 }
 
-func (cn *conn) getBool(query string) (bool, error) {
+func (cn *conn) getBool(query string) (value bool, err error) {
 	res, err := cn.simpleQuery(query)
 	if err != nil {
 		return false, err
 	}
-	defer res.Close()
+	defer func() {
+		if closeErr := res.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 
 	v := make([]driver.Value, 1)
 	err = res.Next(v)
@@ -405,10 +461,6 @@ func (cn *conn) getBool(query string) (bool, error) {
 	case bool:
 		return vv, nil
 	case string:
-		vv, ok := v[0].(string)
-		if !ok {
-			return false, err
-		}
 		return vv == "on", nil
 	}
 }
@@ -440,13 +492,6 @@ func (cn *conn) checkTSA(tsa TargetSessionAttrs) error {
 		readonly, err := getro()
 		if err != nil {
 			return err
-		}
-		if !cn.parameterStatus.defaultTransactionReadOnly.Valid {
-			var err error
-			readonly, err = cn.getBool("show transaction_read_only")
-			if err != nil {
-				return err
-			}
 		}
 		switch {
 		case tsa == TargetSessionAttrsReadOnly && !readonly:
@@ -712,6 +757,7 @@ func (cn *conn) rollback() (err error) {
 		return err
 	}
 	if commandTag != "ROLLBACK" {
+		cn.err.set(driver.ErrBadConn)
 		return fmt.Errorf("unexpected command tag %s", commandTag)
 	}
 	return cn.checkIsInTransaction(false)
@@ -1174,18 +1220,58 @@ func (cn *conn) Ping(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if err := cn.err.get(); err != nil {
+		return err
+	}
 	defer cn.watchCancel(ctx, false)()
 	rows, err := cn.simpleQuery(";")
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		cn.err.set(driver.ErrBadConn)
 		return driver.ErrBadConn
 	}
-	_ = rows.Close()
-	return nil
+	if err = rows.Close(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		cn.err.set(driver.ErrBadConn)
+		return driver.ErrBadConn
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return cn.err.get()
 }
 
 type safeRetryError struct{ Err error }
 
 func (se *safeRetryError) Error() string { return se.Err.Error() }
+func (se *safeRetryError) Unwrap() error { return se.Err }
+
+// write sends one complete frontend message. Once any prefix has been written,
+// retrying the operation could splice a second message into the protocol
+// stream, so every incomplete positive-count write poisons the connection.
+// A zero-count failure is safe for database/sql to retry on a new connection.
+func (cn *conn) write(p []byte) error {
+	n, err := cn.c.Write(p)
+	if n == len(p) && err == nil {
+		return nil
+	}
+	if n < 0 || n > len(p) {
+		cn.err.set(driver.ErrBadConn)
+		return fmt.Errorf("pq: invalid write count %d for %d-byte message", n, len(p))
+	}
+	if err == nil {
+		err = io.ErrShortWrite
+	}
+	if n == 0 {
+		return &safeRetryError{Err: err}
+	}
+	cn.err.set(driver.ErrBadConn)
+	return err
+}
 
 func (cn *conn) send(m *writeBuf) error {
 	if debugProto {
@@ -1202,11 +1288,7 @@ func (cn *conn) send(m *writeBuf) error {
 		}
 	}
 
-	n, err := cn.c.Write(m.wrap())
-	if err != nil && n == 0 {
-		err = &safeRetryError{Err: err}
-	}
-	return err
+	return cn.write(m.wrap())
 }
 
 func (cn *conn) sendStartupPacket(m *writeBuf) error {
@@ -1222,8 +1304,7 @@ func (cn *conn) sendStartupPacket(m *writeBuf) error {
 		}
 		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n", name, int(binary.BigEndian.Uint32(w[1:5]))-4, payload)
 	}
-	_, err := cn.c.Write((m.wrap())[1:])
-	return err
+	return cn.write((m.wrap())[1:])
 }
 
 func debugStartupPayload(payload []byte) []byte {
@@ -1269,8 +1350,7 @@ func (cn *conn) sendSimpleMessage(typ proto.RequestCode) error {
 	if debugProto {
 		fmt.Fprintf(os.Stderr, "CLIENT → %-20s %5d  %q\n", typ, 0, []byte{})
 	}
-	_, err := cn.c.Write([]byte{byte(typ), '\x00', '\x00', '\x00', '\x04'})
-	return err
+	return cn.write([]byte{byte(typ), '\x00', '\x00', '\x00', '\x04'})
 }
 
 // saveMessage memorizes a message and its buffer in the conn struct.
@@ -1329,6 +1409,9 @@ func (cn *conn) recvMessage(r *readBuf) (proto.ResponseCode, error) {
 		return 0, cn.badBackendMessage(fmt.Errorf("pq: lost synchronization with server: got message type %q, invalid length %d", t, wireLength))
 	}
 	payloadLength := wireLength - 4
+	if cn.startupPhase && payloadLength > proto.MaxMsgLen {
+		return 0, cn.badBackendMessage(fmt.Errorf("pq: lost synchronization with server during startup: got message type %q, length %d", t, payloadLength))
+	}
 	if t == proto.ParameterDescription && payloadLength > proto.MaxParameterDescriptionLen {
 		return 0, cn.badBackendMessage(fmt.Errorf("pq: lost synchronization with server: got ParameterDescription length %d, maximum is %d", payloadLength, proto.MaxParameterDescriptionLen))
 	}
@@ -1838,6 +1921,9 @@ func (cn *conn) ssl(cfg Config, mode SSLMode) error {
 }
 
 func (cn *conn) startup(cfg Config) error {
+	cn.startupPhase = true
+	defer func() { cn.startupPhase = false }()
+
 	w := cn.writeBuf(0)
 	// Send maximum protocol version in startup; if the server doesn't support
 	// this version it responds with NegotiateProtocolVersion and the maximum
@@ -1879,7 +1965,7 @@ func (cn *conn) startup(cfg Config) error {
 		return err
 	}
 
-	var didauth bool
+	var didauth, authOK bool
 	for {
 		t, r, err := cn.recvError()
 		if err != nil {
@@ -1897,8 +1983,11 @@ func (cn *conn) startup(cfg Config) error {
 			cn.processParameterStatus(r)
 		case proto.AuthenticationRequest:
 			code := proto.AuthCode(r.int32())
-			if code != proto.AuthReqOk {
+			if code == proto.AuthReqOk {
+				authOK = true
+			} else {
 				didauth = true
+				authOK = false
 			}
 			err := cn.auth(code, r, cfg)
 			if err != nil {
@@ -1913,6 +2002,9 @@ func (cn *conn) startup(cfg Config) error {
 		case proto.ReadyForQuery:
 			if cn.gss != nil && !cn.gssComplete {
 				return errors.New("pq: GSSAPI mutual authentication did not complete")
+			}
+			if didauth && !authOK {
+				return errors.New("pq: server completed startup without AuthenticationOk")
 			}
 			if !didauth && !cn.cfg.RequireAuth.allows(RequireAuthNone) {
 				return fmt.Errorf("pq: authentication method requirement %q failed: server did not perform any authentication", cn.cfg.RequireAuth)
