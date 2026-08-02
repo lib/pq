@@ -74,7 +74,7 @@ func TestProtocolRegressionMalformedFrames(t *testing.T) {
 			wire := newRegressionScriptConn(tt.input)
 			cn := &conn{c: wire, buf: bufio.NewReader(wire)}
 
-			err, panicValue := regressionCallWithoutPanic(func() error {
+			panicValue, err := regressionCallWithoutPanic(func() error {
 				return tt.call(cn)
 			})
 			if panicValue != nil {
@@ -476,7 +476,7 @@ func TestProtocolRegressionLegacyDriverMethodsDoNotPanic(t *testing.T) {
 			cn := new(conn)
 			cn.err.set(errors.New("deliberately unusable test connection"))
 			st := &stmt{cn: cn}
-			_, panicValue := regressionCallWithoutPanic(func() error {
+			panicValue, _ := regressionCallWithoutPanic(func() error {
 				return tt.call(cn, st)
 			})
 			if panicValue != nil {
@@ -552,10 +552,10 @@ func regressionBackendFrame(code proto.ResponseCode, payload []byte) []byte {
 	return append(frame, payload...)
 }
 
-func regressionCallWithoutPanic(fn func() error) (err error, panicValue any) {
+func regressionCallWithoutPanic(fn func() error) (panicValue any, err error) {
 	defer func() { panicValue = recover() }()
 	err = fn()
-	return err, nil
+	return nil, err
 }
 
 func regressionAsync(fn func() error) <-chan error {
