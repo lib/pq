@@ -34,6 +34,13 @@ func TestRegressionSCRAMRejectsNonPositiveIterations(t *testing.T) {
 	}
 }
 
+func TestRegressionSCRAMAcceptsShortPositiveIterationCount(t *testing.T) {
+	c, done := regressionSCRAMClient(sha256.New, "password", "1")
+	if done || c.Err() != nil {
+		t.Fatalf("positive server iteration count was rejected: %v", c.Err())
+	}
+}
+
 type regressionHashBudgetExceeded struct{}
 
 type regressionBudgetHash struct {
