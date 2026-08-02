@@ -295,6 +295,16 @@ func TestSecurityRegressionExplicitDSNOverridesService(t *testing.T) {
 	}
 }
 
+func TestSecurityRegressionPortListRequiresMatchingHostCount(t *testing.T) {
+	_, err := newConfig(
+		"host=one.example port=5432,6543 sslmode=disable",
+		[]string{"PGUSER=test"},
+	)
+	if err == nil {
+		t.Fatal("one host with multiple ports was accepted and the extra port was silently discarded")
+	}
+}
+
 func TestSecurityRegressionVerifyCARequiresRootCertificate(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	cfg, err := newConfig("host=example.test sslmode=verify-ca sslrootcert=''", []string{"PGUSER=test"})
