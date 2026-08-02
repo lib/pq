@@ -138,7 +138,7 @@ func TestProtocolRegressionPreProtocolErrorIsBounded(t *testing.T) {
 	if err := cn.err.get(); err != driver.ErrBadConn {
 		t.Errorf("pre-protocol backend error left connection reusable: %v", err)
 	}
-	if remaining := wire.reader.Len(); remaining < 100 {
+	if remaining := wire.reader.Len() + cn.buf.Buffered(); remaining < 100 {
 		t.Errorf("pre-protocol error consumed unbounded input; only %d bytes remain", remaining)
 	}
 }
@@ -190,6 +190,25 @@ func TestProtocolRegressionCancellationFailureUnblocksQuery(t *testing.T) {
 				_ = client.Close()
 			})
 		})
+	}
+}
+
+func TestProtocolRegressionCancelRequestBoundsLegacyDialer(t *testing.T) {
+	timeoutUsed := make(chan time.Duration, 1)
+	cn := &conn{
+		dialer: protocolLifecycleTimeoutDialer{timeoutUsed: timeoutUsed},
+		cfg:    Config{Host: "cancel.invalid", Port: 1, SSLMode: SSLModeDisable},
+	}
+	if err := cn.sendCancelRequest(); err == nil {
+		t.Fatal("CancelRequest unexpectedly succeeded")
+	}
+	select {
+	case timeout := <-timeoutUsed:
+		if timeout <= 0 || timeout > 10*time.Second {
+			t.Errorf("CancelRequest dial timeout = %s; want a positive bound no greater than 10s", timeout)
+		}
+	case <-time.After(regressionOperationTimeout):
+		t.Fatal("CancelRequest did not use the bounded legacy DialTimeout method")
 	}
 }
 
@@ -646,6 +665,20 @@ type protocolLifecycleCancelDialer struct {
 
 type protocolLifecycleFixedDialer struct {
 	conn net.Conn
+}
+
+type protocolLifecycleTimeoutDialer struct {
+	timeoutUsed chan<- time.Duration
+}
+
+func (d protocolLifecycleTimeoutDialer) Dial(string, string) (net.Conn, error) {
+	d.timeoutUsed <- 0
+	return nil, errors.New("unbounded Dial called")
+}
+
+func (d protocolLifecycleTimeoutDialer) DialTimeout(_ string, _ string, timeout time.Duration) (net.Conn, error) {
+	d.timeoutUsed <- timeout
+	return nil, errors.New("bounded DialTimeout called")
 }
 
 func (d protocolLifecycleFixedDialer) Dial(string, string) (net.Conn, error) {
