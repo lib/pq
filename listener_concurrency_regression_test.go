@@ -295,6 +295,84 @@ func TestListenerConcurrencyCloseEmitsOneDisconnectedEvent(t *testing.T) {
 	}
 }
 
+func TestListenerConcurrencyCloseAfterDroppedDisconnect(t *testing.T) {
+	callbackStarted := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	dispatcherDone := make(chan struct{})
+	events := make(chan listenerEvent, listenerEventQueueCapacity+2)
+	var releaseOnce sync.Once
+
+	listener := &Listener{
+		done:      make(chan struct{}),
+		eventWake: make(chan struct{}, 1),
+		eventCallback: func(event ListenerEventType, err error) {
+			events <- listenerEvent{typ: event, err: err}
+			if event == ListenerEventConnected {
+				close(callbackStarted)
+				<-releaseCallback
+			}
+		},
+	}
+	listener.reconnectCond = sync.NewCond(&listener.lock)
+	go func() {
+		listener.eventDispatcher()
+		close(dispatcherDone)
+	}()
+	t.Cleanup(func() {
+		_ = listener.Close()
+		releaseOnce.Do(func() { close(releaseCallback) })
+		listenerConcurrencyAwaitSignal(t, dispatcherDone, "the event dispatcher to stop")
+	})
+
+	listener.emitEvent(ListenerEventConnected, nil)
+	listenerConcurrencyAwaitSignal(t, callbackStarted, "the initial callback to block")
+	for range listenerEventQueueCapacity - 1 {
+		listener.emitEvent(ListenerEventDisconnected, errors.New("intentional churn"))
+		listener.emitEvent(ListenerEventReconnected, nil)
+	}
+
+	listener.eventLock.Lock()
+	if len(listener.eventQueue) != listenerEventQueueCapacity-1 {
+		t.Errorf("churn retained %d events; want %d", len(listener.eventQueue), listenerEventQueueCapacity-1)
+	}
+	for _, event := range listener.eventQueue {
+		if event.typ != ListenerEventReconnected || event.barrier == nil {
+			t.Errorf("saturated queue contains unprotected event %+v", event)
+			break
+		}
+	}
+	listener.eventLock.Unlock()
+
+	// No protected reconnect can be evicted, so this transition is dropped.
+	// Close must nevertheless preserve the state of the retained callback stream
+	// and append its terminal Disconnected callback.
+	listener.emitEvent(ListenerEventDisconnected, errors.New("dropped disconnect"))
+	if err := listener.Close(); err != nil {
+		t.Fatalf("Listener.Close: %v", err)
+	}
+	releaseOnce.Do(func() { close(releaseCallback) })
+	listenerConcurrencyAwaitSignal(t, dispatcherDone, "the event dispatcher to stop")
+	close(events)
+
+	last := listenerEvent{typ: ListenerEventType(-1)}
+	disconnected := 0
+	for event := range events {
+		last = event
+		if event.typ == ListenerEventDisconnected {
+			disconnected++
+		}
+	}
+	if last.typ != ListenerEventDisconnected {
+		t.Errorf("retained callback stream ended in %s; want %s", last.typ, ListenerEventDisconnected)
+	}
+	if disconnected != 1 {
+		t.Errorf("Close delivered %d Disconnected callbacks; want exactly 1", disconnected)
+	}
+	if last.err != errListenerConnClosed {
+		t.Errorf("terminal Disconnected callback error = %v; want %v", last.err, errListenerConnClosed)
+	}
+}
+
 func TestListenerConcurrencyReconnectMarkerFollowsCallback(t *testing.T) {
 	firstClient, firstServer := net.Pipe()
 	secondClient, secondServer := net.Pipe()

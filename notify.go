@@ -1374,13 +1374,6 @@ func (l *Listener) emitEvent(event ListenerEventType, err error) *listenerEventB
 		return nil
 	}
 
-	switch event {
-	case ListenerEventConnected, ListenerEventReconnected:
-		l.eventConnected = true
-	case ListenerEventDisconnected:
-		l.eventConnected = false
-	}
-
 	// Consecutive failures convey the same state; retain only the newest error.
 	if event == ListenerEventConnectionAttemptFailed && len(l.eventQueue) != 0 {
 		last := len(l.eventQueue) - 1
@@ -1419,6 +1412,14 @@ func (l *Listener) emitEvent(event ListenerEventType, err error) *listenerEventB
 	if !l.enqueueEventLocked(queued) {
 		l.eventLock.Unlock()
 		return nil
+	}
+	// Close consults this state after disconnect cleanup may have cleared cn, so
+	// only transitions retained in the callback stream may update it.
+	switch event {
+	case ListenerEventConnected, ListenerEventReconnected:
+		l.eventConnected = true
+	case ListenerEventDisconnected:
+		l.eventConnected = false
 	}
 	l.eventLock.Unlock()
 	l.wakeEventDispatcher()
