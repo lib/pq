@@ -25,8 +25,8 @@ import (
 	"github.com/lib/pq/internal/pqsql"
 	"github.com/lib/pq/internal/pqutil"
 	"github.com/lib/pq/internal/proto"
+	"github.com/lib/pq/internal/scram"
 	"github.com/lib/pq/oid"
-	"github.com/lib/pq/scram"
 )
 
 // Common error types
