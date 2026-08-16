@@ -32,6 +32,8 @@ type Client struct {
 	newHash func() hash.Hash
 	user    string
 	pass    string
+	minIter uint
+	maxIter uint
 	step    int
 	out     bytes.Buffer
 	err     error
@@ -48,7 +50,7 @@ type Client struct {
 //
 //	client := scram.NewClient(sha256.New, user, pass)
 func NewClient(newHash func() hash.Hash, user, pass string) *Client {
-	c := &Client{newHash: newHash, user: user, pass: pass}
+	c := &Client{newHash: newHash, user: user, pass: pass, minIter: 1000, maxIter: 10_000_000}
 	c.out.Grow(256)
 	c.authMsg.Grow(256)
 	return c
@@ -56,6 +58,13 @@ func NewClient(newHash func() hash.Hash, user, pass string) *Client {
 
 // Set client nonce for tests.
 func (c *Client) setNonce(nonce []byte) { c.clientNonce = nonce }
+
+// AcceptIterations sets the minimum number of iterations that we accept.
+//
+// The default is 1000 and 10_000_000.
+func (c *Client) AcceptIterations(minIter, maxIter uint) {
+	c.minIter, c.maxIter = minIter, maxIter
+}
 
 // Out returns the data to be sent to the server in the current step.
 func (c *Client) Out() []byte {
@@ -124,26 +133,32 @@ func (c *Client) stepServerFirst(in []byte) error {
 	if !bytes.HasPrefix(fields[1], []byte("s=")) || len(fields[1]) < 6 {
 		return fmt.Errorf("server sent an invalid SCRAM-SHA-256 salt: %q", fields[1])
 	}
-	if !bytes.HasPrefix(fields[2], []byte("i=")) || len(fields[2]) < 6 {
+	if !bytes.HasPrefix(fields[2], []byte("i=")) || len(fields[2]) < 3 {
 		return fmt.Errorf("server sent an invalid SCRAM-SHA-256 iteration count: %q", fields[2])
 	}
 
 	c.serverNonce = fields[0][2:]
 	if !bytes.HasPrefix(c.serverNonce, c.clientNonce) {
-		return fmt.Errorf("server SCRAM-SHA-256 nonce is not prefixed by client nonce: got %q, want %q+\"...\"", c.serverNonce, c.clientNonce)
+		return fmt.Errorf("server SCRAM-SHA-256 nonce is not prefixed by client nonce; have: %q", c.serverNonce)
 	}
 
 	salt := make([]byte, base64.StdEncoding.DecodedLen(len(fields[1][2:])))
 	n, err := base64.StdEncoding.Decode(salt, fields[1][2:])
 	if err != nil {
-		return fmt.Errorf("cannot decode SCRAM-SHA-256 salt sent by server: %q", fields[1])
+		return fmt.Errorf("decoding SCRAM-SHA-256 salt sent by server: %q: %w", fields[1], err)
 	}
 	salt = salt[:n]
-	iterCount, err := strconv.Atoi(string(fields[2][2:]))
-	if err != nil {
+	iterCount, err := strconv.ParseUint(string(fields[2][2:]), 10, 0)
+	if err != nil || iterCount <= 0 {
 		return fmt.Errorf("server sent an invalid SCRAM-SHA-256 iteration count: %q", fields[2])
 	}
-	c.saltPassword(salt, iterCount)
+	if uint(iterCount) < c.minIter {
+		return fmt.Errorf("server iteration count %d lower than minimum of %d ", iterCount, c.minIter)
+	}
+	if uint(iterCount) > c.maxIter {
+		return fmt.Errorf("server iteration count %d higher than maximum of %d ", iterCount, c.maxIter)
+	}
+	c.saltPassword(salt, uint(iterCount))
 
 	// Write client-final message.
 	c.authMsg.WriteString(",c=biws,r=")
@@ -173,14 +188,14 @@ func (c *Client) stepServerFinal(in []byte) error {
 	return nil
 }
 
-func (c *Client) saltPassword(salt []byte, iterCount int) {
+func (c *Client) saltPassword(salt []byte, iterCount uint) {
 	mac := hmac.New(c.newHash, []byte(c.pass))
 	mac.Write(salt)
 	mac.Write([]byte{0, 0, 0, 1})
 	ui := mac.Sum(nil)
 	hi := make([]byte, len(ui))
 	copy(hi, ui)
-	for i := 1; i < iterCount; i++ {
+	for i := uint(1); i < iterCount; i++ {
 		mac.Reset()
 		mac.Write(ui)
 		mac.Sum(ui[:0])

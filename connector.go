@@ -495,6 +495,16 @@ type Config struct {
 	// to this and sent to PostgreSQL during startup.
 	Runtime map[string]string `postgres:"-" env:"-"`
 
+	// ScramIterations sets the minimum and maximum SCRAM authentication
+	// iterations. The default is 1000 and 10_000_000.
+	//
+	// The default minimum may be raised to 4096 in a future release, which is
+	// the RFC 5802 recommended minimum default, and the PostgreSQL default
+	// value.
+	//
+	// This is a pq extension, not supported in libpq.
+	ScramIterations []uint `postgres:"pqgo_scram_iterations" env:"PQGOSCRAMITERATIONS"`
+
 	// Multi contains additional connection details. The first value is
 	// available in [Config.Host], [Config.Hostaddr], and [Config.Port], and
 	// additional ones (if any) are available here.
@@ -897,6 +907,7 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 			sslminprotocolversion = (tag == "postgres" && k == "ssl_min_protocol_version") || (tag == "env" && k == "PGSSLMINPROTOCOLVERSION")
 			sslmaxprotocolversion = (tag == "postgres" && k == "ssl_max_protocol_version") || (tag == "env" && k == "PGSSLMAXPROTOCOLVERSION")
 			requireauth           = (tag == "postgres" && k == "require_auth") || (tag == "env" && k == "PGREQUIREAUTH")
+			scramiter             = (tag == "postgres" && k == "pqgo_scram_iterations") || (tag == "env" && k == "PQGOSCRAMITERATIONS")
 		)
 		if k == "" || k == "-" {
 			continue
@@ -995,6 +1006,22 @@ func (cfg *Config) setFromTag(o map[string]string, tag string, service bool) err
 					}
 					rv.Set(reflect.ValueOf(s))
 				}
+				if scramiter {
+					vv := strings.Split(v, ",")
+					if len(vv) != 2 {
+						return fmt.Errorf(f+`requires two numbers as "min,max"`, k)
+					}
+
+					s := make([]uint, 2)
+					for i := range vv {
+						n, err := strconv.ParseUint(vv[i], 10, 0)
+						if err != nil {
+							return fmt.Errorf(f+`%w`, k, err)
+						}
+						s[i] = uint(n)
+					}
+					rv.Set(reflect.ValueOf(s))
+				}
 			case reflect.Int64:
 				n, err := strconv.ParseInt(v, 10, 64)
 				if err != nil {
@@ -1081,6 +1108,12 @@ func (cfg Config) tomap() map[string]string {
 			default:
 				if s, ok := rv.Interface().(fmt.Stringer); ok {
 					o[k] = s.String()
+				} else if rt.Type.Kind() == reflect.Slice {
+					s := make([]string, 0, 4)
+					for i := range rv.Len() {
+						s = append(s, strconv.FormatUint(rv.Index(i).Uint(), 10))
+					}
+					o[k] = strings.Join(s, ",")
 				} else {
 					o[k] = rv.String()
 				}

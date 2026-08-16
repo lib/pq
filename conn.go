@@ -1488,6 +1488,9 @@ func (cn *conn) auth(code proto.AuthCode, r *readBuf, cfg Config) error {
 			return fmt.Errorf("pq: authentication method requirement %q failed: server requested %q", cn.cfg.RequireAuth, RequireAuthScramSHA256)
 		}
 		sc := scram.NewClient(sha256.New, cfg.User, cfg.Password)
+		if len(cn.cfg.ScramIterations) == 2 {
+			sc.AcceptIterations(cn.cfg.ScramIterations[0], cn.cfg.ScramIterations[1])
+		}
 		sc.Step(nil)
 		if sc.Err() != nil {
 			return fmt.Errorf("pq: SCRAM-SHA-256 error: %w", sc.Err())

@@ -444,6 +444,17 @@ func TestNewConfig(t *testing.T) {
 		{"require_auth=!md5,!scram-sha-256", nil, "require_auth=!md5,!scram-sha-256", ""},
 		{"require_auth=md5,!password", nil, "", `negative require_auth method "!password" cannot be mixed with non-negative methods`},
 		{"require_auth=!md5,password", nil, "", `require_auth method "password" cannot be mixed with negative methods`},
+
+		// pqgo_scram_iterations
+		{"pqgo_scram_iterations=123,456", nil, "pqgo_scram_iterations=123,456", ``},
+		{"pqgo_scram_iterations=1,2", nil, "pqgo_scram_iterations=1,2", ``},
+		{"", []string{"PQGOSCRAMITERATIONS=123,456"}, "pqgo_scram_iterations=123,456", ``},
+		{"pqgo_scram_iterations=", nil, "", `pq: wrong value for "pqgo_scram_iterations": requires two numbers as "min,max"`},
+		{"pqgo_scram_iterations=123", nil, "", `pq: wrong value for "pqgo_scram_iterations": requires two numbers as "min,max"`},
+		{"pqgo_scram_iterations=123,xxx", nil, "", `pq: wrong value for "pqgo_scram_iterations": strconv.ParseUint: parsing "xxx": invalid syntax`},
+		{"pqgo_scram_iterations=123,-99", nil, "", `pq: wrong value for "pqgo_scram_iterations": strconv.ParseUint: parsing "-99": invalid syntax`},
+		{"pqgo_scram_iterations=123,", nil, "", `pq: wrong value for "pqgo_scram_iterations": strconv.ParseUint: parsing "": invalid syntax`},
+		{"pqgo_scram_iterations=,1", nil, "", `pq: wrong value for "pqgo_scram_iterations": strconv.ParseUint: parsing "": invalid syntax`},
 	}
 
 	t.Parallel()

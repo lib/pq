@@ -11,6 +11,10 @@ unreleased
 
 - Implement `require_auth` connection parameter ([#1310]).
 
+- Implement setting minimum and maximum SCRAM iteration count with
+  `pqgo_scram_iterations=min,max` and `$PQGOSCRAMITERATIONS=min,max`. The
+  default is 1000 and 10_000_000. ([#1444]).
+
 ### Fixes
 
 - `sslnegotiation=direct` didn't work due to missing ALPN protocol [[#1332]).
@@ -34,6 +38,7 @@ unreleased
 [#1326]: https://github.com/lib/pq/pull/1326
 [#1327]: https://github.com/lib/pq/pull/1327
 [#1332]: https://github.com/lib/pq/pull/1327
+[#1444]: https://github.com/lib/pq/pull/1444
 
 
 v1.12.3 (2026-04-03)
