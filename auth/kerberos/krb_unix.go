@@ -25,11 +25,9 @@ type GSS struct {
 func NewGSS() (*GSS, error) {
 	g := &GSS{}
 	err := g.init()
-
 	if err != nil {
 		return nil, err
 	}
-
 	return g, nil
 }
 
@@ -50,32 +48,25 @@ func (g *GSS) init() error {
 	}
 
 	ccpath := "/tmp/krb5cc_" + u.Uid
-
-	ccname := os.Getenv("KRB5CCNAME")
-	if strings.HasPrefix(ccname, "FILE:") {
+	if ccname := os.Getenv("KRB5CCNAME"); strings.HasPrefix(ccname, "FILE:") {
 		ccpath = strings.SplitN(ccname, ":", 2)[1]
 	}
-
 	ccache, err := credentials.LoadCCache(ccpath)
 	if err != nil {
 		return err
 	}
-
 	cl, err := client.NewFromCCache(ccache, cfg, client.DisablePAFXFAST(true))
 	if err != nil {
 		return err
 	}
 
 	cl.Login()
-
 	g.cli = cl
-
 	return nil
 }
 
 // GetInitToken implements the GSS interface.
 func (g *GSS) GetInitToken(host string, service string) ([]byte, error) {
-
 	// Resolve the hostname down to an 'A' record, if required (usually, it is)
 	if g.cli.Config.LibDefaults.DNSCanonicalizeHostname {
 		var err error
@@ -84,26 +75,19 @@ func (g *GSS) GetInitToken(host string, service string) ([]byte, error) {
 			return nil, err
 		}
 	}
-
-	spn := service + "/" + host
-
-	return g.GetInitTokenFromSpn(spn)
+	return g.GetInitTokenFromSpn(service + "/" + host)
 }
 
 // GetInitTokenFromSpn implements the GSS interface.
 func (g *GSS) GetInitTokenFromSpn(spn string) ([]byte, error) {
-	s := spnego.SPNEGOClient(g.cli, spn)
-
-	st, err := s.InitSecContext()
+	st, err := spnego.SPNEGOClient(g.cli, spn).InitSecContext()
 	if err != nil {
 		return nil, fmt.Errorf("kerberos error (InitSecContext): %w", err)
 	}
-
 	b, err := st.Marshal()
 	if err != nil {
 		return nil, fmt.Errorf("kerberos error (Marshaling token): %w", err)
 	}
-
 	return b, nil
 }
 
@@ -114,11 +98,9 @@ func (g *GSS) Continue(inToken []byte) (done bool, outToken []byte, err error) {
 	if err != nil {
 		return true, nil, fmt.Errorf("kerberos error (Unmarshaling token): %w", err)
 	}
-
 	state := t.NegTokenResp.State()
 	if state != spnego.NegStateAcceptCompleted {
 		return true, nil, fmt.Errorf("kerberos: expected state 'Completed' - got %d", state)
 	}
-
 	return true, nil, nil
 }
