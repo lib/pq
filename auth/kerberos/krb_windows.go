@@ -17,11 +17,9 @@ type GSS struct {
 func NewGSS() (*GSS, error) {
 	g := &GSS{}
 	err := g.init()
-
 	if err != nil {
 		return nil, err
 	}
-
 	return g, nil
 }
 
@@ -30,22 +28,17 @@ func (g *GSS) init() error {
 	if err != nil {
 		return err
 	}
-
 	g.creds = creds
 	return nil
 }
 
 // GetInitToken implements the GSS interface.
 func (g *GSS) GetInitToken(host string, service string) ([]byte, error) {
-
 	host, err := canonicalizeHostname(host)
 	if err != nil {
 		return nil, err
 	}
-
-	spn := service + "/" + host
-
-	return g.GetInitTokenFromSpn(spn)
+	return g.GetInitTokenFromSpn(service + "/" + host)
 }
 
 // GetInitTokenFromSpn implements the GSS interface.
@@ -54,9 +47,7 @@ func (g *GSS) GetInitTokenFromSpn(spn string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	g.ctx = ctx
-
 	return token, nil
 }
 
