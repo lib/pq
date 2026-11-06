@@ -1,11 +1,14 @@
 package pq
 
 import (
+	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -281,5 +284,153 @@ func BenchmarkCopyIn(b *testing.B) {
 	rows := pqtest.Query[int](b, tx, `select count(*) from tbl`)
 	if rows[0]["count"] != b.N {
 		b.Fatalf("expected %d items, not %d", b.N, rows[0]["count"])
+	}
+}
+
+// beginCopy starts a transaction with a COPY that is still open.
+func beginCopy(t *testing.T, db *sql.DB) *sql.Tx {
+	t.Helper()
+	tx := pqtest.Begin(t, db)
+	pqtest.Exec(t, tx, `create temp table tbl (a int)`)
+	stmt, err := tx.Prepare(`copy tbl (a) from stdin`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stmt.Exec(int64(1)); err != nil {
+		t.Fatal(err)
+	}
+	return tx
+}
+
+// endTx fails the test if end, which commits or rolls back a transaction, does
+// not return.
+func endTx(t *testing.T, tx *sql.Tx, end func(*sql.Tx) error) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- end(tx) }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("transaction did not end")
+		return nil
+	}
+}
+
+// A transaction can end while a COPY is still open, for example when
+// database/sql rolls it back after its context is cancelled. Only resploop may
+// read from the connection until the COPY has ended.
+func TestCopyInEndTxDuringCopy(t *testing.T) {
+	tests := []struct {
+		name    string
+		end     func(*sql.Tx) error
+		wantErr error
+	}{
+		{"rollback", (*sql.Tx).Rollback, nil},
+		{"commit", (*sql.Tx).Commit, ErrInFailedTransaction},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			db := pqtest.MustDB(t)
+			for i := range 50 {
+				err := endTx(t, beginCopy(t, db), tt.end)
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("iteration %d: wrong error\nhave: %v\nwant: %v", i, err, tt.wantErr)
+				}
+			}
+		})
+	}
+}
+
+func TestCopyInEndTxAfterServerEndedCopy(t *testing.T) {
+	t.Parallel()
+	db := pqtest.MustDB(t)
+	db.SetMaxOpenConns(1)
+
+	tx := pqtest.Begin(t, db)
+	pqtest.Exec(t, tx, `create temp table tbl (a int)`)
+	stmt, err := tx.Prepare(`copy tbl (a) from stdin`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	invalid := strings.Repeat("x", ciBufferFlushSize+1)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := stmt.Exec(invalid); err != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("server did not end the COPY")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if err := endTx(t, tx, (*sql.Tx).Rollback); err != nil {
+		t.Fatal(err)
+	}
+	pqtest.Exec(t, db, `select 1`)
+}
+
+type failingWriteConn struct {
+	net.Conn
+	fail atomic.Bool
+}
+
+func (c *failingWriteConn) Write(b []byte) (int, error) {
+	if c.fail.Load() {
+		return 0, errors.New("write failed")
+	}
+	return c.Conn.Write(b)
+}
+
+type failingWriteDialer struct {
+	conn atomic.Pointer[failingWriteConn]
+}
+
+func (d *failingWriteDialer) Dial(ntw, addr string) (net.Conn, error) {
+	return d.DialTimeout(ntw, addr, 0)
+}
+
+func (d *failingWriteDialer) DialTimeout(ntw, addr string, timeout time.Duration) (net.Conn, error) {
+	c, err := net.DialTimeout(ntw, addr, timeout)
+	if err != nil {
+		return nil, err
+	}
+	fc := &failingWriteConn{Conn: c}
+	d.conn.Store(fc)
+	return fc, nil
+}
+
+// resploop has to stop even if the server never learns that the COPY ended.
+func TestCopyInEndTxWriteError(t *testing.T) {
+	tests := []struct {
+		name string
+		end  func(*sql.Tx) error
+	}{
+		{"rollback", (*sql.Tx).Rollback},
+		{"commit", (*sql.Tx).Commit},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			connector, err := NewConnector(pqtest.DSN(""))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dialer := new(failingWriteDialer)
+			connector.Dialer(dialer)
+			db := sql.OpenDB(connector)
+			defer db.Close()
+
+			tx := beginCopy(t, db)
+			dialer.conn.Load().fail.Store(true)
+			if err := endTx(t, tx, tt.end); err == nil {
+				t.Fatal("no error")
+			}
+		})
 	}
 }

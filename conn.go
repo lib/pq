@@ -172,6 +172,10 @@ type conn struct {
 	txnStatus transactionStatus
 	txnFinish func()
 
+	// Open COPY FROM STDIN, if any. Its resploop goroutine reads from the
+	// connection until the COPY ends.
+	copyIn *copyin
+
 	// Save connection arguments to use during CancelRequest.
 	dialer          Dialer
 	cfg             Config
@@ -540,6 +544,9 @@ func (cn *conn) Commit() error {
 	if err := cn.err.get(); err != nil {
 		return err
 	}
+	if err := cn.abortCopyIn(); err != nil {
+		return cn.handleError(err)
+	}
 	if err := cn.checkIsInTransaction(true); err != nil {
 		return err
 	}
@@ -586,6 +593,9 @@ func (cn *conn) Rollback() error {
 }
 
 func (cn *conn) rollback() (err error) {
+	if err := cn.abortCopyIn(); err != nil {
+		return err
+	}
 	if err := cn.checkIsInTransaction(true); err != nil {
 		return err
 	}
