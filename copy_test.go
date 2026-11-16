@@ -2,6 +2,7 @@ package pq
 
 import (
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -253,7 +254,7 @@ func TestCopyInRespLoopConnectionError(t *testing.T) {
 	case *net.OpError:
 		// ignore
 	default:
-		if err == driver.ErrBadConn {
+		if errors.Is(err, driver.ErrBadConn) {
 			// likely an EPIPE
 		} else if err == errCopyInClosed {
 			// ignore

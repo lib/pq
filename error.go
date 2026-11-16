@@ -2,6 +2,7 @@ package pq
 
 import (
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -294,31 +295,31 @@ func (cn *conn) handleError(reported error, query ...string) error {
 	case nil:
 		return nil
 	case runtime.Error, *net.OpError:
-		cn.err.set(driver.ErrBadConn)
+		cn.err.setf("%w: %w", driver.ErrBadConn, reported)
 	case *safeRetryError:
-		cn.err.set(driver.ErrBadConn)
-		reported = driver.ErrBadConn
+		reported = fmt.Errorf("%w: %w", driver.ErrBadConn, reported)
+		cn.err.set(reported)
 	case *Error:
 		if len(query) > 0 && query[0] != "" {
 			err.query = query[0]
 			reported = err
 		}
 		if err.Fatal() {
-			reported = driver.ErrBadConn
+			reported = fmt.Errorf("%w: %w", driver.ErrBadConn, reported)
 		}
 	case error:
 		if err == io.EOF || err == io.ErrUnexpectedEOF || err.Error() == "remote error: handshake failure" {
-			reported = driver.ErrBadConn
+			reported = fmt.Errorf("%w: %w", driver.ErrBadConn, reported)
 		}
 	default:
-		cn.err.set(driver.ErrBadConn)
 		reported = fmt.Errorf("pq: unknown error %T: %[1]s", err)
+		cn.err.setf("%w: %w", driver.ErrBadConn, reported)
 	}
 
 	// Any time we return ErrBadConn, we need to remember it since *Tx doesn't
 	// mark the connection bad in database/sql.
-	if reported == driver.ErrBadConn {
-		cn.err.set(driver.ErrBadConn)
+	if errors.Is(reported, driver.ErrBadConn) {
+		cn.err.set(reported)
 	}
 	return reported
 }

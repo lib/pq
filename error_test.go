@@ -274,7 +274,7 @@ func TestNetworkError(t *testing.T) {
 	os.Setenv("PQTEST_FAILNET", "1")
 	_, err = db.Begin()
 	if err == nil || !errors.As(err, new(*net.OpError)) {
-		t.Fatalf("wrong error %T: %[1]s", err)
+		t.Fatalf("wrong error %T: %[1]v", err)
 	}
 
 	// TODO: should make sure this opens a new connection.
