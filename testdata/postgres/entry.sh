@@ -15,4 +15,5 @@ cd /init
 cp ./docker-entrypoint-initdb.d/* /docker-entrypoint-initdb.d
 echo '127.0.0.1 postgres' >>/etc/hosts
 
+chmod -R a+r /docker-entrypoint-initdb.d
 exec /usr/local/bin/docker-entrypoint.sh postgres "$@"
