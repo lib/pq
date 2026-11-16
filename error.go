@@ -295,7 +295,7 @@ func (cn *conn) handleError(reported error, query ...string) error {
 	case nil:
 		return nil
 	case runtime.Error, *net.OpError:
-		cn.err.set(driver.ErrBadConn)
+		cn.err.setf("%w: %w", driver.ErrBadConn, reported)
 	case *safeRetryError:
 		reported = fmt.Errorf("%w: %w", driver.ErrBadConn, reported)
 		cn.err.set(reported)
@@ -312,14 +312,14 @@ func (cn *conn) handleError(reported error, query ...string) error {
 			reported = fmt.Errorf("%w: %w", driver.ErrBadConn, reported)
 		}
 	default:
-		cn.err.set(driver.ErrBadConn)
 		reported = fmt.Errorf("pq: unknown error %T: %[1]s", err)
+		cn.err.setf("%w: %w", driver.ErrBadConn, reported)
 	}
 
 	// Any time we return ErrBadConn, we need to remember it since *Tx doesn't
 	// mark the connection bad in database/sql.
 	if errors.Is(reported, driver.ErrBadConn) {
-		cn.err.set(driver.ErrBadConn)
+		cn.err.set(reported)
 	}
 	return reported
 }

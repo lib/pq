@@ -112,8 +112,9 @@ func (rs *rows) Next(dest []driver.Value) (resErr error) {
 		case proto.DataRow:
 			n := rs.rb.int16()
 			if resErr != nil {
-				rs.cn.err.set(driver.ErrBadConn)
-				return fmt.Errorf("pq: unexpected DataRow after error %s", resErr)
+				err := fmt.Errorf("pq: unexpected DataRow after error %s", resErr)
+				rs.cn.err.setf("%w: %w", driver.ErrBadConn, err)
+				return err
 			}
 			if n < len(dest) {
 				dest = dest[:n]

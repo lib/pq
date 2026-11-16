@@ -44,8 +44,9 @@ func (st *stmt) Close() error {
 		return st.cn.handleError(err)
 	}
 	if t != proto.CloseComplete {
-		st.cn.err.set(driver.ErrBadConn)
-		return fmt.Errorf("pq: unexpected close response: %q", t)
+		err := fmt.Errorf("pq: unexpected close response: %q", t)
+		st.cn.err.setf("%w: %w", driver.ErrBadConn, err)
+		return err
 	}
 	st.closed = true
 
@@ -54,8 +55,9 @@ func (st *stmt) Close() error {
 		return st.cn.handleError(err)
 	}
 	if t != proto.ReadyForQuery {
-		st.cn.err.set(driver.ErrBadConn)
-		return fmt.Errorf("pq: expected ready for query, but got: %q", t)
+		err := fmt.Errorf("pq: expected ready for query, but got: %q", t)
+		st.cn.err.setf("%w: %w", driver.ErrBadConn, err)
+		return err
 	}
 	st.cn.processReadyForQuery(r)
 
