@@ -1,9 +1,9 @@
 name: 'staticcheck'
 on:
   pull_request:
-    paths: ['**.go', 'go.mod', '.github/workflows/*']
+    paths: ['**.go', 'go.mod', '.github/workflows/*', 'testdata/*']
   push:
-    branches: ['main', 'master']
+    branches: ['main']
 
 jobs:
   staticcheck:
@@ -14,7 +14,7 @@ jobs:
       # Setup
       - uses: 'actions/checkout@v6'
 
-      # Store and restore staticcheck only from master branch.
+      # Store and restore staticcheck only from main branch.
       - id:   'cache-restore'
         uses: 'actions/cache/restore@v5'
         with:
@@ -54,9 +54,9 @@ jobs:
           done
           exit $fail
 
-      # Store cache, only on master branch
+      # Store cache, only on main branch
       - uses: 'actions/cache/save@v5'
-        if:   "github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'"
+        if:   "github.ref == 'refs/heads/main'"
         with:
           key: 'staticcheck'
           path: |
