@@ -17,6 +17,9 @@ unreleased
 
 ### Fixes
 
+- Fix hang when a transaction ends while a COPY is in progress, for example when
+  its context is cancelled ([#1452]).
+
 - `sslnegotiation=direct` didn't work due to missing ALPN protocol [[#1332]).
 
 - Revert "clearer error when starting a new query while pq is still processing
@@ -39,6 +42,7 @@ unreleased
 [#1327]: https://github.com/lib/pq/pull/1327
 [#1332]: https://github.com/lib/pq/pull/1327
 [#1444]: https://github.com/lib/pq/pull/1444
+[#1452]: https://github.com/lib/pq/issues/1452
 
 
 v1.12.3 (2026-04-03)
