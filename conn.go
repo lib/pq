@@ -202,7 +202,7 @@ func (e *syncErr) get() error {
 	e.Lock()
 	defer e.Unlock()
 	if e.err != nil {
-		return driver.ErrBadConn
+		return fmt.Errorf("%w: %w", driver.ErrBadConn, e.err)
 	}
 	return nil
 }
@@ -224,6 +224,9 @@ func (e *syncErr) set(err error) {
 	if e.err == nil {
 		e.err = err
 	}
+}
+func (e *syncErr) setf(format string, a ...any) {
+	e.set(fmt.Errorf(format, a...))
 }
 
 func (cn *conn) writeBuf(b proto.RequestCode) *writeBuf {
@@ -560,7 +563,7 @@ func (cn *conn) Commit() error {
 	_, commandTag, err := cn.simpleExec("COMMIT")
 	if err != nil {
 		if cn.isInTransaction() {
-			cn.err.set(driver.ErrBadConn)
+			cn.err.setf("%w: pq.Commit: COMMIT failed: %w", driver.ErrBadConn, err)
 		}
 		return cn.handleError(err)
 	}
@@ -1024,7 +1027,7 @@ func (cn *conn) Ping(ctx context.Context) error {
 	defer cn.watchCancel(ctx, false)()
 	rows, err := cn.simpleQuery(";")
 	if err != nil {
-		return driver.ErrBadConn
+		return fmt.Errorf("%w: %w", driver.ErrBadConn, err)
 	}
 	_ = rows.Close()
 	return nil

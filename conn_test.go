@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -511,10 +512,10 @@ func TestBadConn(t *testing.T) {
 		t.Run(fmt.Sprintf("%s", tt), func(t *testing.T) {
 			var cn conn
 			err := cn.handleError(tt)
-			if err != driver.ErrBadConn {
+			if !errors.Is(err, driver.ErrBadConn) {
 				t.Fatalf("expected driver.ErrBadConn, got: %#v", err)
 			}
-			if err := cn.err.get(); err != driver.ErrBadConn {
+			if err := cn.err.get(); !errors.Is(err, driver.ErrBadConn) {
 				t.Fatalf("expected driver.ErrBadConn, got %#v", err)
 			}
 		})
@@ -1340,7 +1341,7 @@ func TestContextCancelQuery(t *testing.T) {
 			cancel()
 			if err != nil {
 				t.Fatal(err)
-			} else if err := rows.Close(); err != nil && err != driver.ErrBadConn && err != context.Canceled {
+			} else if err := rows.Close(); err != nil && !errors.Is(err, driver.ErrBadConn) && !errors.Is(err, context.Canceled) {
 				t.Fatal(err)
 			}
 		}()
@@ -1431,7 +1432,7 @@ func TestContextCancelBegin(t *testing.T) {
 				t.Fatal(err)
 			}
 			err = tx.Rollback()
-			if err != nil && err != sql.ErrTxDone && err != driver.ErrBadConn && err != context.Canceled {
+			if err != nil && !errors.Is(err, sql.ErrTxDone) && !errors.Is(err, driver.ErrBadConn) && !errors.Is(err, context.Canceled) {
 				mustAs(t, err, pqerror.QueryCanceled)
 			}
 		}()
@@ -1578,7 +1579,7 @@ func TestPing(t *testing.T) {
 	if _, err := db.Exec("SELECT pg_terminate_backend($1)", pid); err != nil {
 		t.Fatal(err)
 	}
-	if err := conn.PingContext(ctx); err != driver.ErrBadConn {
+	if err := conn.PingContext(ctx); !errors.Is(err, driver.ErrBadConn) {
 		t.Fatalf("expected error %s, instead got %s", driver.ErrBadConn, err)
 	}
 }
